@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+  <meta name="version" content="1.6.43"/>
+  <title>SpinLog</title>
+  <link rel="preload" href="Imgs/image.jpg" as="image">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+  <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#050505">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css"/>
+</head>
+<body>
+  <div class="container">
+    <main role="main">
+      <section id="home" class="active" aria-labelledby="home-header">
+        <div class="home-page-shell">
+          <div class="home-bike-spec-combo">
+            <div class="home-hero-card">
+              <div class="home-hero-copy">
+                <span class="home-eyebrow"><i class="fas fa-motorcycle"></i> SpinLog command center</span>
+                <h2 id="home-header">Hello, Viky!</h2>
+                <p class="home-subtitle">Track service health, documents, insurance, EMI, and the key Duke details you need before every ride.</p>
+                <button type="button" class="db-status-strip db-status-checking" id="dbStatusButton" aria-live="polite" aria-label="Database status: checking">
+                  <span class="db-status-dot" id="dbStatusDot" aria-hidden="true"></span>
+                  <span class="db-status-copy">
+                    <span class="db-status-kicker">Supabase DB</span>
+                    <strong id="dbStatusText">Checking...</strong>
+                  </span>
+                </button>
+              </div>
+              <div class="home-hero-bike">
+                <div class="home-bike-glow"></div>
+                <img src="./Imgs/sage.webp" alt="Duke 250 Black" loading="lazy"/>
+                <div class="home-bike-name-pill">
+                  <span>Duke 250 Gen 3</span>
+                  <strong>TN 60 BV 1227</strong>
+                </div>
+              </div>
+              <div class="home-quick-actions" aria-label="Quick actions">
+                <button type="button" class="home-action-card" data-home-section="service">
+                  <i class="fas fa-screwdriver-wrench"></i>
+                  <span>Log Service</span>
+                </button>
+                <button type="button" class="home-action-card" data-home-section="docs">
+                  <i class="fas fa-folder-open"></i>
+                  <span>Open Docs</span>
+                </button>
+                <button type="button" class="home-action-card" data-home-section="emi">
+                  <i class="fas fa-wallet"></i>
+                  <span>Track EMI</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="home-dashboard-grid" aria-label="Bike summary">
+              <article class="home-stat-card home-stat-main">
+                <span class="home-stat-icon"><i class="fas fa-road"></i></span>
+                <span class="home-stat-label">Odometer</span>
+                <span class="home-stat-value" id="home-odo">0 km</span>
+              </article>
+              <!-- Mobile park card — sits beside odometer -->
+              <article class="home-stat-card home-park-card" id="parkCardMobile">
+                <span class="home-stat-icon"><i class="fas fa-location-dot"></i></span>
+                <span class="home-stat-label">Last Parked</span>
+                <span class="home-stat-value" id="parkValueMobile">Tap to save</span>
+                <span class="park-hint">hold for history</span>
+              </article>
+              <article class="home-stat-card">
+                <span class="home-stat-icon"><i class="fas fa-calendar-check"></i></span>
+                <span class="home-stat-label">Last Service</span>
+                <span class="home-stat-value" id="home-last">N/A</span>
+              </article>
+              <article class="home-stat-card">
+                <span class="home-stat-icon"><i class="fas fa-bell"></i></span>
+                <span class="home-stat-label">Next Service</span>
+                <span class="home-stat-value" id="home-next">N/A</span>
+              </article>
+              <article class="home-stat-card home-cover-card">
+                <span class="home-stat-icon"><i class="fas fa-shield-halved"></i></span>
+                <span class="home-stat-label">Own Damage Cover</span>
+                <span class="status" data-due="2026-06-24"></span>
+              </article>
+              <article class="home-stat-card home-cover-card">
+                <span class="home-stat-icon"><i class="fas fa-file-shield"></i></span>
+                <span class="home-stat-label">Liability Cover</span>
+                <span class="status" data-due="2030-06-24"></span>
+              </article>
+            </div>
+
+            <div class="home-info-grid">
+              <article class="home-info-panel">
+                <div class="home-panel-title"><i class="fas fa-id-card"></i> Vehicle Identity</div>
+                <div class="home-detail-grid">
+                  <div><span>Bike Name</span><strong>Duke 250 Gen 3</strong></div>
+                  <div><span>Registration</span><strong>TN 60 BV 1227</strong></div>
+                  <div><span>Engine No.</span><strong>S-962*15524*</strong></div>
+                  <div><span>VIN / Chassis</span><strong>MD2JPEXC0SN078159</strong></div>
+                </div>
+              </article>
+              <article class="home-info-panel">
+                <div class="home-panel-title"><i class="fas fa-receipt"></i> Ownership Snapshot</div>
+                <div class="home-detail-grid">
+                  <div><span>Purchase Date</span><strong>27-06-2025</strong></div>
+                  <div><span>Purchase Price</span><strong>₹2,84,000</strong></div>
+                  <div class="desktop-only-detail"><span>Garage Status</span><strong>Owned / Active</strong></div>
+                  <div class="desktop-only-detail"><span>Primary Use</span><strong>Daily + Weekend Rides</strong></div>
+                </div>
+              </article>
+            </div>
+
+            <div class="home-spec-unified" aria-label="Duke 250 specification sheet">
+              <div class="home-section-heading home-specs-heading">
+                <span><i class="fas fa-gear"></i> Duke 250 Specification Sheet</span>
+                <p>One clean reference section for service checks, tyre pressure, fluids, and mechanical details.</p>
+              </div>
+              <div class="home-spec-sheet" role="region" aria-label="Duke 250 specifications">
+              <div class="home-spec-group">
+                <h4><i class="fas fa-gauge"></i> Engine</h4>
+                <div class="home-spec-list">
+                  <div><span>Capacity</span><strong>249.07 cc</strong></div>
+                  <div><span>Power</span><strong>30.57 bhp @ 9,250 rpm</strong></div>
+                  <div><span>Torque</span><strong>25 Nm @ 7,250 rpm</strong></div>
+                  <div><span>Cooling</span><strong>Liquid Cooled</strong></div>
+                  <div><span>Fuel System</span><strong>Bosch EFI</strong></div>
+                  <div><span>Emission</span><strong>BS6 Phase 2B</strong></div>
+                </div>
+              </div>
+              <div class="home-spec-group">
+                <h4><i class="fas fa-circle-notch"></i> Tyres & Brakes</h4>
+                <div class="home-spec-list">
+                  <div><span>Front Tyre</span><strong>110/70-R17</strong></div>
+                  <div><span>Rear Tyre</span><strong>150/60-R17</strong></div>
+                  <div><span>Tyre Pressure</span><strong>29 psi F / 32 psi R</strong></div>
+                  <div><span>ABS</span><strong>Supermoto ABS</strong></div>
+                  <div><span>Front Brake</span><strong>320 mm Disc</strong></div>
+                  <div><span>Rear Brake</span><strong>240 mm Disc</strong></div>
+                </div>
+              </div>
+              <div class="home-spec-group">
+                <h4><i class="fas fa-tools"></i> Chassis & Features</h4>
+                <div class="home-spec-list">
+                  <div><span>Frame</span><strong>Split-Trellis</strong></div>
+                  <div><span>Suspension</span><strong>WP Apex USD + Monoshock</strong></div>
+                  <div><span>Weight</span><strong>162.8 kg</strong></div>
+                  <div><span>Fuel Tank</span><strong>15 L, Reserve 3 L</strong></div>
+                  <div><span>Gearbox</span><strong>6-Speed + Slipper Clutch</strong></div>
+                  <div><span>Extras</span><strong>Quickshifter+, TFT, LED DRLs</strong></div>
+                </div>
+              </div>
+              </div>
+            </div>
+          </div>
+
+          <span id="home-odo-mobile" class="home-hidden-metric">0 km</span>
+          <span id="home-last-mobile" class="home-hidden-metric">N/A</span>
+          <span id="home-next-mobile" class="home-hidden-metric">N/A</span>
+        </div>
+      </section>
+      
+     <!-- SpinLog v1.6.37 | Image layout fix -->
+      <section id="service" aria-labelledby="service-header">
+        <div class="section-topline">
+          <h2 id="service-header" class="service-title">
+            <i class="fas fa-screwdriver-wrench"></i> Service Records
+          </h2>
+          <button type="button" class="section-home-pill" data-home-section="home"><i class="fas fa-house"></i> Home</button>
+        </div>
+        <div class="service-placeholder-card">
+          <div class="service-placeholder-icon">
+            <div class="service-management-desc">
+              Track your bike's service history, schedule upcoming maintenance, and set reminders for regular checkups.
+            </div>
+          </div>
+          <form id="serviceEntryForm" autocomplete="off" enctype="multipart/form-data" novalidate>
+            <div class="form-in-card-row">
+              <label class="service-field service-field-type">
+                <span id="serviceTypeLabel">Type</span>
+                <div class="field-shell select-shell service-type-shell custom-entry-select" data-service-entry-type>
+                  <i class="fas fa-list-ul field-leading" aria-hidden="true"></i>
+                  <input type="hidden" name="type" id="serviceType" value="" aria-label="Service type">
+                  <button type="button" class="entry-select-button" id="serviceTypeButton" aria-haspopup="listbox" aria-expanded="false" aria-controls="serviceTypeMenu">
+                    <span id="serviceTypeValue">Select service type</span>
+                  </button>
+                  <div class="entry-select-menu" id="serviceTypeMenu" role="listbox" aria-labelledby="serviceTypeLabel">
+                    <button type="button" class="entry-select-option" role="option" data-value="" aria-selected="true">Select service type</button>
+                    <button type="button" class="entry-select-option" role="option" data-value="Showroom" aria-selected="false">Showroom</button>
+                    <button type="button" class="entry-select-option" role="option" data-value="3rd Party" aria-selected="false">3rd Party</button>
+                    <button type="button" class="entry-select-option" role="option" data-value="Mods/Updates" aria-selected="false">Mods/Updates</button>
+                  </div>
+                </div>
+              </label>
+              <label class="service-field service-field-date">
+                <span>Date</span>
+                <div class="field-shell date-shell service-date-shell">
+                  <i class="far fa-calendar field-leading" aria-hidden="true"></i>
+                  <input type="date" name="date" aria-label="Service date" data-date-ui data-empty-label="Select date" required>
+                  <span class="date-display" aria-hidden="true">Select date</span>
+                </div>
+              </label>
+              <label id="nextDueLabel" class="service-field">
+                <span>Next Due Date</span>
+                <div class="field-shell date-shell service-date-shell">
+                  <i class="far fa-calendar-check field-leading" aria-hidden="true"></i>
+                  <input type="date" name="nextDue" aria-label="Next due date" data-date-ui data-empty-label="Select due date">
+                  <span class="date-display" aria-hidden="true">Select due date</span>
+                </div>
+              </label>
+              <label class="service-field service-field-odo">
+                <span>ODO (km)</span>
+                <div class="field-shell">
+                  <i class="fas fa-gauge-high field-leading" aria-hidden="true"></i>
+                  <input type="number" name="odo" min="0" inputmode="numeric" placeholder="Enter ODO" required>
+                </div>
+              </label>
+            </div>
+            <div class="form-in-card-row">
+              <label class="service-field service-field-cost">
+                <span>Cost (₹)</span>
+                <div class="field-shell">
+                  <i class="fas fa-indian-rupee-sign field-leading" aria-hidden="true"></i>
+                  <input type="number" name="cost" min="0" step="0.01" inputmode="decimal" placeholder="Enter amount" required>
+                </div>
+              </label>
+              <div class="custom-file-label service-upload-field" role="group" aria-labelledby="billFieldLabel">
+                <span id="billFieldLabel">Bill</span>
+                <input 
+                  type="file" 
+                  name="bill" 
+                  id="fileInput" 
+                  hidden 
+                  accept="image/*,application/pdf,.pdf" 
+                  required
+                >
+                <button 
+                  type="button" 
+                  id="customFileButton" 
+                  class="service-upload-trigger"
+                >
+                  <i class="fas fa-cloud-arrow-up" aria-hidden="true"></i>
+                  <strong>Upload bill</strong>
+                  <small>Tap to choose file or take a photo</small>
+                </button>
+                <div id="fileInfo" aria-live="polite"></div>
+              </div>
+            </div>
+            <label class="service-field service-notes-field">
+              <span>Notes</span>
+              <div class="field-shell textarea-shell">
+                <i class="fas fa-pen field-leading" aria-hidden="true"></i>
+                <textarea name="notes" rows="3" placeholder="Add any extra notes..." required></textarea>
+              </div>
+            </label>
+            <div class="form-in-card-actions">
+              <button type="submit" class="drawer-submit">Add Entry</button>
+            </div>
+          </form>
+          <div class="service-entry-history-break" aria-hidden="true"></div>
+          <div class="service-history-panel" aria-labelledby="serviceHistoryTitle">
+            <div class="service-history-header">
+              <div>
+                <h4 class="record-history-title" id="serviceHistoryTitle">Record History</h4>
+                <p class="service-history-subtitle is-hidden" id="serviceHistorySummary"></p>
+              </div>
+              <div class="history-header-actions">
+                <button type="button" class="history-filter-toggle" id="serviceHistoryFilterToggle" aria-expanded="false" aria-controls="serviceHistoryFilters">
+                  <i class="fas fa-filter" aria-hidden="true"></i>
+                  Filters
+                  <span class="history-filter-count" id="serviceHistoryFilterCount" hidden>0</span>
+                </button>
+                <button type="button" class="history-clear-btn" id="serviceHistoryClearFilters">
+                  <i class="fas fa-rotate-left" aria-hidden="true"></i>
+                  Clear
+                </button>
+              </div>
+            </div>
+            <div class="history-tools" id="serviceHistoryFilters" role="search" aria-label="Filter service record history">
+              <label class="history-control history-search-control" for="serviceHistorySearch">
+                <span>Search</span>
+                <div class="history-input-shell">
+                  <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                  <input type="search" id="serviceHistorySearch" placeholder="Search type, notes, ODO or cost" autocomplete="off" aria-controls="serviceRecordTable">
+                </div>
+              </label>
+              <div class="history-control history-type-control" aria-labelledby="serviceHistoryTypeLabel">
+                <span id="serviceHistoryTypeLabel">Type</span>
+                <div class="history-input-shell history-select-shell custom-history-select" data-service-type-filter>
+                  <i class="fas fa-filter" aria-hidden="true"></i>
+                  <input type="hidden" id="serviceHistoryTypeFilter" value="" aria-controls="serviceRecordTable">
+                  <button type="button" class="history-select-button" id="serviceHistoryTypeButton" aria-haspopup="listbox" aria-expanded="false" aria-controls="serviceHistoryTypeMenu">
+                    <span id="serviceHistoryTypeValue">All types</span>
+                  </button>
+                  <div class="history-select-menu" id="serviceHistoryTypeMenu" role="listbox" aria-labelledby="serviceHistoryTypeLabel">
+                    <button type="button" class="history-select-option" role="option" data-value="" aria-selected="true">All types</button>
+                    <button type="button" class="history-select-option" role="option" data-value="Showroom" aria-selected="false">Showroom</button>
+                    <button type="button" class="history-select-option" role="option" data-value="3rd Party" aria-selected="false">3rd Party</button>
+                    <button type="button" class="history-select-option" role="option" data-value="Mods/Updates" aria-selected="false">Mods/Updates</button>
+                  </div>
+                </div>
+              </div>
+              <label class="history-control" for="serviceHistoryFromDate">
+                <span>From</span>
+                <div class="history-input-shell history-date-shell date-shell">
+                  <i class="far fa-calendar" aria-hidden="true"></i>
+                  <input type="date" id="serviceHistoryFromDate" aria-controls="serviceRecordTable" data-date-ui data-empty-label="From date">
+                  <span class="date-display" aria-hidden="true">From date</span>
+                </div>
+              </label>
+              <label class="history-control" for="serviceHistoryToDate">
+                <span>To</span>
+                <div class="history-input-shell history-date-shell date-shell">
+                  <i class="far fa-calendar-check" aria-hidden="true"></i>
+                  <input type="date" id="serviceHistoryToDate" aria-controls="serviceRecordTable" data-date-ui data-empty-label="To date">
+                  <span class="date-display" aria-hidden="true">To date</span>
+                </div>
+              </label>
+            </div>
+            <div class="active-filter-row" id="serviceHistoryActiveFilters" aria-live="polite"></div>
+            <div class="history-spend-strip" id="serviceHistorySpendStrip" aria-live="polite">
+              <div class="history-spend-card history-spend-total">
+                <span>Total Spend</span>
+                <strong>₹0</strong>
+              </div>
+              <div class="history-spend-card">
+                <span>Service Spend</span>
+                <strong>₹0</strong>
+              </div>
+              <div class="history-spend-card">
+                <span>Mods Spend</span>
+                <strong>₹0</strong>
+              </div>
+              <div class="history-spend-card">
+                <span>Records</span>
+                <strong>0</strong>
+              </div>
+            </div>
+            <div class="service-table-wrap service-history-wrap">
+              <table class="service-table service-record-table" id="serviceRecordTable">
+                <thead>
+                  <tr>
+                    <th>Type</th>
+                    <th>Date</th>
+                    <th>Next Due</th>
+                    <th>Odo (km)</th>
+                    <th>Cost (₹)</th>
+                    <th>Notes</th>
+                    <th>Bill</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="serviceTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+<section id="emi" aria-labelledby="emi-header" class="emi-management-section">
+  <div class="section-topline">
+    <h2 id="emi-header"><i class="fas fa-wallet"></i> EMI Tracker</h2>
+    <button type="button" class="section-home-pill" data-home-section="home"><i class="fas fa-house"></i> Home</button>
+  </div>
+  <p class="emi-section-desc">Track monthly dues, part payments, receipts, and repayment progress in one clean finance panel.</p>
+
+  <!-- Loan Details Card -->
+  <div class="emi-loan-details-card">
+    <div class="emi-card-header">
+      <h3><i class="fas fa-info-circle"></i> Loan Details</h3>
+    </div>
+    <div class="emi-loan-grid">
+      <div class="emi-detail-item"><span class="emi-detail-label">Borrower Name</span><span class="emi-detail-value">Nagavigneshwaran V</span></div>
+      <div class="emi-detail-item"><span class="emi-detail-label">Loan Amount</span><span class="emi-detail-value">₹1,99,704</span></div>
+      <div class="emi-detail-item"><span class="emi-detail-label">Tenure</span><span class="emi-detail-value">48 months</span></div>
+      <div class="emi-detail-item"><span class="emi-detail-label">Interest Rate</span><span class="emi-detail-value">17.04% (APR 18.13%)</span></div>
+      <div class="emi-detail-item"><span class="emi-detail-label">EMI Amount</span><span class="emi-detail-value">₹5,788/month</span></div>
+      <div class="emi-detail-item"><span class="emi-detail-label">Start Date</span><span class="emi-detail-value">03-08-2025</span></div>
+      <div class="emi-detail-item"><span class="emi-detail-label">Total Interest</span><span class="emi-detail-value">₹78,120</span></div>
+      <div class="emi-detail-item"><span class="emi-detail-label">Total Repayable</span><span class="emi-detail-value">₹2,76,792</span></div>
+    </div>
+  </div>
+
+  <!-- EMI Tabs -->
+  <div class="emi-tabs-container">
+    <div class="emi-tab-headers">
+      <button class="emi-tab-btn active" data-tab="monthly">
+        <i class="fas fa-calendar-alt"></i> Monthly Payment
+      </button>
+      <button class="emi-tab-btn" data-tab="part">
+        <i class="fas fa-coins"></i> Part Payment
+      </button>
+    </div>
+
+    <!-- Monthly EMI Tab -->
+    <div class="emi-tab-content active" id="monthly-tab">
+      <div class="emi-payment-section">
+        <h4><i class="fas fa-calendar-check"></i> Monthly EMI Payment</h4>
+        <div class="emi-payment-details">
+          <div class="emi-payment-info">
+            <span class="emi-payment-label">Next EMI Due</span>
+            <span class="emi-payment-value">₹5,788</span>
+          </div>
+          <div class="emi-payment-info">
+            <span class="emi-payment-label">Due Date</span>
+            <p><span class="emi-due-date">--</span></p>
+          </div>
+          <div class="emi-payment-info">
+            <span class="emi-payment-label">Remaining EMIs</span>
+            <span class="emi-payment-value" id="remainingEMIs">48</span>
+          </div>
+        </div>
+        <div class="emi-upload-section">
+          <h5><i class="fas fa-upload"></i> Upload Receipt</h5>
+          <div class="upload-wrapper upload-wrapper-flex">
+            <label class="upload-label">
+              <input type="file" id="monthlyReceiptUpload" accept=".jpg,.jpeg,.png,.pdf">
+              <span class="button-label">Choose File</span>
+            </label>
+            <span class="filename-display" id="monthlyFilenameDisplay">Choose file</span>
+            <button type="button" class="emi-confirm-btn" 
+            data-type="Monthly" 
+            data-input-id="monthlyReceiptUpload">
+            <i class="fas fa-upload"></i> Upload
+          </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Part Payment Tab -->
+    <div class="emi-tab-content" id="part-tab">
+      <div class="emi-payment-section">
+        <h4><i class="fas fa-coins"></i> Part Payment Tracker</h4>
+        <div class="emi-payment-details">
+          <div class="emi-payment-info"><span class="emi-payment-label">Part Payment 1</span><span class="emi-payment-value" id="part1Status">Pending</span></div>
+          <div class="emi-payment-info"><span class="emi-payment-label">Part Payment 2</span><span class="emi-payment-value" id="part2Status">Pending</span></div>
+          <div class="emi-payment-info"><span class="emi-payment-label">Part Payment 3</span><span class="emi-payment-value" id="part3Status">Pending</span></div>
+        </div>
+        <div class="emi-input-section">
+          <label for="customPartAmount">Enter Payment Amount (₹)</label>
+          <input type="number" id="customPartAmount" placeholder="Part Payment Amount" min="0" step="0.01">
+        </div>
+        <div class="emi-upload-section">
+          <h5><i class="fas fa-upload"></i> Upload Receipt</h5>
+          <div class="upload-wrapper upload-wrapper-flex">
+            <label class="upload-label">
+              <input type="file" id="partReceiptUpload" accept=".jpg,.jpeg,.png,.pdf">
+              <span class="button-label">Choose File</span>
+            </label>
+            <span class="filename-display" id="partFilenameDisplay">Choose file</span>
+            <button type="button" class="emi-confirm-btn" 
+            data-type="Part" 
+            data-input-id="partReceiptUpload">
+            <i class="fas fa-check-circle"></i> Upload & Mark Paid
+          </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <h4 class="record-history-title">Record History</h4>
+<div class="service-table-wrap emi-history-table-wrap">
+  <table class="service-table emi-history-table" id="emiRecordTable">
+    <thead>
+      <tr>
+        <th>Date Paid</th>
+        <th>Amount (₹)</th>
+        <th>Type</th>
+        <th>Preview</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+</section>
+   <section id="docs" aria-labelledby="docs-header" class="docs-management-section">
+  <div class="section-topline">
+    <h2 id="docs-header"><i class="fas fa-folder-open"></i> Documents & Media</h2>
+    <button type="button" class="section-home-pill" data-home-section="home"><i class="fas fa-house"></i> Home</button>
+  </div>
+  <p class="docs-section-desc">Store vehicle documents, historic ride media, engine sounds, and notes in one clean garage vault.</p>
+
+  <!-- VEHICLE DOCUMENTS SECTION -->
+  <div class="docs-panel docs-vehicle-panel">
+    <div class="docs-panel-header">
+      <div>
+        <h3><i class="fas fa-file-shield"></i> Vehicle Related Documents</h3>
+        <p>Keep your legal and ownership files clean, private, and quick to open or delete.</p>
+      </div>
+      <span class="docs-panel-pill"><i class="fas fa-lock"></i> Private vault</span>
+    </div>
+
+    <div class="vehicle-docs-grid">
+      <div class="doc-card" data-type="Driving License">
+        <div class="doc-card-top">
+          <div class="doc-icon"><i class="fas fa-id-card"></i></div>
+          <button class="doc-delete-btn" title="Delete Driving License" aria-label="Delete Driving License">
+            <i class="fas fa-trash"></i>
+          </button>
+        </div>
+        <h4>Driving License</h4>
+        <p>Rider identity and licence proof.</p>
+        <span class="doc-status-chip">ID proof</span>
+        <input type="file" accept="image/*,.pdf" hidden />
+        <button class="upload-btn angled-btn" type="button"><i class="fas fa-cloud-arrow-up"></i> Upload Document</button>
+        <div class="doc-preview"></div>
+      </div>
+
+      <div class="doc-card" data-type="Registration Certificate">
+        <div class="doc-card-top">
+          <div class="doc-icon"><i class="fas fa-file-contract"></i></div>
+          <button class="doc-delete-btn" title="Delete Registration Certificate" aria-label="Delete Registration Certificate">
+            <i class="fas fa-trash"></i>
+          </button>
+        </div>
+        <h4>Registration Certificate</h4>
+        <p>Vehicle registration and ownership record.</p>
+        <span class="doc-status-chip">Ownership</span>
+        <input type="file" accept="image/*,.pdf" hidden />
+        <button class="upload-btn angled-btn" type="button"><i class="fas fa-cloud-arrow-up"></i> Upload Document</button>
+        <div class="doc-preview"></div>
+      </div>
+
+      <div class="doc-card" data-type="Pollution Certificate">
+        <div class="doc-card-top">
+          <div class="doc-icon"><i class="fas fa-leaf"></i></div>
+          <button class="doc-delete-btn" title="Delete Pollution Certificate" aria-label="Delete Pollution Certificate">
+            <i class="fas fa-trash"></i>
+          </button>
+        </div>
+        <h4>Pollution Certificate</h4>
+        <p>PUC certificate and emission compliance.</p>
+        <span class="doc-status-chip">Compliance</span>
+        <input type="file" accept="image/*,.pdf" hidden />
+        <button class="upload-btn angled-btn" type="button"><i class="fas fa-cloud-arrow-up"></i> Upload Document</button>
+        <div class="doc-preview"></div>
+      </div>
+
+      <div class="doc-card" data-type="Insurance Policy">
+        <div class="doc-card-top">
+          <div class="doc-icon"><i class="fas fa-shield-halved"></i></div>
+          <button class="doc-delete-btn" title="Delete Insurance Policy" aria-label="Delete Insurance Policy">
+            <i class="fas fa-trash"></i>
+          </button>
+        </div>
+        <h4>Insurance Policy</h4>
+        <p>Own damage, liability, and policy proof.</p>
+        <span class="doc-status-chip">Coverage</span>
+        <input type="file" accept="image/*,.pdf" hidden />
+        <button class="upload-btn angled-btn" type="button"><i class="fas fa-cloud-arrow-up"></i> Upload Document</button>
+        <div class="doc-preview"></div>
+      </div>
+
+      <div class="doc-card" data-type="Other Document">
+        <div class="doc-card-top">
+          <div class="doc-icon"><i class="fas fa-folder-plus"></i></div>
+          <button class="doc-delete-btn" title="Delete Other Document" aria-label="Delete Other Document">
+            <i class="fas fa-trash"></i>
+          </button>
+        </div>
+        <h4>Other Document</h4>
+        <p>Accessories, warranty, or any extra file.</p>
+        <span class="doc-status-chip">Extra</span>
+        <input type="file" accept="image/*,.pdf" hidden />
+        <button class="upload-btn angled-btn" type="button"><i class="fas fa-cloud-arrow-up"></i> Upload Document</button>
+        <div class="doc-preview"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- HISTORIC SECTION + RECORD HISTORY -->
+  <div class="docs-panel docs-historic-panel docs-media-record-panel">
+    <div class="docs-panel-header">
+      <div>
+        <h3><i class="fas fa-history"></i> Historic Audio & Images</h3>
+        <p>Upload ride media with notes, then manage the same records below.</p>
+      </div>
+      <span class="docs-panel-pill"><i class="fas fa-pen"></i> Notes required</span>
+    </div>
+
+    <div class="historic-upload-grid">
+      <div class="drop-zone" data-type="audio">
+        <div class="drop-zone-icon"><i class="fas fa-wave-square"></i></div>
+        <h4>Engine Sound Archives</h4>
+        <input type="file" accept=".mp3,.wav,.m4a" hidden />
+        <p>Tap or drag audio files. Notes open before upload.</p>
+        <span>MP3 · WAV · M4A</span>
+      </div>
+      <div class="drop-zone" data-type="image">
+        <div class="drop-zone-icon"><i class="fas fa-image"></i></div>
+        <h4>Historic Images</h4>
+        <input type="file" accept=".jpg,.jpeg,.png,.webp" hidden />
+        <p>Tap or drag images. Add the story behind the shot.</p>
+        <span>JPG · PNG · WEBP</span>
+      </div>
+      <div class="drop-zone" data-type="video">
+        <div class="drop-zone-icon"><i class="fas fa-video"></i></div>
+        <h4>Historic Videos</h4>
+        <input type="file" accept=".mp4,.mov,.avi,.webm" hidden />
+        <p>Tap or drag videos. Notes are saved with the file.</p>
+        <span>MP4 · MOV · AVI · WEBM</span>
+      </div>
+      <div id="uploadProgressBar"></div>
+    </div>
+
+    <div class="docs-record-inner">
+      <div class="docs-panel-header compact docs-record-header-inline">
+        <div>
+          <h3><i class="fas fa-clock-rotate-left"></i> Record History</h3>
+          <p>Preview media, edit notes, or delete historic uploads.</p>
+        </div>
+      </div>
+      <div class="service-table-wrap docs-history-wrap">
+        <table class="service-table docs-history-table" id="mediaRecordTable">
+          <thead>
+            <tr>
+              <th scope="col">File</th>
+              <th scope="col">Notes</th>
+              <th scope="col">Preview</th>
+              <th scope="col">Uploaded</th>
+              <th scope="col">Action</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Historic notes modal -->
+  <div id="historicNotesModal" class="docs-modal" aria-hidden="true">
+    <div class="docs-modal-card" role="dialog" aria-modal="true" aria-labelledby="historicNotesTitle">
+      <button type="button" class="docs-modal-close" id="historicNotesCancel" aria-label="Close notes dialog">×</button>
+      <div class="docs-modal-icon"><i class="fas fa-note-sticky"></i></div>
+      <h3 id="historicNotesTitle">Add upload notes</h3>
+      <p id="historicNotesHelp">Write what this file is about. Notes are required.</p>
+      <textarea id="historicNotesInput" rows="5" maxlength="600" placeholder="Example: Cold start after 5,999 km service, new exhaust tone, highway ride photo..."></textarea>
+      <div class="docs-modal-actions">
+        <button type="button" class="docs-secondary-btn" id="historicNotesSkip">Cancel</button>
+        <button type="button" class="docs-primary-btn" id="historicNotesSave"><i class="fas fa-check"></i> Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Fullscreen Image Preview -->
+  <div id="imagePreviewModal" style="display:none;position:fixed;z-index:99999;left:0;top:0;width:100vw;height:100vh;background:rgba(0,0,0,0.93);justify-content:center;align-items:center;">
+    <img id="fullPreviewImg" src="" style="max-width:92vw;max-height:92vh;box-shadow:0 0 40px #000;border-radius:14px;display:block;margin:auto;" alt="Preview" />
+  </div>
+
+  <!-- PDF Preview Modal -->
+  <div id="pdfPreviewModal" style="display:none;position:fixed;z-index:99999;left:0;top:0;width:100vw;height:100vh;background:rgba(0,0,0,0.97);justify-content:center;align-items:center;">
+    <iframe id="fullPreviewPdf" src="" style="width:90vw;height:90vh;border:0;border-radius:18px;background:#fff;"></iframe>
+  </div>
+
+  <!-- Audio Preview Modal -->
+  <div id="audioPreviewModal" style="display:none;position:fixed;z-index:99999;left:0;top:0;width:100vw;height:100vh;background:rgba(0,0,0,0.95);justify-content:center;align-items:center;">
+    <audio id="fullPreviewAudio" controls style="width:60vw;max-width:420px;box-shadow:0 0 40px #000;border-radius:18px;display:block;margin:auto;background:#111;"></audio>
+  </div>
+
+  <!-- Video Preview Modal -->
+  <div id="videoPreviewModal" style="display:none;position:fixed;z-index:99999;left:0;top:0;width:100vw;height:100vh;background:rgba(0,0,0,0.96);justify-content:center;align-items:center;">
+    <video id="fullPreviewVideo" controls style="width:80vw;max-width:700px;max-height:82vh;box-shadow:0 0 40px #000;border-radius:16px;display:block;margin:auto;background:#111;"></video>
+  </div>
+</section>
+
+</main>
+      </div>
+      <!-- Custom Popup Modal -->
+      <div id="customPopup" class="popup-overlay">
+        <div class="popup-content">
+          <div class="popup-icon">
+            <i class="fas fa-circle-notch fa-spin" id="popupSpinner"></i>
+            <i class="fas fa-thumbs-up" id="popupSuccess" style="display: none;"></i>
+            <i class="fas fa-exclamation-triangle" id="popupError" style="display: none;"></i>
+          </div>
+          <div class="popup-message" id="popupMessage">Processing...</div>
+        </div>
+      </div>
+      
+      <!-- Park History Modal -->
+      <div id="parkHistoryModal" class="sl-modal-overlay" aria-hidden="true" role="dialog" aria-modal="true">
+        <div class="sl-modal-card">
+          <div class="sl-modal-header">
+            <span><i class="fas fa-clock-rotate-left"></i> Park History</span>
+            <button type="button" class="sl-modal-close" id="parkHistoryClose" aria-label="Close">×</button>
+          </div>
+          <div id="parkHistoryList" class="park-history-list"></div>
+        </div>
+      </div>
+
+      <!-- Cover Date Edit Modal -->
+      <div id="coverEditModal" class="sl-modal-overlay" aria-hidden="true" role="dialog" aria-modal="true">
+        <div class="sl-modal-card cover-edit-card">
+          <div class="sl-modal-header">
+            <span id="coverEditTitle"><i class="fas fa-calendar-pen"></i> Edit Date</span>
+            <button type="button" class="sl-modal-close" id="coverEditClose" aria-label="Close">×</button>
+          </div>
+          <div class="cover-edit-body">
+            <label class="cover-edit-label">Expiry Date
+              <input type="date" id="coverEditInput" class="cover-date-input" />
+            </label>
+            <button type="button" id="coverEditSave" class="cover-edit-save-btn">Save Date</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sage notification permission prompt — shown once only -->
+      <div id="sageNotifBanner" style="display:none;position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:1900;background:#1a1a1a;border:1px solid rgba(251,105,0,0.3);border-radius:20px;padding:14px 18px;align-items:center;gap:12px;max-width:340px;width:calc(100% - 32px);box-shadow:0 8px 32px rgba(0,0,0,0.5);animation:slModalIn .25s ease-out;">
+        <span style="font-size:1.3rem">🏍️</span>
+        <span style="flex:1;font-size:0.83rem;color:rgba(255,255,255,0.85);line-height:1.35">Sage wants to text you sometimes 🥺</span>
+        <button onclick="window._sageAllowNotif()" style="background:#e25f03;color:#000;border:none;border-radius:12px;padding:7px 14px;font-weight:700;font-size:0.8rem;cursor:pointer;white-space:nowrap">Allow</button>
+        <button onclick="window._sageDismissNotif()" style="background:none;border:none;color:rgba(255,255,255,0.4);font-size:1.1rem;cursor:pointer;padding:0 4px">×</button>
+      </div>
+
+      <!-- Supabase client -->
+      <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+      <script src="notifications.js"></script>
+      <script src="script.js"></script>
+      <script>
+        const BANNER_DISMISSED_KEY = 'sage_notif_banner_done';
+
+        window._sageAllowNotif = async function() {
+          // Hide + permanently flag FIRST, before we even know the permission result.
+          // This guarantees the banner never reappears, regardless of allow/deny.
+          document.getElementById('sageNotifBanner').style.display = 'none';
+          localStorage.setItem(BANNER_DISMISSED_KEY, '1');
+
+          if (window.requestNotifPermission) {
+            const granted = await window.requestNotifPermission();
+            if (granted && window.sendSageFirstConnectNotif) {
+              setTimeout(() => window.sendSageFirstConnectNotif(), 700);
+            }
+            // If denied: do nothing. No retry, no nagging.
+          }
+        };
+
+        window._sageDismissNotif = function() {
+          document.getElementById('sageNotifBanner').style.display = 'none';
+          localStorage.setItem(BANNER_DISMISSED_KEY, '1');
+        };
+
+        window.addEventListener('load', () => {
+          if (!('Notification' in window)) return;
+          // Only show if browser permission is undecided AND the banner was never resolved before.
+          // Once dismissed (allow OR deny OR ×), this never shows again — even across sessions,
+          // even if the user later resets browser-level permissions.
+          const alreadyDecided = Notification.permission !== 'default';
+          const userDismissed  = !!localStorage.getItem(BANNER_DISMISSED_KEY);
+          if (!alreadyDecided && !userDismissed) {
+            setTimeout(() => {
+              const b = document.getElementById('sageNotifBanner');
+              if (b) b.style.display = 'flex';
+            }, 3000);
+          }
+        });
+      </script>
+    </body>
+    </html>
