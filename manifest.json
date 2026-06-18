@@ -4,8 +4,8 @@
   "description": "Track your bike's service, EMI, and documents with ease.",
   "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#e25f03",
-  "theme_color": "#e25f03",
+  "background_color": "#e35d01",
+  "theme_color": "#e35d01",
   "orientation": "portrait-primary",
   "icons": [
     {

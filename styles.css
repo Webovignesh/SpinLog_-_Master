@@ -12717,7 +12717,7 @@ section {
 #emi .service-history-panel,
 #docs .service-history-panel {
   position: relative;
-  overflow: hidden;
+  overflow: visible;
   margin-top: 24px;
   padding: 22px;
   border-radius: 24px;
@@ -12728,12 +12728,6 @@ section {
     linear-gradient(145deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.018)),
     #101010;
   box-shadow: 0 22px 52px rgba(0, 0, 0, 0.42), 0 0 0 1px rgba(251, 105, 0, 0.04) inset;
-}
-
-/* Allow dropdown menus to overflow the panel */
-#emi .history-tools,
-#docs .history-tools {
-  overflow: visible;
 }
 
 #emi .service-history-header,
