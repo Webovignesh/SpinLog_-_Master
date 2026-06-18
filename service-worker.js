@@ -43,7 +43,7 @@ self.addEventListener('push', event => {
   event.waitUntil(
     self.registration.showNotification(title, {
       body,
-      icon: './icons/icon-192.png',
+      icon: './Imgs/sage.webp',
       badge: './icons/icon-192.png',
       vibrate: [120, 60, 120],
     })
@@ -203,7 +203,7 @@ async function fireBgNotif(category) {
   const { title, body } = pickRandom(pool);
   await self.registration.showNotification(title, {
     body,
-    icon: './icons/icon-192.png',
+    icon: './Imgs/sage.webp',
     badge: './icons/icon-192.png',
     vibrate: [120, 60, 120],
     tag: category,

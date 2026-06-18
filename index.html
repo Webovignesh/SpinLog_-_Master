@@ -463,21 +463,77 @@
       </div>
     </div>
   </div>
-  <h4 class="record-history-title">Record History</h4>
-<div class="service-table-wrap emi-history-table-wrap">
-  <table class="service-table emi-history-table" id="emiRecordTable">
-    <thead>
-      <tr>
-        <th>Date Paid</th>
-        <th>Amount (₹)</th>
-        <th>Type</th>
-        <th>Preview</th>
-        <th>Action</th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  </table>
-</div>
+  <div class="service-history-panel" aria-labelledby="emiHistoryTitle">
+    <div class="service-history-header">
+      <div>
+        <h4 class="record-history-title" id="emiHistoryTitle">Record History</h4>
+      </div>
+      <div class="history-header-actions">
+        <button type="button" class="history-filter-toggle" id="emiHistoryFilterToggle" aria-expanded="false" aria-controls="emiHistoryFilters">
+          <i class="fas fa-filter" aria-hidden="true"></i>
+          Filters
+        </button>
+        <button type="button" class="history-clear-btn" id="emiHistoryClearFilters">
+          <i class="fas fa-rotate-left" aria-hidden="true"></i>
+          Clear
+        </button>
+      </div>
+    </div>
+    <div class="history-tools" id="emiHistoryFilters" role="search" aria-label="Filter EMI records">
+      <label class="history-control history-search-control" for="emiHistorySearch">
+        <span>Search</span>
+        <div class="history-input-shell">
+          <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+          <input type="search" id="emiHistorySearch" placeholder="Search amount, type or date" autocomplete="off" aria-controls="emiRecordTable">
+        </div>
+      </label>
+      <div class="history-control history-type-control" aria-labelledby="emiHistoryTypeLabel">
+        <span id="emiHistoryTypeLabel">Type</span>
+        <div class="history-input-shell history-select-shell custom-history-select" data-emi-type-filter>
+          <i class="fas fa-filter" aria-hidden="true"></i>
+          <input type="hidden" id="emiHistoryTypeFilter" value="" aria-controls="emiRecordTable">
+          <button type="button" class="history-select-button" id="emiHistoryTypeButton" aria-haspopup="listbox" aria-expanded="false" aria-controls="emiHistoryTypeMenu">
+            <span id="emiHistoryTypeValue">All types</span>
+          </button>
+          <div class="history-select-menu" id="emiHistoryTypeMenu" role="listbox" aria-labelledby="emiHistoryTypeLabel">
+            <button type="button" class="history-select-option" role="option" data-value="" aria-selected="true">All types</button>
+            <button type="button" class="history-select-option" role="option" data-value="Monthly" aria-selected="false">Monthly</button>
+            <button type="button" class="history-select-option" role="option" data-value="Part" aria-selected="false">Part</button>
+          </div>
+        </div>
+      </div>
+      <label class="history-control" for="emiHistoryFromDate">
+        <span>From</span>
+        <div class="history-input-shell history-date-shell date-shell">
+          <i class="far fa-calendar" aria-hidden="true"></i>
+          <input type="date" id="emiHistoryFromDate" aria-controls="emiRecordTable" data-date-ui data-empty-label="From date">
+          <span class="date-display" aria-hidden="true">From date</span>
+        </div>
+      </label>
+      <label class="history-control" for="emiHistoryToDate">
+        <span>To</span>
+        <div class="history-input-shell history-date-shell date-shell">
+          <i class="far fa-calendar-check" aria-hidden="true"></i>
+          <input type="date" id="emiHistoryToDate" aria-controls="emiRecordTable" data-date-ui data-empty-label="To date">
+          <span class="date-display" aria-hidden="true">To date</span>
+        </div>
+      </label>
+    </div>
+    <div class="service-table-wrap emi-history-table-wrap">
+      <table class="service-table emi-history-table" id="emiRecordTable">
+        <thead>
+          <tr>
+            <th>Date Paid</th>
+            <th>Amount (₹)</th>
+            <th>Type</th>
+            <th>Preview</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
 
 </section>
    <section id="docs" aria-labelledby="docs-header" class="docs-management-section">
@@ -611,13 +667,65 @@
     </div>
 
     <div class="docs-record-inner">
-      <div class="docs-panel-header compact docs-record-header-inline">
-        <div>
-          <h3><i class="fas fa-clock-rotate-left"></i> Record History</h3>
-          <p>Preview media, edit notes, or delete historic uploads.</p>
+      <div class="service-history-panel" aria-labelledby="docsHistoryTitle">
+        <div class="service-history-header">
+          <div>
+            <h4 class="record-history-title" id="docsHistoryTitle">Record History</h4>
+            <p class="service-history-subtitle">Preview media, edit notes, or delete historic uploads.</p>
+          </div>
+          <div class="history-header-actions">
+            <button type="button" class="history-filter-toggle" id="docsHistoryFilterToggle" aria-expanded="false" aria-controls="docsHistoryFilters">
+              <i class="fas fa-filter" aria-hidden="true"></i>
+              Filters
+            </button>
+            <button type="button" class="history-clear-btn" id="docsHistoryClearFilters">
+              <i class="fas fa-rotate-left" aria-hidden="true"></i>
+              Clear
+            </button>
+          </div>
         </div>
-      </div>
-      <div class="service-table-wrap docs-history-wrap">
+        <div class="history-tools" id="docsHistoryFilters" role="search" aria-label="Filter media records">
+          <label class="history-control history-search-control" for="docsHistorySearch">
+            <span>Search</span>
+            <div class="history-input-shell">
+              <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+              <input type="search" id="docsHistorySearch" placeholder="Search file name or notes" autocomplete="off" aria-controls="mediaRecordTable">
+            </div>
+          </label>
+          <div class="history-control history-type-control" aria-labelledby="docsHistoryTypeLabel">
+            <span id="docsHistoryTypeLabel">Type</span>
+            <div class="history-input-shell history-select-shell custom-history-select" data-docs-type-filter>
+              <i class="fas fa-filter" aria-hidden="true"></i>
+              <input type="hidden" id="docsHistoryTypeFilter" value="" aria-controls="mediaRecordTable">
+              <button type="button" class="history-select-button" id="docsHistoryTypeButton" aria-haspopup="listbox" aria-expanded="false" aria-controls="docsHistoryTypeMenu">
+                <span id="docsHistoryTypeValue">All types</span>
+              </button>
+              <div class="history-select-menu" id="docsHistoryTypeMenu" role="listbox" aria-labelledby="docsHistoryTypeLabel">
+                <button type="button" class="history-select-option" role="option" data-value="" aria-selected="true">All types</button>
+                <button type="button" class="history-select-option" role="option" data-value="image" aria-selected="false">Image</button>
+                <button type="button" class="history-select-option" role="option" data-value="audio" aria-selected="false">Audio</button>
+                <button type="button" class="history-select-option" role="option" data-value="video" aria-selected="false">Video</button>
+              </div>
+            </div>
+          </div>
+          <label class="history-control" for="docsHistoryFromDate">
+            <span>From</span>
+            <div class="history-input-shell history-date-shell date-shell">
+              <i class="far fa-calendar" aria-hidden="true"></i>
+              <input type="date" id="docsHistoryFromDate" aria-controls="mediaRecordTable" data-date-ui data-empty-label="From date">
+              <span class="date-display" aria-hidden="true">From date</span>
+            </div>
+          </label>
+          <label class="history-control" for="docsHistoryToDate">
+            <span>To</span>
+            <div class="history-input-shell history-date-shell date-shell">
+              <i class="far fa-calendar-check" aria-hidden="true"></i>
+              <input type="date" id="docsHistoryToDate" aria-controls="mediaRecordTable" data-date-ui data-empty-label="To date">
+              <span class="date-display" aria-hidden="true">To date</span>
+            </div>
+          </label>
+        </div>
+        <div class="service-table-wrap docs-history-wrap">
         <table class="service-table docs-history-table" id="mediaRecordTable">
           <thead>
             <tr>

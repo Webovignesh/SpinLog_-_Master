@@ -1424,8 +1424,9 @@ window._showImagePreview = function(url) {
       el.textContent = 'Active until ' + formatted;
     }
   }
-  document.querySelectorAll('.status[data-due]').forEach(updateCoverBadge);
+  window.updateCoverBadge = updateCoverBadge;
   setupCoverDateEditing();
+  document.querySelectorAll('.status[data-due]').forEach(updateCoverBadge);
 
   // Hide Next Due for Mods/Updates
   document.getElementById('serviceType')?.addEventListener('change', function() {
@@ -2844,18 +2845,23 @@ async function updatePartPaymentStatus() {
   }
 
   function showAppPopup(type, msg) {
-    const overlay = document.getElementById('popupOverlay');
+    // Use the main popup system (customPopup element)
+    if (typeof showPopup === 'function') {
+      showPopup(type, msg);
+      return;
+    }
+    const popup = document.getElementById('customPopup');
     const msgEl   = document.getElementById('popupMessage');
     const spinner = document.getElementById('popupSpinner');
     const success = document.getElementById('popupSuccess');
     const error   = document.getElementById('popupError');
-    if (!overlay) return;
-    overlay.style.display = 'flex';
+    if (!popup) return;
+    if (spinner) spinner.style.display = type === 'loading' ? 'block' : 'none';
+    if (success) success.style.display = type === 'success' ? 'block' : 'none';
+    if (error)   error.style.display   = type === 'error'   ? 'block' : 'none';
     if (msgEl) msgEl.textContent = msg;
-    if (spinner) spinner.style.display = type === 'loading' ? '' : 'none';
-    if (success) success.style.display = type === 'success' ? '' : 'none';
-    if (error)   error.style.display   = type === 'error'   ? '' : 'none';
-    if (type !== 'loading') setTimeout(() => { overlay.style.display = 'none'; }, 2200);
+    popup.classList.add('show');
+    if (type !== 'loading') setTimeout(() => { popup.classList.remove('show'); }, 2200);
   }
 
   async function saveCurrentParkLocation() {
@@ -2992,23 +2998,242 @@ window.setupCoverDateEditing = function() {
     const dates = (() => { try { return JSON.parse(localStorage.getItem(COVER_KEY) || '{}'); } catch { return {}; } })();
     dates[label] = input.value;
     localStorage.setItem(COVER_KEY, JSON.stringify(dates));
-    if (typeof updateCoverBadge === 'function') updateCoverBadge(statusEl);
+    if (typeof window.updateCoverBadge === 'function') window.updateCoverBadge(statusEl);
     closeModal();
-    const overlay = document.getElementById('popupOverlay');
-    const msgEl   = document.getElementById('popupMessage');
-    const spinner = document.getElementById('popupSpinner');
-    const success = document.getElementById('popupSuccess');
-    const error   = document.getElementById('popupError');
-    if (overlay) {
-      overlay.style.display = 'flex';
-      if (msgEl) msgEl.textContent = 'Cover date updated!';
-      if (spinner) spinner.style.display = 'none';
-      if (success) success.style.display = '';
-      if (error)   error.style.display   = 'none';
-      setTimeout(() => { overlay.style.display = 'none'; }, 2200);
+    if (typeof showPopup === 'function') {
+      showPopup('success', 'Cover date updated!');
     }
   });
 
   closeBtn?.addEventListener('click', closeModal);
   modal?.addEventListener('click', e => { if (e.target === modal) closeModal(); });
 };
+
+// ════════════════════════════════════════════════════════════
+// EMI HISTORY FILTERS
+// ════════════════════════════════════════════════════════════
+(function() {
+  function setupEMIFilters() {
+    const search = document.getElementById('emiHistorySearch');
+    const typeFilter = document.getElementById('emiHistoryTypeFilter');
+    const fromDate = document.getElementById('emiHistoryFromDate');
+    const toDate = document.getElementById('emiHistoryToDate');
+    const toggle = document.getElementById('emiHistoryFilterToggle');
+    const filterPanel = document.getElementById('emiHistoryFilters');
+    const clearBtn = document.getElementById('emiHistoryClearFilters');
+    const typeButton = document.getElementById('emiHistoryTypeButton');
+    const typeMenu = document.getElementById('emiHistoryTypeMenu');
+    const typeValueEl = document.getElementById('emiHistoryTypeValue');
+    const typeWrapper = document.querySelector('[data-emi-type-filter]');
+    const table = document.querySelector('#emiRecordTable tbody');
+    if (!search || !table) return;
+
+    // Toggle filter panel on mobile
+    toggle?.addEventListener('click', () => {
+      const isOpen = filterPanel?.classList.toggle('is-open');
+      toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+    });
+
+    // Custom type dropdown
+    typeButton?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const isOpen = typeWrapper?.classList.toggle('is-open');
+      typeButton.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+    });
+
+    typeMenu?.querySelectorAll('.history-select-option').forEach(option => {
+      option.addEventListener('click', (e) => {
+        e.preventDefault();
+        const value = option.dataset.value || '';
+        typeFilter.value = value;
+        if (typeValueEl) typeValueEl.textContent = option.textContent;
+        typeWrapper?.classList.remove('is-open');
+        typeButton?.setAttribute('aria-expanded', 'false');
+        typeMenu.querySelectorAll('.history-select-option').forEach(o => o.setAttribute('aria-selected', 'false'));
+        option.setAttribute('aria-selected', 'true');
+        filterEMITable();
+      });
+    });
+
+    document.addEventListener('click', (e) => {
+      if (typeWrapper && !typeWrapper.contains(e.target)) {
+        typeWrapper.classList.remove('is-open');
+        typeButton?.setAttribute('aria-expanded', 'false');
+      }
+    });
+
+    // Clear button
+    clearBtn?.addEventListener('click', () => {
+      search.value = '';
+      typeFilter.value = '';
+      if (typeValueEl) typeValueEl.textContent = 'All types';
+      fromDate.value = '';
+      toDate.value = '';
+      typeMenu?.querySelectorAll('.history-select-option').forEach((o, i) => o.setAttribute('aria-selected', i === 0 ? 'true' : 'false'));
+      filterEMITable();
+    });
+
+    function filterEMITable() {
+      const query = search.value.toLowerCase().trim();
+      const type = typeFilter?.value || '';
+      const from = fromDate?.value || '';
+      const to = toDate?.value || '';
+      const rows = table.querySelectorAll('tr');
+
+      rows.forEach(row => {
+        const cells = row.querySelectorAll('td');
+        if (!cells.length) return;
+        const datePaid = cells[0]?.textContent?.trim() || '';
+        const amount = cells[1]?.textContent?.trim() || '';
+        const rowType = cells[2]?.textContent?.trim() || '';
+        const text = (datePaid + ' ' + amount + ' ' + rowType).toLowerCase();
+
+        let show = true;
+        if (query && !text.includes(query)) show = false;
+        if (type && rowType !== type) show = false;
+
+        if (from || to) {
+          const parts = datePaid.split('/');
+          if (parts.length === 3) {
+            const rowDate = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+            if (from && rowDate < from) show = false;
+            if (to && rowDate > to) show = false;
+          }
+        }
+
+        row.style.display = show ? '' : 'none';
+      });
+    }
+
+    let emiFilterTimer;
+    search.addEventListener('input', () => { clearTimeout(emiFilterTimer); emiFilterTimer = setTimeout(filterEMITable, 150); });
+    fromDate?.addEventListener('change', filterEMITable);
+    toDate?.addEventListener('change', filterEMITable);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupEMIFilters);
+  } else {
+    setupEMIFilters();
+  }
+})();
+
+// ════════════════════════════════════════════════════════════
+// DOCS MEDIA HISTORY FILTERS
+// ════════════════════════════════════════════════════════════
+(function() {
+  function setupDocsFilters() {
+    const search = document.getElementById('docsHistorySearch');
+    const typeFilter = document.getElementById('docsHistoryTypeFilter');
+    const fromDate = document.getElementById('docsHistoryFromDate');
+    const toDate = document.getElementById('docsHistoryToDate');
+    const toggle = document.getElementById('docsHistoryFilterToggle');
+    const filterPanel = document.getElementById('docsHistoryFilters');
+    const clearBtn = document.getElementById('docsHistoryClearFilters');
+    const typeButton = document.getElementById('docsHistoryTypeButton');
+    const typeMenu = document.getElementById('docsHistoryTypeMenu');
+    const typeValueEl = document.getElementById('docsHistoryTypeValue');
+    const typeWrapper = document.querySelector('[data-docs-type-filter]');
+    const table = document.querySelector('#mediaRecordTable tbody');
+    if (!search || !table) return;
+
+    // Toggle filter panel on mobile
+    toggle?.addEventListener('click', () => {
+      const isOpen = filterPanel?.classList.toggle('is-open');
+      toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+    });
+
+    // Custom type dropdown
+    typeButton?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const isOpen = typeWrapper?.classList.toggle('is-open');
+      typeButton.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+    });
+
+    typeMenu?.querySelectorAll('.history-select-option').forEach(option => {
+      option.addEventListener('click', (e) => {
+        e.preventDefault();
+        const value = option.dataset.value || '';
+        typeFilter.value = value;
+        if (typeValueEl) typeValueEl.textContent = option.textContent;
+        typeWrapper?.classList.remove('is-open');
+        typeButton?.setAttribute('aria-expanded', 'false');
+        typeMenu.querySelectorAll('.history-select-option').forEach(o => o.setAttribute('aria-selected', 'false'));
+        option.setAttribute('aria-selected', 'true');
+        filterDocsTable();
+      });
+    });
+
+    document.addEventListener('click', (e) => {
+      if (typeWrapper && !typeWrapper.contains(e.target)) {
+        typeWrapper.classList.remove('is-open');
+        typeButton?.setAttribute('aria-expanded', 'false');
+      }
+    });
+
+    // Clear button
+    clearBtn?.addEventListener('click', () => {
+      search.value = '';
+      typeFilter.value = '';
+      if (typeValueEl) typeValueEl.textContent = 'All types';
+      fromDate.value = '';
+      toDate.value = '';
+      typeMenu?.querySelectorAll('.history-select-option').forEach((o, i) => o.setAttribute('aria-selected', i === 0 ? 'true' : 'false'));
+      filterDocsTable();
+    });
+
+    function filterDocsTable() {
+      const query = search.value.toLowerCase().trim();
+      const type = typeFilter?.value || '';
+      const from = fromDate?.value || '';
+      const to = toDate?.value || '';
+      const rows = table.querySelectorAll('tr');
+
+      rows.forEach(row => {
+        const cells = row.querySelectorAll('td');
+        if (!cells.length) return;
+        const fileName = cells[0]?.textContent?.trim()?.toLowerCase() || '';
+        const notes = cells[1]?.textContent?.trim()?.toLowerCase() || '';
+        const text = fileName + ' ' + notes;
+
+        let show = true;
+        if (query && !text.includes(query)) show = false;
+
+        if (type) {
+          const metaText = cells[0]?.querySelector('.docs-file-meta span:last-child')?.textContent?.toLowerCase() || '';
+          let mediaType = '';
+          if (metaText.includes('image')) mediaType = 'image';
+          else if (metaText.includes('audio')) mediaType = 'audio';
+          else if (metaText.includes('video')) mediaType = 'video';
+          if (mediaType !== type) show = false;
+        }
+
+        if (from || to) {
+          const dateEl = cells[3]?.querySelector('.docs-date-cell span');
+          const dateText = dateEl?.textContent?.trim() || '';
+          const parsed = new Date(dateText);
+          if (!isNaN(parsed.getTime())) {
+            const rowDate = parsed.toISOString().slice(0, 10);
+            if (from && rowDate < from) show = false;
+            if (to && rowDate > to) show = false;
+          }
+        }
+
+        row.style.display = show ? '' : 'none';
+      });
+    }
+
+    let docsFilterTimer;
+    search.addEventListener('input', () => { clearTimeout(docsFilterTimer); docsFilterTimer = setTimeout(filterDocsTable, 150); });
+    fromDate?.addEventListener('change', filterDocsTable);
+    toDate?.addEventListener('change', filterDocsTable);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupDocsFilters);
+  } else {
+    setupDocsFilters();
+  }
+})();

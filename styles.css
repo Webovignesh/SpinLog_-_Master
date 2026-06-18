@@ -4649,25 +4649,15 @@ body {
   }
 
   #service .history-tools {
-    display: grid !important;
+    display: none !important;
     grid-template-columns: 1fr !important;
     gap: 10px;
-    max-height: 0;
-    opacity: 0;
-    overflow: hidden;
     margin-top: 0 !important;
-    transform: translateY(-8px);
-    pointer-events: none;
-    transition: max-height 0.34s ease, opacity 0.22s ease, transform 0.28s ease, margin-top 0.28s ease;
   }
 
   #service .history-tools.is-open {
-    max-height: 780px;
-    opacity: 1;
-    overflow: visible;
+    display: grid !important;
     margin-top: 14px !important;
-    transform: translateY(0);
-    pointer-events: auto;
   }
 }
 
@@ -12719,3 +12709,400 @@ section {
 }
 .cover-edit-save-btn:hover { opacity: 0.9; }
 .cover-edit-save-btn:active { transform: scale(0.97); }
+
+/* ════════════════════════════════════════════════════════════
+   EMI & DOCS FILTER STYLES (reuse service page pattern)
+   ════════════════════════════════════════════════════════════ */
+
+#emi .service-history-panel,
+#docs .service-history-panel {
+  position: relative;
+  overflow: hidden;
+  margin-top: 24px;
+  padding: 22px;
+  border-radius: 24px;
+  border: 1px solid rgba(251, 105, 0, 0.24);
+  background:
+    linear-gradient(90deg, rgba(251, 105, 0, 0.24), rgba(251, 105, 0, 0) 42%) top left / 100% 3px no-repeat,
+    radial-gradient(circle at 9% 0%, rgba(251, 105, 0, 0.18), transparent 34%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.018)),
+    #101010;
+  box-shadow: 0 22px 52px rgba(0, 0, 0, 0.42), 0 0 0 1px rgba(251, 105, 0, 0.04) inset;
+}
+
+/* Allow dropdown menus to overflow the panel */
+#emi .history-tools,
+#docs .history-tools {
+  overflow: visible;
+}
+
+#emi .service-history-header,
+#docs .service-history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+#emi .history-header-actions,
+#docs .history-header-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+/* Filter toggle button */
+#emi .history-filter-toggle,
+#docs .history-filter-toggle {
+  min-height: 42px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 15px;
+  border-radius: 999px;
+  border: 1px solid rgba(251, 105, 0, 0.55);
+  background: rgba(251, 105, 0, 0.14);
+  color: var(--orange);
+  font-family: 'Blender Pro', 'Oswald', Arial, sans-serif;
+  font-size: 0.94rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+#emi .history-filter-toggle:hover,
+#emi .history-filter-toggle[aria-expanded="true"],
+#docs .history-filter-toggle:hover,
+#docs .history-filter-toggle[aria-expanded="true"] {
+  background: var(--orange);
+  color: #050505;
+  border-color: var(--orange);
+}
+
+/* Clear button */
+#emi .history-clear-btn,
+#docs .history-clear-btn {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 15px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.13);
+  background: rgba(255,255,255,0.04);
+  color: rgba(255,255,255,0.72);
+  font-family: 'Oswald', sans-serif;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+#emi .history-clear-btn:hover,
+#docs .history-clear-btn:hover {
+  background: var(--orange);
+  color: #050505;
+  border-color: var(--orange);
+}
+
+/* Filter grid */
+#emi .history-tools,
+#docs .history-tools {
+  display: grid;
+  grid-template-columns: minmax(240px, 1.7fr) minmax(150px, 1fr) minmax(150px, 0.9fr) minmax(150px, 0.9fr);
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+/* Controls */
+#emi .history-control,
+#docs .history-control {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+#emi .history-control > span,
+#docs .history-control > span {
+  color: rgba(255, 255, 255, 0.78);
+  font-family: 'Blender Pro', 'Oswald', Arial, sans-serif;
+  font-size: 0.88rem;
+  font-weight: 700;
+  letter-spacing: 0.35px;
+  text-transform: uppercase;
+}
+
+/* Input shells */
+#emi .history-input-shell,
+#docs .history-input-shell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 48px;
+  border: 1px solid rgba(255,255,255,0.13);
+  border-radius: 14px;
+  background: rgba(0,0,0,0.58);
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.45);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+#emi .history-input-shell:focus-within,
+#docs .history-input-shell:focus-within {
+  border-color: rgba(251,105,0,0.92);
+  box-shadow: 0 0 0 4px rgba(251,105,0,0.12), inset 0 0 0 1px rgba(0,0,0,0.45);
+}
+
+#emi .history-input-shell > i,
+#docs .history-input-shell > i {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--orange);
+  font-size: 0.98rem;
+  pointer-events: none;
+  z-index: 1;
+}
+
+#emi .history-input-shell input[type="search"],
+#docs .history-input-shell input[type="search"] {
+  width: 100%;
+  height: 48px;
+  margin: 0;
+  padding: 0 14px 0 42px;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  color: var(--white);
+  font-family: 'Oswald', Arial, sans-serif;
+  font-size: 1rem;
+  outline: none;
+}
+
+#emi .history-input-shell input[type="search"]::placeholder,
+#docs .history-input-shell input[type="search"]::placeholder {
+  color: rgba(255,255,255,0.38);
+}
+
+/* Date shell — hide native input, show custom display */
+#emi .history-input-shell.date-shell,
+#docs .history-input-shell.date-shell {
+  cursor: pointer;
+  overflow: hidden;
+}
+
+#emi .history-input-shell.date-shell input[type="date"],
+#docs .history-input-shell.date-shell input[type="date"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  z-index: 2;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+#emi .history-input-shell.date-shell .date-display,
+#docs .history-input-shell.date-shell .date-display {
+  position: relative;
+  z-index: 1;
+  padding: 0 14px 0 42px;
+  color: rgba(255,255,255,0.38);
+  font-family: 'Oswald', Arial, sans-serif;
+  font-size: 1rem;
+  line-height: 48px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+#emi .history-input-shell.date-shell .date-display.has-value,
+#docs .history-input-shell.date-shell .date-display.has-value {
+  color: var(--white);
+}
+
+/* Custom dropdown (button-based, matching service page) */
+#emi .custom-history-select,
+#docs .custom-history-select {
+  position: relative;
+}
+
+#emi .custom-history-select input[type="hidden"],
+#docs .custom-history-select input[type="hidden"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+#emi .history-select-button,
+#docs .history-select-button {
+  width: 100%;
+  min-width: 0;
+  height: 48px;
+  padding: 0 34px 0 42px;
+  border: 0;
+  background: transparent;
+  color: var(--white);
+  font-family: 'Oswald', Arial, sans-serif;
+  font-size: 1rem;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+
+#emi .history-select-button:focus-visible,
+#docs .history-select-button:focus-visible {
+  outline: none;
+}
+
+/* Chevron arrow for select shell */
+#emi .custom-history-select::after,
+#docs .custom-history-select::after {
+  content: '';
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--orange);
+  border-bottom: 2px solid var(--orange);
+  transform: translateY(-62%) rotate(45deg);
+  pointer-events: none;
+  z-index: 1;
+}
+
+#emi .history-select-menu,
+#docs .history-select-menu {
+  position: absolute;
+  z-index: 80;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  display: none;
+  padding: 6px;
+  margin: 0;
+  border: 1px solid rgba(251, 105, 0, 0.38);
+  border-radius: 16px;
+  background: linear-gradient(180deg, #15110f 0%, #090909 100%);
+  box-shadow: 0 18px 38px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05) inset;
+  list-style: none;
+}
+
+#emi .custom-history-select.is-open .history-select-menu,
+#docs .custom-history-select.is-open .history-select-menu {
+  display: grid;
+  gap: 4px;
+  animation: historyMenuDrop 0.16s ease-out;
+}
+
+#emi .history-select-option,
+#docs .history-select-option {
+  width: 100%;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.86);
+  font-family: 'Oswald', Arial, sans-serif;
+  font-size: 0.98rem;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+
+#emi .history-select-option:hover,
+#emi .history-select-option:focus-visible,
+#docs .history-select-option:hover,
+#docs .history-select-option:focus-visible {
+  background: rgba(251, 105, 0, 0.16);
+  color: #fff;
+  outline: none;
+}
+
+#emi .history-select-option[aria-selected="true"],
+#docs .history-select-option[aria-selected="true"] {
+  background: rgba(251, 105, 0, 0.22);
+  color: #fff;
+}
+
+/* Responsive: tablet */
+@media (max-width: 1024px) {
+  #emi .history-tools,
+  #docs .history-tools {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Responsive: mobile — collapsible filter panel */
+@media (max-width: 768px) {
+  #emi .service-history-panel,
+  #docs .service-history-panel {
+    padding: 16px;
+  }
+
+  #emi .history-filter-toggle,
+  #docs .history-filter-toggle {
+    display: inline-flex;
+    width: 100%;
+  }
+
+  #emi .history-clear-btn,
+  #docs .history-clear-btn {
+    width: auto !important;
+    min-width: 104px;
+  }
+
+  #emi .history-tools,
+  #docs .history-tools {
+    display: none !important;
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+    margin-top: 0 !important;
+  }
+
+  #emi .history-tools.is-open,
+  #docs .history-tools.is-open {
+    display: grid !important;
+    margin-top: 14px !important;
+    margin-bottom: 16px !important;
+  }
+
+  #emi .service-history-header,
+  #docs .service-history-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  #emi .history-header-actions,
+  #docs .history-header-actions {
+    width: 100%;
+    gap: 10px;
+  }
+}
+
+@media (min-width: 769px) {
+  #emi .history-tools,
+  #docs .history-tools {
+    display: grid !important;
+  }
+}
+
+
+

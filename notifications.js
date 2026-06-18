@@ -464,14 +464,14 @@ async function sendSageNotif(category, overrides = {}) {
   if (reg?.showNotification) {
     reg.showNotification(title, {
       body,
-      icon: './icons/icon-192.png',
+      icon: './Imgs/sage.webp',
       badge: './icons/icon-192.png',
       vibrate: [120, 60, 120],
       tag: category,
       renotify: true,
     });
   } else {
-    new Notification(title, { body, icon: './icons/icon-192.png' });
+    new Notification(title, { body, icon: './Imgs/sage.webp' });
   }
 }
 
