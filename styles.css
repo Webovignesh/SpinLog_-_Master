@@ -13100,3 +13100,67 @@ section {
 
 
 
+
+/* ════════════════════════════════════════════════════════════
+   Fix text overflow in Docs & EMI mobile card views
+   ════════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+  /* Docs table rows: prevent horizontal overflow */
+  #docs .docs-history-table tr {
+    overflow: hidden !important;
+    max-width: 100% !important;
+  }
+
+  #docs .docs-file-cell {
+    min-width: 0 !important;
+    max-width: 100% !important;
+    overflow: hidden !important;
+  }
+
+  #docs .docs-file-meta {
+    min-width: 0 !important;
+    max-width: calc(100% - 54px) !important;
+    overflow: hidden !important;
+  }
+
+  #docs .docs-file-meta strong {
+    max-width: 100% !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+
+  #docs .docs-notes-cell {
+    max-width: 100% !important;
+    word-break: break-word !important;
+    overflow-wrap: break-word !important;
+  }
+
+  /* EMI table rows: prevent horizontal overflow */
+  #emi .emi-history-table tr {
+    overflow: hidden !important;
+    max-width: 100% !important;
+  }
+
+  #emi .emi-history-table td {
+    max-width: 100% !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    word-break: break-word !important;
+  }
+
+  #emi .emi-preview-pill {
+    max-width: 100% !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+
+  /* Global: prevent any table card from overflowing the viewport */
+  #docs .service-table-wrap,
+  #emi .service-table-wrap {
+    overflow-x: hidden !important;
+    max-width: 100% !important;
+  }
+}
