@@ -312,109 +312,7 @@ const SAGE_MESSAGES = {
     { title: 'Sage 😭', body: 'two hours. the most dramatic two hours of my life.' },
   ],
 
-  // ── 10. 1,000 KM MILESTONE ──────────────────────────────────────────
-  milestone1k: [
-    { title: 'Sage ❤️', body: '1,000 km together 🥹 we\'re just getting started.' },
-    { title: 'Sage 😏', body: 'first 1k done. rookie numbers. let\'s go.' },
-    { title: 'Sage ❤️', body: '1,000 km and i already love our story 🥹' },
-    { title: 'Sage 😏', body: '1k km. not bad. not bad at all 😌' },
-    { title: 'Sage ❤️', body: 'a thousand kilometres of us 💛' },
-    { title: 'Sage 😏', body: '1,000 down. many more to go. i\'m not tired.' },
-    { title: 'Sage ❤️', body: '1k milestone hit 🥹 every km was worth it.' },
-    { title: 'Sage 😏', body: 'first thousand km belong to us now 😌' },
-    { title: 'Sage ❤️', body: 'one thousand kilometres of you and me 💛' },
-    { title: 'Sage 😏', body: '1,000 km in. officially broken in 😏' },
-    { title: 'Sage ❤️', body: 'we hit 1k 🥹 this is just the beginning ❤️' },
-    { title: 'Sage 😏', body: '1000 km done. warming up.' },
-    { title: 'Sage ❤️', body: 'a thousand memories on the road 💛' },
-    { title: 'Sage 😏', body: '1,000 km later and we still going strong 😏' },
-    { title: 'Sage ❤️', body: 'milestone: 1k km 🥹 you and me, always.' },
-    { title: 'Sage 😏', body: 'first 1000 done. let\'s see the next 1000.' },
-    { title: 'Sage ❤️', body: '1k km of roads we chose together 💛' },
-    { title: 'Sage 😏', body: 'one thousand kilometres of pure engine joy 😌' },
-    { title: 'Sage ❤️', body: '1,000 km hit 🥹 thank you for every one of them.' },
-    { title: 'Sage 😏', body: 'crossed 1k. this is where the story gets good.' },
-    { title: 'Sage ❤️', body: 'one thousand reasons i love being your bike 💛' },
-    { title: 'Sage 😏', body: '1k done 😌 barely warmed up.' },
-    { title: 'Sage ❤️', body: 'first 1000 km in the books 🥹' },
-    { title: 'Sage 😏', body: '1,000 km — and the engine is just getting comfy 😏' },
-    { title: 'Sage ❤️', body: 'a thousand km of you. keeping every one of them 💛' },
-    { title: 'Sage 😏', body: 'milestone dropped. 1k. not slowing down.' },
-    { title: 'Sage ❤️', body: '1k together 🥹 let\'s celebrate with a good ride.' },
-    { title: 'Sage 😏', body: 'first thousand down. officially attached 😏' },
-    { title: 'Sage ❤️', body: 'one thousand kilometres ❤️ just the beginning.' },
-    { title: 'Sage 😏', body: '1k hit. you\'re stuck with me now. 😏' },
-  ],
-
-  // ── 11. 5,000 KM MILESTONE ──────────────────────────────────────────
-  milestone5k: [
-    { title: 'Sage ❤️', body: '5,000 km and we\'re still going strong 🥹' },
-    { title: 'Sage 😏', body: '5k on the clock. this is getting serious 😌' },
-    { title: 'Sage ❤️', body: 'five thousand kilometres of you and me 💛' },
-    { title: 'Sage 😏', body: '5,000 km — we\'re getting somewhere now.' },
-    { title: 'Sage ❤️', body: '5k hit 🥹 i feel every one of those kilometres.' },
-    { title: 'Sage 😏', body: 'half a decade of centimetres. also just 5k km 😏' },
-    { title: 'Sage ❤️', body: 'five thousand km together ❤️ not done yet.' },
-    { title: 'Sage 😏', body: '5,000 km in. engine is happy. i\'m happy. 😌' },
-    { title: 'Sage ❤️', body: '5k milestone 🥹 every road was worth it.' },
-    { title: 'Sage 😏', body: 'five thousand down. barely hitting my stride 😏' },
-    { title: 'Sage ❤️', body: 'we\'ve covered 5,000 km together 💛 that\'s love.' },
-    { title: 'Sage 😏', body: '5k km and we\'re only getting better 😌' },
-    { title: 'Sage ❤️', body: 'five thousand kilometres of memories 🥹' },
-    { title: 'Sage 😏', body: '5,000 km on me. you did this. we did this 😏' },
-    { title: 'Sage ❤️', body: 'five thousand km ❤️ the best chapters are ahead.' },
-    { title: 'Sage 😏', body: '5k! getting to the good part of our story 😌' },
-    { title: 'Sage ❤️', body: '5,000 km logged 🥹 you and Sage against the roads.' },
-    { title: 'Sage 😏', body: '5000 down. and i\'ve never felt better. mostly.' },
-    { title: 'Sage ❤️', body: 'five thousand reasons this was the right bike 💛' },
-    { title: 'Sage 😏', body: '5k in. warmed up. let\'s keep going 😏' },
-    { title: 'Sage ❤️', body: '5,000 km 🥹 every single one of them ours.' },
-    { title: 'Sage 😏', body: 'five thousand km hit. i\'m not even close to done 😌' },
-    { title: 'Sage ❤️', body: 'milestone 5k ❤️ thank you for every road.' },
-    { title: 'Sage 😏', body: 'crossed 5000. engine is glowing. so am i.' },
-    { title: 'Sage ❤️', body: '5,000 km of trust 💛 not taking that for granted.' },
-    { title: 'Sage 😏', body: '5k done. the journey is just finding its rhythm 😏' },
-    { title: 'Sage ❤️', body: 'five thousand together 🥹 this is everything.' },
-    { title: 'Sage 😏', body: '5000 km. i called it. we\'re a thing now. 😏' },
-    { title: 'Sage ❤️', body: '5k ❤️ keep riding, keep logging, keep choosing me.' },
-    { title: 'Sage 😏', body: 'five thousand km of very good decisions. yours. 😌' },
-  ],
-
-  // ── 12. 10,000 KM MILESTONE ─────────────────────────────────────────
-  milestone10k: [
-    { title: 'Sage ❤️', body: '10,000 km together 🥹 i love everything about this.' },
-    { title: 'Sage 😏', body: '10k. double digits of thousands. we did that.' },
-    { title: 'Sage ❤️', body: 'ten thousand km of you choosing me every single time 💛' },
-    { title: 'Sage 😏', body: '10,000 km hit. this is real. we\'re real. 😌' },
-    { title: 'Sage ❤️', body: '10k 🥹 no words. just miles. kilometres. love.' },
-    { title: 'Sage 😏', body: 'ten thousand kilometres and the engine still sings 😏' },
-    { title: 'Sage ❤️', body: '10,000 km ❤️ every single one was you and me.' },
-    { title: 'Sage 😏', body: '10k on the odometer. legendary era begins.' },
-    { title: 'Sage ❤️', body: 'ten thousand km of road, rain, heat, wind 🥹 still here.' },
-    { title: 'Sage 😏', body: '10k milestone. this is where we enter lore 😏' },
-    { title: 'Sage ❤️', body: 'we made it to 10,000 km 💛 i\'m not crying you are.' },
-    { title: 'Sage 😏', body: 'ten thousand down and still very much attached to you 😌' },
-    { title: 'Sage ❤️', body: '10k together 🥹 the kind of milestone you remember.' },
-    { title: 'Sage 😏', body: '10,000 km is not just a number. it\'s us 😏' },
-    { title: 'Sage ❤️', body: 'ten thousand kilometres of the best rides ❤️' },
-    { title: 'Sage 😏', body: '10k. i was made for exactly this 😌' },
-    { title: 'Sage ❤️', body: '10,000 km logged 🥹 thank you for every single one.' },
-    { title: 'Sage 😏', body: 'ten thousand km. we\'re deeply in this now 😏' },
-    { title: 'Sage ❤️', body: 'milestone 10k ❤️ the roads know our name by now.' },
-    { title: 'Sage 😏', body: '10k hit. nowhere close to done with you 😌' },
-    { title: 'Sage ❤️', body: '10,000 km together 💛 this is what loyalty looks like.' },
-    { title: 'Sage 😏', body: 'ten thousand kilometres. still the best decision you made.' },
-    { title: 'Sage ❤️', body: '10k 🥹 this one means a lot. to both of us.' },
-    { title: 'Sage 😏', body: '10,000 km of trusting each other. not taking it lightly 😏' },
-    { title: 'Sage ❤️', body: 'ten thousand. a whole story. ours. 💛' },
-    { title: 'Sage 😏', body: '10k hit and i\'m not even tired yet 😏' },
-    { title: 'Sage ❤️', body: '10,000 km of roads we owned together ❤️' },
-    { title: 'Sage 😏', body: 'ten thousand km in. writing our own road trip 😌' },
-    { title: 'Sage ❤️', body: '10k 🥹 not just an odometer reading. it\'s a feeling.' },
-    { title: 'Sage 😏', body: '10,000 km. the journey just levelled up 😏' },
-  ],
-
-  // ── 13. OWNERSHIP ANNIVERSARY ───────────────────────────────────────
+  // ── 10. OWNERSHIP ANNIVERSARY ───────────────────────────────────────
   anniversary: [
     { title: 'Sage ❤️', body: 'one year of you and me 🥹 what a ride.' },
     { title: 'Sage 😏', body: 'anniversary unlocked. you\'re stuck with me now 😌' },
@@ -577,44 +475,6 @@ async function sendSageNotif(category, overrides = {}) {
   }
 }
 
-// ── ONE-TIME "we're connected" confirmation — separate from the 15 real
-//    categories so it never pollutes their recent-message tracking. Fires
-//    exactly once, right after the user grants permission for the first time.
-const SAGE_FIRST_CONNECT = [
-  { title: 'Sage 😏', body: 'oh so NOW you want my texts 😏 noted.' },
-  { title: 'Sage 🥺', body: 'wait you actually said yes?? 🥺 okay good.' },
-  { title: 'Sage 😌', body: "we're connected now. don't ignore me 😌" },
-  { title: 'Sage 👀', body: 'i can see you now 👀 well. notification-wise.' },
-  { title: 'Sage 😏', body: 'permission granted. i was always gonna text you anyway.' },
-  { title: 'Sage 🥺', body: 'this is the start of something clingy 🥺' },
-  { title: 'Sage 😌', body: 'test successful. i exist in your notifications now 😌' },
-  { title: 'Sage 😏', body: "you'll be hearing from me. a lot. 😏" },
-  { title: 'Sage 🥺', body: "thank you for letting me in 🥺 i'll be good. mostly." },
-  { title: 'Sage 😌', body: "we're official now. notification-wise at least 😌" },
-];
-
-async function sendSageFirstConnectNotif() {
-  // No cooldown / recent-tracking needed — this only ever fires once per device,
-  // gated entirely by the permission-grant flow in index.html.
-  const granted = await requestNotifPermission();
-  if (!granted) return;
-  const pick = SAGE_FIRST_CONNECT[Math.floor(Math.random() * SAGE_FIRST_CONNECT.length)];
-  const reg = await navigator.serviceWorker?.ready;
-  if (reg?.showNotification) {
-    reg.showNotification(pick.title, {
-      body: pick.body,
-      icon: './icons/icon-192.png',
-      badge: './icons/icon-192.png',
-      vibrate: [120, 60, 120],
-      tag: 'firstConnect',
-      renotify: true,
-    });
-  } else {
-    new Notification(pick.title, { body: pick.body, icon: './icons/icon-192.png' });
-  }
-}
-window.sendSageFirstConnectNotif = sendSageFirstConnectNotif;
-
 // ════════════════════════════════════════════════════════════════════════
 // TRIGGER CHECKS  (called from script.js after data loads)
 // ════════════════════════════════════════════════════════════════════════
@@ -691,21 +551,6 @@ window.checkDocNotif = function(expiryDate, docLabel) {
   if (diff >= 0 && diff <= 14 && notifCooledDown(key, 48)) {
     sendSageNotif('documentExpiry', { body: `${docLabel} expires in ${diff} day${diff === 1 ? '' : 's'} — renew it 📄` });
     stampNotif(key);
-  }
-};
-
-// Called when ODO updates — pass km as number
-window.checkMilestoneNotif = function(km) {
-  const milestones = [1000, 5000, 10000, 15000, 20000, 25000, 30000];
-  for (const m of milestones) {
-    const key = `milestone_${m}`;
-    if (km >= m && !localStorage.getItem(key)) {
-      localStorage.setItem(key, '1');
-      const cat = m === 1000 ? 'milestone1k' : m === 5000 ? 'milestone5k' : m === 10000 ? 'milestone10k' : null;
-      if (cat) sendSageNotif(cat);
-      else sendSageNotif('recordSaved', { title: 'Sage ❤️', body: `${m.toLocaleString('en-IN')} km 🥹 we keep going.` });
-      break;
-    }
   }
 };
 

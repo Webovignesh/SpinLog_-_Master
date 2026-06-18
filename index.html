@@ -733,11 +733,8 @@
           localStorage.setItem(BANNER_DISMISSED_KEY, '1');
 
           if (window.requestNotifPermission) {
-            const granted = await window.requestNotifPermission();
-            if (granted && window.sendSageFirstConnectNotif) {
-              setTimeout(() => window.sendSageFirstConnectNotif(), 700);
-            }
-            // If denied: do nothing. No retry, no nagging.
+            await window.requestNotifPermission();
+            // Permission granted or denied — no first-connect notification needed.
           }
         };
 

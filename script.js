@@ -1757,7 +1757,14 @@ window._showImagePreview = function(url) {
 
     // ── Sage notification triggers ──
     if (window.checkServiceNotif)  window.checkServiceNotif(maxOdo, latest.next_due || null);
-    if (window.checkMilestoneNotif) window.checkMilestoneNotif(maxOdo);
+
+    // Sync next service date to service worker for background notifications
+    if (latest.next_due && navigator.serviceWorker && navigator.serviceWorker.controller) {
+      navigator.serviceWorker.controller.postMessage({
+        type: 'SPINLOG_SYNC_NOTIF_DATA',
+        payload: { nextServiceDate: latest.next_due, lastAppOpen: Date.now() }
+      });
+    }
   }
 
   function getServiceTypeClass(type) {
@@ -2715,17 +2722,73 @@ async function updatePartPaymentStatus() {
 
     // ── Sage notification system boot ──
     if (window.checkReEngagementNotif) window.checkReEngagementNotif();
-    if (window.checkAnniversaryNotif) window.checkAnniversaryNotif('2024-06-27');
+    if (window.checkAnniversaryNotif) window.checkAnniversaryNotif('2025-06-27');
     document.querySelectorAll('.home-cover-card .status[data-due]').forEach(el => {
       const label = el.closest('.home-stat-card')?.querySelector('.home-stat-label')?.textContent?.trim() || 'Cover';
       if (window.checkInsuranceNotif) window.checkInsuranceNotif(el.getAttribute('data-due'));
       if (window.checkDocNotif) window.checkDocNotif(el.getAttribute('data-due'), label);
     });
 
+    // ── Sync notification data to service worker for background checks ──
+    syncNotifDataToSW();
+
+    // ── Register periodic background sync for Sage notifications ──
+    registerPeriodicSync();
+
     // Load only service records on startup because Home needs ODO / last service / next service.
     spinlogLazyState.serviceLoaded = true;
     loadServiceEntries();
   }
+
+  // ── Sync notification-relevant data to service worker for background checks ──
+  function syncNotifDataToSW() {
+    if (!navigator.serviceWorker || !navigator.serviceWorker.controller) return;
+    // Gather insurance expiry dates from the cover cards
+    const coverCards = document.querySelectorAll('.home-cover-card .status[data-due]');
+    let earliestInsurance = null;
+    coverCards.forEach(el => {
+      const due = el.getAttribute('data-due');
+      if (due && (!earliestInsurance || due < earliestInsurance)) earliestInsurance = due;
+    });
+
+    // EMI next due date (3rd of each month, starting Aug 2025)
+    const emiStart = new Date(2025, 7, 3); // Aug 3, 2025
+    const now = new Date();
+    let nextEMI = new Date(now.getFullYear(), now.getMonth(), 3);
+    if (nextEMI <= now) nextEMI.setMonth(nextEMI.getMonth() + 1);
+    if (nextEMI < emiStart) nextEMI = emiStart;
+
+    const payload = {
+      insuranceExpiry: earliestInsurance || null,
+      nextEMIDate: nextEMI.toISOString(),
+      nextServiceDate: null, // Will be updated after service records load
+      lastAppOpen: Date.now(),
+    };
+
+    navigator.serviceWorker.controller.postMessage({
+      type: 'SPINLOG_SYNC_NOTIF_DATA',
+      payload
+    });
+  }
+
+  // ── Register periodic background sync ──
+  async function registerPeriodicSync() {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      if ('periodicSync' in reg) {
+        const status = await navigator.permissions.query({ name: 'periodic-background-sync' });
+        if (status.state === 'granted') {
+          await reg.periodicSync.register('spinlog-sage-notifs', {
+            minInterval: 12 * 60 * 60 * 1000, // 12 hours
+          });
+        }
+      }
+    } catch (e) {
+      // Periodic sync not supported — fallback is SW activation check
+      console.log('[SpinLog] Periodic sync not available, using activation fallback');
+    }
+  }
+
   initApp();
 });
 
@@ -2860,12 +2923,13 @@ async function updatePartPaymentStatus() {
   }
 
   function makeLongPress(el, onTap, onLong, ms = 650) {
-    let timer = null, fired = false;
-    const cancel = () => clearTimeout(timer);
-    el.addEventListener('pointerdown', () => { fired = false; timer = setTimeout(() => { fired = true; onLong(); }, ms); });
+    let timer = null, fired = false, startX = 0, startY = 0;
+    const MOVE_THRESHOLD = 10;
+    const cancel = () => { clearTimeout(timer); timer = null; };
+    el.addEventListener('pointerdown', (e) => { fired = false; startX = e.clientX; startY = e.clientY; timer = setTimeout(() => { fired = true; onLong(); }, ms); });
     el.addEventListener('pointerup',   () => { cancel(); if (!fired) onTap(); });
     el.addEventListener('pointerleave', cancel);
-    el.addEventListener('pointermove',  cancel);
+    el.addEventListener('pointermove',  (e) => { if (timer && (Math.abs(e.clientX - startX) > MOVE_THRESHOLD || Math.abs(e.clientY - startY) > MOVE_THRESHOLD)) cancel(); });
   }
 
   window.setupParkFeature = function() {
@@ -2901,12 +2965,13 @@ window.setupCoverDateEditing = function() {
   const closeModal = () => { modal?.classList.remove('sl-modal--open'); modal?.setAttribute('aria-hidden', 'true'); };
 
   function makeLongPressCard(el, onLong, ms = 650) {
-    let timer = null, fired = false;
-    const cancel = () => clearTimeout(timer);
-    el.addEventListener('pointerdown', () => { fired = false; timer = setTimeout(() => { fired = true; onLong(); }, ms); });
+    let timer = null, fired = false, startX = 0, startY = 0;
+    const MOVE_THRESHOLD = 10;
+    const cancel = () => { clearTimeout(timer); timer = null; };
+    el.addEventListener('pointerdown', (e) => { fired = false; startX = e.clientX; startY = e.clientY; timer = setTimeout(() => { fired = true; onLong(); }, ms); });
     el.addEventListener('pointerup',   cancel);
     el.addEventListener('pointerleave', cancel);
-    el.addEventListener('pointermove',  cancel);
+    el.addEventListener('pointermove',  (e) => { if (timer && (Math.abs(e.clientX - startX) > MOVE_THRESHOLD || Math.abs(e.clientY - startY) > MOVE_THRESHOLD)) cancel(); });
   }
 
   document.querySelectorAll('.home-cover-card').forEach(card => {

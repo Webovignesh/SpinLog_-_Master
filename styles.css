@@ -12554,7 +12554,7 @@ section {
   cursor: pointer;
   user-select: none;
   -webkit-user-select: none;
-  touch-action: none;
+  touch-action: pan-y;
   background:
     radial-gradient(circle at 80% 20%, rgba(251,105,0,0.18), transparent 55%),
     linear-gradient(145deg, rgba(251,105,0,0.09), #151515 70%);
@@ -12590,7 +12590,7 @@ section {
   cursor: pointer;
   user-select: none;
   -webkit-user-select: none;
-  touch-action: none;
+  touch-action: pan-y;
   transition: transform 0.12s;
 }
 .home-cover-card:active { transform: scale(0.97); }
