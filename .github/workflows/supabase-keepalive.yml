@@ -2,14 +2,17 @@ name: Supabase Keep Alive
 
 on:
   schedule:
-    - cron: '0 3 */3 * *'
+    # Daily (not every-3-days). Supabase docs: "a few user requests to the
+    # database each day" is needed — ~2 queries/week is NOT enough.
+    # 03:17 UTC (odd minute) avoids top-of-hour Actions queue delays.
+    - cron: '17 3 * * *'
   workflow_dispatch:
 
 jobs:
   ping-supabase:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping SpinLog Supabase database
+      - name: Ping SpinLog Supabase database (real Postgres queries)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
@@ -18,7 +21,45 @@ jobs:
             echo "Missing SUPABASE_URL or SUPABASE_ANON_KEY repository secret."
             exit 1
           fi
-          curl --fail --silent --show-error \
-            "$SUPABASE_URL/rest/v1/maintenance_records?select=id&limit=1" \
-            -H "apikey: $SUPABASE_ANON_KEY" \
-            -H "Authorization: Bearer $SUPABASE_ANON_KEY"
+
+          # Hit every real table (same ones the app uses) with a real
+          # PostgREST SELECT + Prefer: count=exact so Postgres actually
+          # executes a query (incl. a COUNT plan). Do NOT ping
+          # /auth/v1/health — it never touches Postgres and does not
+          # reset the 7-day pause timer.
+          TABLES="maintenance_records vehicle_documents media_files emi_record_table"
+          touched=0
+          failed=0
+
+          for table in $TABLES; do
+            code=$(curl --silent --output /tmp/resp.txt --write-out "%{http_code}" \
+              "$SUPABASE_URL/rest/v1/$table?select=id&limit=1" \
+              -H "apikey: $SUPABASE_ANON_KEY" \
+              -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+              -H "Prefer: count=exact") || code="000"
+            body=$(head -c 200 /tmp/resp.txt 2>/dev/null || true)
+            echo "$table -> HTTP $code body: $body"
+
+            case "$code" in
+              200|206)
+                echo "  OK: query executed on $table."
+                touched=$((touched+1))
+                ;;
+              401|403|404)
+                # SQL still executed before RLS/policy or routing rejected it,
+                # so it still counts as DB activity — warn but don't fail.
+                echo "  NOTICE: $table returned $code (RLS/empty/route) — query still hit Postgres."
+                touched=$((touched+1))
+                ;;
+              *)
+                echo "  ERROR: $table returned $code — no DB activity proven."
+                failed=$((failed+1))
+                ;;
+            esac
+          done
+
+          echo "Tables touched: $touched, failed: $failed"
+          if [ "$touched" -eq 0 ]; then
+            echo "All pings failed — Supabase will still pause. Failing job so it alerts."
+            exit 1
+          fi
