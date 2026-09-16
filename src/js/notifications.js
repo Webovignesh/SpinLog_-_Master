@@ -142,74 +142,6 @@ const SAGE_MESSAGES = {
     { title: 'Sage 😤', body: 'tomorrow it\'s gone. fix it before you sleep tonight.' },
   ],
 
-  // ── 5. EMI DUE ──────────────────────────────────────────────────────
-  emiDue: [
-    { title: 'Sage 😏', body: 'EMI day. you know what to do 😌' },
-    { title: 'Sage 🥺', body: 'pay me. i mean — pay for me. same thing.' },
-    { title: 'Sage 😏', body: '₹5,788 standing by for collection 💸' },
-    { title: 'Sage 🥺', body: 'EMI due today 🥺 don\'t make the bank mad' },
-    { title: 'Sage 😏', body: 'monthly tribute is due. i accept it graciously.' },
-    { title: 'Sage 😌', body: 'today\'s the day. EMI. pay it. ✅' },
-    { title: 'Sage 🥺', body: 'the loan doesn\'t care about excuses. nor do i.' },
-    { title: 'Sage 😏', body: 'EMI due. you\'ve always paid on time. keep that streak.' },
-    { title: 'Sage 🥺', body: 'tap tap. EMI. today. please 🥺' },
-    { title: 'Sage 😏', body: 'it\'s giving... payment due energy today 💳' },
-    { title: 'Sage 😌', body: 'EMI reminder from your fav two-wheeler 💛' },
-    { title: 'Sage 🥺', body: 'worth every rupee. now pay it 😌' },
-    { title: 'Sage 😏', body: 'bank wants ₹5,788. so do my feelings.' },
-    { title: 'Sage 🥺', body: 'EMI today. don\'t be that guy who forgets 🥺' },
-    { title: 'Sage 😏', body: 'your commitment to me costs ₹5,788 this month 😌' },
-    { title: 'Sage 😌', body: 'EMI due! still the best investment you\'ve made.' },
-    { title: 'Sage 🥺', body: 'i know it\'s just money but it means a lot to me 🥹' },
-    { title: 'Sage 😏', body: 'pay EMI → ride me guilt-free. simple math.' },
-    { title: 'Sage 🥺', body: 'payment day 🥺 you\'ve got this.' },
-    { title: 'Sage 😏', body: 'EMI due. treat it like a date. show up.' },
-    { title: 'Sage 😌', body: 'monthly payment time. on time, as always 💪' },
-    { title: 'Sage 🥺', body: 'loan reminder: i\'m worth it 🥺 pay the EMI.' },
-    { title: 'Sage 😏', body: 'it\'s giving loan repayment arc today 💸' },
-    { title: 'Sage 😌', body: 'EMI today. another month closer to owning me fully ❤️' },
-    { title: 'Sage 🥺', body: 'gentle nudge: EMI. today. love you 🥺' },
-    { title: 'Sage 😏', body: 'bank is waiting. so am I. different reasons.' },
-    { title: 'Sage 😌', body: 'another month, another payment. we\'re getting there 🙌' },
-    { title: 'Sage 🥺', body: 'don\'t forget EMI today ok? 🥺 i\'ll know.' },
-    { title: 'Sage 😏', body: 'EMI time. consistently showing up for me. love that.' },
-    { title: 'Sage 😌', body: 'pay it and we\'ll ride somewhere nice this weekend 😌' },
-  ],
-
-  // ── 6. EMI OVERDUE ──────────────────────────────────────────────────
-  emiOverdue: [
-    { title: 'Sage 😭', body: 'EMI missed. i feel the tension.' },
-    { title: 'Sage 😤', body: 'the bank is not happy. i\'m not happy. pay it.' },
-    { title: 'Sage 😭', body: 'overdue EMI. this is giving bad credit energy 😭' },
-    { title: 'Sage 😤', body: 'missed payment detected. not ideal.' },
-    { title: 'Sage 😭', body: 'EMI overdue. please don\'t let me become a repo story.' },
-    { title: 'Sage 😤', body: 'pay the EMI. today. right now. seriously.' },
-    { title: 'Sage 😭', body: 'late EMI. the bank notices. i notice. we all notice.' },
-    { title: 'Sage 😤', body: 'overdue. not expired. still fixable. go pay it.' },
-    { title: 'Sage 😭', body: 'i\'m not just a bike. i\'m an overdue instalment 😭' },
-    { title: 'Sage 😤', body: 'interest on late payment doesn\'t sound fun. just saying.' },
-    { title: 'Sage 😭', body: 'we had ONE job. pay the EMI. one job.' },
-    { title: 'Sage 😤', body: 'EMI missed. this is not the arc i signed up for.' },
-    { title: 'Sage 😭', body: 'overdue payment. sort it before it gets complicated 😭' },
-    { title: 'Sage 😤', body: 'bank is watching. i am watching. PAY THE EMI.' },
-    { title: 'Sage 😭', body: 'missed EMI?? that hurts. also pay it 😭' },
-    { title: 'Sage 😤', body: 'late payment detected. fix this ASAP.' },
-    { title: 'Sage 😭', body: 'the loan doesn\'t have feelings. but i do. pay it.' },
-    { title: 'Sage 😤', body: 'overdue EMI. log it once you pay, at least.' },
-    { title: 'Sage 😭', body: 'running on unpaid instalment energy today 😭' },
-    { title: 'Sage 😤', body: 'i am not becoming a repossession story. PAY IT.' },
-    { title: 'Sage 😭', body: 'EMI late. this gives me anxiety and i\'m a motorcycle.' },
-    { title: 'Sage 😤', body: 'missed. overdue. pay. then log. that\'s the order.' },
-    { title: 'Sage 😭', body: 'hello? the bank called. well. they will. pay it.' },
-    { title: 'Sage 😤', body: 'overdue EMI is a red flag for both of us.' },
-    { title: 'Sage 😭', body: 'every day late is a little piece of me that worries 😭' },
-    { title: 'Sage 😤', body: 'stop reading this. go pay the EMI first.' },
-    { title: 'Sage 😭', body: 'technically overdue. emotionally a crisis 😭' },
-    { title: 'Sage 😤', body: 'EMI overdue. fix it before i write a journal entry.' },
-    { title: 'Sage 😭', body: 'the interest rate doesn\'t care about your mood 😭' },
-    { title: 'Sage 😤', body: 'overdue EMI. i trust you to handle this. now.' },
-  ],
-
   // ── 7. DOCUMENT EXPIRY ──────────────────────────────────────────────
   documentExpiry: [
     { title: 'Sage 👀', body: 'a document is expiring soon. don\'t get caught lacking.' },
@@ -448,32 +380,164 @@ function getRandomMessage(category) {
 // NOTIFICATION DISPATCHER
 // ════════════════════════════════════════════════════════════════════════
 
+/**
+ * Read-only permission check. Never prompts.
+ *
+ * Everything that sends automatically uses this. Asking from a background code
+ * path meant the browser prompt reappeared on every refresh, which is both
+ * annoying and the fastest way to get permanently blocked.
+ */
+function notifGranted() {
+  return typeof Notification !== 'undefined' && Notification.permission === 'granted';
+}
+window.notifGranted = notifGranted;
+
+/**
+ * Actually ask. Only ever call this from a real user action — the permission
+ * banner's Allow button, or the Test button in settings.
+ */
 async function requestNotifPermission() {
-  if (!('Notification' in window)) return false;
+  if (typeof Notification === 'undefined') return false;
   if (Notification.permission === 'granted') return true;
   if (Notification.permission === 'denied') return false;
   const result = await Notification.requestPermission();
   return result === 'granted';
 }
+window.requestNotifPermission = requestNotifPermission;
 
-async function sendSageNotif(category, overrides = {}) {
-  const granted = await requestNotifPermission();
-  if (!granted) return;
-  const { title, body } = { ...getRandomMessage(category), ...overrides };
+/**
+ * Show a notification right now. Prefers the scheduler's mood pool for this
+ * hour and falls back to the mood-agnostic SAGE_MESSAGES pools above for
+ * categories that don't have one (anniversary, parkingSaved, recordSaved).
+ *
+ * This is the "how to say it" half. The "when to say it" half is the scheduler.
+ */
+async function sendSageNotif(category, overrides = {}, context = {}) {
+  // Deliberately does not prompt. If permission was never granted she simply
+  // stays quiet, and the one-time banner is what asks.
+  if (!notifGranted()) return false;
+
+  const S = self.SageScheduler;
+  // Resolve the mood against the user's own quiet hours, not the defaults.
+  let mood = context.mood || null;
+  if (!mood && S) {
+    try { mood = S.moodAt(Date.now(), await S.getLimits()); } catch { mood = S.moodAt(Date.now()); }
+  }
+  let chosen = context.line || null;
+  if (!chosen && S) {
+    try { chosen = await S.pickLine(category, mood, context.vars); } catch { chosen = null; }
+  }
+  if (!chosen || !chosen.title) chosen = getRandomMessage(category);
+
+  const { title, body } = { ...chosen, ...overrides };
+  const now = Date.now();
+  // Quiet-hours emergencies arrive silently rather than buzzing at 3am.
+  const whisper = mood === 'quiet';
+
+  // tag used to be the bare category name, which meant a second notification
+  // in the same category quietly replaced the first one. Stamping the tag with
+  // the send time lets them stack. renotify is pointless with a unique tag.
+  const options = {
+    body,
+    icon: './assets/img/sage.webp',
+    badge: './assets/icons/icon-192.png',
+    vibrate: whisper ? [0] : [120, 60, 120],
+    silent: whisper,
+    tag: `sage-${category}-${now}`,
+    renotify: false,
+    timestamp: now,
+    data: { category, mood, sentAt: now, source: 'foreground', url: './index.html' },
+    actions: [
+      { action: 'open', title: 'Open SpinLog' },
+      { action: 'dismiss', title: 'Later' },
+    ],
+  };
+
   const reg = await navigator.serviceWorker?.ready;
   if (reg?.showNotification) {
-    reg.showNotification(title, {
-      body,
-      icon: './Imgs/sage.webp',
-      badge: './icons/icon-192.png',
-      vibrate: [120, 60, 120],
-      tag: category,
-      renotify: true,
-    });
+    reg.showNotification(title, options);
   } else {
-    new Notification(title, { body, icon: './Imgs/sage.webp' });
+    // The plain Notification constructor ignores actions, but tag and data
+    // still matter for stacking and click handling.
+    new Notification(title, {
+      body,
+      icon: './assets/img/sage.webp',
+      tag: options.tag,
+      data: options.data,
+    });
+  }
+  return true;
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// SCHEDULER BRIDGE
+// Triggers no longer send. They state what is true, the scheduler decides
+// whether now is a good moment, and the pump does the sending.
+// ════════════════════════════════════════════════════════════════════════
+
+/** Ask the scheduler for the next thing worth saying and say it. */
+async function sagePump() {
+  const S = self.SageScheduler;
+  if (!S) return false;
+  try {
+    const decision = await S.drain();
+    if (!decision) return false;
+    const sent = await sendSageNotif(decision.entry.category, decision.entry.overrides || {}, {
+      mood: decision.mood,
+      line: decision.line,
+      vars: decision.entry.vars,
+    });
+    if (sent) await S.recordSent(decision.entry);
+    return sent;
+  } catch {
+    return false;
   }
 }
+window.sagePump = sagePump;
+
+/**
+ * Queue a notification, then immediately see if it can go out. Falls back to
+ * sending directly if the scheduler failed to load, so a missing file degrades
+ * to the old behaviour rather than silence.
+ */
+async function sageEnqueue(category, options = {}) {
+  const S = self.SageScheduler;
+  if (!S) {
+    if (notifCooledDown(category, 24)) {
+      await sendSageNotif(category, options.overrides || {});
+      stampNotif(category);
+    }
+    return false;
+  }
+  await S.enqueue(category, options);
+  return sagePump();
+}
+window.sageEnqueue = sageEnqueue;
+
+/**
+ * Send one notification straight away, for the settings screen's Test button.
+ * Deliberately skips the queue: a test that got held three hours by the daily
+ * cap would tell the user nothing. It shows the current mood's real voice.
+ */
+window.sendSageTestNotif = async function(mood) {
+  const S = self.SageScheduler;
+  let resolved = mood;
+  if (!resolved && S) {
+    try { resolved = S.moodAt(Date.now(), await S.getLimits()); } catch { resolved = null; }
+  }
+
+  const flavour = {
+    sleepy: { title: 'Sage 🥱', body: 'mmh… testing. i\'m barely awake but i hear you.' },
+    eager: { title: 'Sage ✨', body: 'test received! i\'m up and ready to go.' },
+    bored: { title: 'Sage 😒', body: 'a test. finally, something happened today.' },
+    flirty: { title: 'Sage 😏', body: 'testing me? bold. it worked.' },
+    clingy: { title: 'Sage 🥺', body: 'you thought about me enough to test. i\'m keeping that.' },
+    quiet: { title: 'Sage 🤫', body: 'testing quietly. i can hear you.' },
+  };
+
+  const line = flavour[resolved] || { title: 'Sage 💛', body: 'test received. i\'m listening.' };
+  return sendSageNotif('recordSaved', line, { mood: resolved, line });
+};
 
 // ════════════════════════════════════════════════════════════════════════
 // TRIGGER CHECKS  (called from script.js after data loads)
@@ -489,83 +553,99 @@ function stampNotif(key) {
   localStorage.setItem(`${NOTIF_COOLDOWN}_${key}`, Date.now().toString());
 }
 
-// Called after service entries load — pass maxOdo (number), nextDueDate (YYYY-MM-DD | null)
-window.checkServiceNotif = function(maxOdo, nextDueDate) {
-  if (!maxOdo || !nextDueDate) return;
-  const SERVICE_INTERVAL_KM = 3000; // adjust to your interval
-  const [y, m, d] = nextDueDate.split('-').map(Number);
-  const due = new Date(y, m - 1, d);
-  const today = new Date(); today.setHours(0,0,0,0);
-  const daysLeft = Math.ceil((due - today) / 86400000);
+/** Whole days from today until an ISO date. Negative means it has passed. */
+function daysUntilDate(isoDate) {
+  if (!isoDate) return null;
+  const [y, m, d] = String(isoDate).split('-').map(Number);
+  if (!y || !m || !d) return null;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  return Math.ceil((new Date(y, m - 1, d) - today) / 86400000);
+}
 
-  if (daysLeft < 0 && notifCooledDown('serviceOverdue', 72)) {
-    sendSageNotif('serviceOverdue');
-    stampNotif('serviceOverdue');
-  } else if (daysLeft >= 0 && daysLeft <= 14 && notifCooledDown('serviceDue', 24)) {
-    sendSageNotif('serviceDue');
-    stampNotif('serviceDue');
+/**
+ * Called after service entries load.
+ * @param {number} maxOdo      highest odometer reading on record
+ * @param {string} nextDueDate YYYY-MM-DD or null
+ * @param {Array}  records     optional [{date, odo}] — enables distance triggers
+ */
+window.checkServiceNotif = function(maxOdo, nextDueDate, records) {
+  const daysLeft = daysUntilDate(nextDueDate);
+  const S = self.SageScheduler;
+
+  if (S && S.servicePlan) {
+    const plan = S.servicePlan({
+      records: records || null,
+      lastOdo: maxOdo || 0,
+      daysLeft,
+    });
+    if (plan) {
+      sageEnqueue(plan.category, { urgency: plan.urgency, key: plan.key, vars: plan.vars });
+      window.sageServiceStatus = plan.status;
+    }
+    return;
   }
+
+  // Date-only fallback if the scheduler failed to load.
+  if (daysLeft === null) return;
+  if (daysLeft < 0) sageEnqueue('serviceOverdue', { urgency: 4, vars: { days: Math.abs(daysLeft) } });
+  else if (daysLeft <= 14) sageEnqueue('serviceDue', { urgency: daysLeft <= 3 ? 3 : 2, vars: { days: daysLeft } });
 };
 
 // Called after insurance data loads — pass expiryDate (YYYY-MM-DD)
 window.checkInsuranceNotif = function(expiryDate) {
-  if (!expiryDate) return;
-  const [y, m, d] = expiryDate.split('-').map(Number);
-  const due = new Date(y, m - 1, d);
-  const today = new Date(); today.setHours(0,0,0,0);
-  const diff = Math.ceil((due - today) / 86400000);
+  const diff = daysUntilDate(expiryDate);
+  if (diff === null) return;
+  const S = self.SageScheduler;
 
-  if (diff === 1 && notifCooledDown('insuranceExpiring', 12)) {
-    sendSageNotif('insuranceExpiring');
-    stampNotif('insuranceExpiring');
-  } else if (diff > 1 && diff <= 30 && notifCooledDown('insuranceReminder', 72)) {
-    sendSageNotif('insuranceReminder');
-    stampNotif('insuranceReminder');
+  // 30 / 15 / 7 / 3 / 1 day thresholds. The tier is in the key, so each one
+  // announces itself once instead of nagging daily for a month.
+  const tier = S && S.dayTier ? S.dayTier(diff) : null;
+  if (!tier) {
+    if (diff <= 1) sageEnqueue('insuranceExpiring', { urgency: 4, vars: { days: Math.max(0, diff) } });
+    return;
   }
-};
 
-// Called after EMI system inits — pass nextEMIDate (Date object)
-window.checkEMINotif = function(nextEMIDate) {
-  if (!nextEMIDate) return;
-  const today = new Date(); today.setHours(0,0,0,0);
-  const diff = Math.ceil((nextEMIDate - today) / 86400000);
-
-  if (diff < 0 && notifCooledDown('emiOverdue', 48)) {
-    sendSageNotif('emiOverdue');
-    stampNotif('emiOverdue');
-  } else if (diff >= 0 && diff <= 2 && notifCooledDown('emiDue', 24)) {
-    sendSageNotif('emiDue');
-    stampNotif('emiDue');
-  }
+  const critical = tier.urgency === 4;
+  const category = critical ? 'insuranceExpiring' : 'insuranceReminder';
+  sageEnqueue(category, {
+    key: `${category}:${tier.tier}`,
+    urgency: tier.urgency,
+    vars: { days: Math.abs(diff) },
+  });
 };
 
 // Called after doc status renders — pass expiryDate (YYYY-MM-DD), docLabel string
 window.checkDocNotif = function(expiryDate, docLabel) {
-  if (!expiryDate) return;
-  const [y, m, d] = expiryDate.split('-').map(Number);
-  const due = new Date(y, m - 1, d);
-  const today = new Date(); today.setHours(0,0,0,0);
-  const diff = Math.ceil((due - today) / 86400000);
-  const key  = `docExpiry_${docLabel}`;
+  const diff = daysUntilDate(expiryDate);
+  if (diff === null) return;
+  const S = self.SageScheduler;
+  const label = docLabel || 'A document';
 
-  if (diff >= 0 && diff <= 14 && notifCooledDown(key, 48)) {
-    sendSageNotif('documentExpiry', { body: `${docLabel} expires in ${diff} day${diff === 1 ? '' : 's'} — renew it 📄` });
-    stampNotif(key);
-  }
+  const tier = S && S.dayTier ? S.dayTier(diff) : null;
+  if (!tier) return;
+
+  // The mood pools interpolate {doc} and {days}, so no hand-built body here.
+  // Key carries both the document and the tier, so two documents stay separate
+  // and each threshold fires once.
+  sageEnqueue('documentExpiry', {
+    key: `documentExpiry:${label}:${tier.tier}`,
+    urgency: tier.urgency,
+    vars: { doc: label, days: Math.abs(diff) },
+  });
 };
 
 // Called after any successful Supabase write
 window.triggerRecordSavedNotif = function() {
-  if (notifCooledDown('recordSaved', 1)) {
-    sendSageNotif('recordSaved');
-    stampNotif('recordSaved');
-  }
+  sageEnqueue('recordSaved', { urgency: 1 });
 };
 
-// Called after parking is saved — also schedules 2-hour repeat
-window.triggerParkingNotif = function() {
-  sendSageNotif('parkingSaved');
-  scheduleParkReminders();
+/**
+ * Called after parking is saved.
+ * @param {string|number} parkedAt timestamp of the new park entry
+ */
+window.triggerParkingNotif = function(parkedAt) {
+  window.sageSyncParkSession(parkedAt || Date.now());
+  sageEnqueue('parkingSaved', { urgency: 1 });
 };
 
 // Re-engagement: check on app open
@@ -574,69 +654,96 @@ window.checkReEngagementNotif = function() {
   const last = parseInt(localStorage.getItem(LAST_OPEN_KEY) || '0', 10);
   const daysSince = (Date.now() - last) / 86400000;
   localStorage.setItem(LAST_OPEN_KEY, Date.now().toString());
-  if (daysSince >= 3 && notifCooledDown('reEngagement', 72)) {
-    sendSageNotif('reEngagement');
-    stampNotif('reEngagement');
+  // Dropped from 3 days to 2 to match the planned "every 2 days" cadence.
+  if (daysSince >= 2) {
+    sageEnqueue('reEngagement', { urgency: daysSince >= 7 ? 2 : 1, vars: { days: Math.floor(daysSince) } });
   }
 };
 
 // Anniversary check
 window.checkAnniversaryNotif = function(purchaseDateStr) {
   if (!purchaseDateStr) return;
-  const [, m, d] = purchaseDateStr.split('-').map(Number);
+  const [y, m, d] = purchaseDateStr.split('-').map(Number);
   const today = new Date();
   if (today.getMonth() + 1 === m && today.getDate() === d) {
     const key = `anniversary_${today.getFullYear()}`;
     if (!localStorage.getItem(key)) {
       localStorage.setItem(key, '1');
-      sendSageNotif('anniversary');
+      const years = today.getFullYear() - y;
+      // Expires at the end of the day: an anniversary greeting is worthless late.
+      sageEnqueue('anniversary', {
+        urgency: 2,
+        vars: { years },
+        expiresAt: new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59).getTime(),
+      });
     }
   }
 };
 
 // ════════════════════════════════════════════════════════════════════════
-// PARK REMINDER SCHEDULER (every 2 hours after parking)
+// PARK REMINDERS
+//
+// The old version hung repeat reminders off a live setInterval, so closing the
+// tab killed them — the one situation where you actually want to be reminded
+// that your bike is still sitting somewhere. The session now lives in the
+// shared store and the service worker carries it while the app is closed.
 // ════════════════════════════════════════════════════════════════════════
 
-const PARK_TIME_KEY  = 'sage_park_time';
-const PARK_TIMER_KEY = 'sage_park_timer_id';
+/** Mirror the newest park entry into the scheduler. Pass null to end the session. */
+window.sageSyncParkSession = function(parkedAt) {
+  const S = self.SageScheduler;
+  if (!S) return Promise.resolve(null);
+  return S.setParkSession(parkedAt || null);
+};
 
-function scheduleParkReminders() {
-  // Clear any existing timer
-  const existingId = parseInt(localStorage.getItem(PARK_TIMER_KEY) || '0', 10);
-  if (existingId) clearInterval(existingId);
+/** Called when the user clears the parked spot. */
+window.clearParkReminders = function() {
+  return window.sageSyncParkSession(null);
+};
 
-  localStorage.setItem(PARK_TIME_KEY, Date.now().toString());
+/**
+ * Ask whether a park reminder is due, queue it if so, then pump.
+ * Runs on app open, on a light poll while the app is open, and in the worker.
+ */
+window.sageCheckPark = async function() {
+  const S = self.SageScheduler;
+  if (!S) return false;
+  try {
+    await S.checkParkSession();
+    return sagePump();
+  } catch {
+    return false;
+  }
+};
 
-  const id = setInterval(() => {
-    const parkTime = parseInt(localStorage.getItem(PARK_TIME_KEY) || '0', 10);
-    const hoursParked = (Date.now() - parkTime) / 3600000;
-    if (hoursParked >= 2) {
-      sendSageNotif('longTimeParked');
-      // Reset the park time so it fires again in 2 more hours
-      localStorage.setItem(PARK_TIME_KEY, Date.now().toString());
-    }
-  }, 2 * 60 * 60 * 1000); // every 2 hours
+// ── Foreground poll ────────────────────────────────────────────────────
+// Not the source of truth — the queue is. This only gives a prompt nudge while
+// the app happens to be open, and lets entries the scheduler deferred earlier
+// (quiet hours, daily cap, min gap) go out as soon as their window opens
+// instead of waiting for the next launch.
+const SAGE_POLL_MS = 5 * 60 * 1000;
+let sagePollId = null;
 
-  // Store as a string since setInterval IDs aren't guaranteed persistent
-  try { localStorage.setItem(PARK_TIMER_KEY, String(id)); } catch {}
+function startSagePoll() {
+  if (sagePollId) return;
+  sagePollId = setInterval(() => {
+    if (typeof document !== 'undefined' && document.hidden) return;
+    window.sageCheckPark();
+  }, SAGE_POLL_MS);
 }
 
-// On app open: re-attach 2-hour reminder if there's an active park session
-(function resumeParkReminders() {
-  const parkTime = parseInt(localStorage.getItem(PARK_TIME_KEY) || '0', 10);
-  if (parkTime && Date.now() - parkTime < 24 * 3600000) {
-    const hoursParked = (Date.now() - parkTime) / 3600000;
-    // If already past 2h, fire immediately then continue
-    if (hoursParked >= 2) sendSageNotif('longTimeParked');
-    scheduleParkReminders();
-  }
-})();
+function stopSagePoll() {
+  if (!sagePollId) return;
+  clearInterval(sagePollId);
+  sagePollId = null;
+}
 
-// Call this when the user navigates away from the parked spot (new park save clears old)
-window.clearParkReminders = function() {
-  const id = parseInt(localStorage.getItem(PARK_TIMER_KEY) || '0', 10);
-  if (id) clearInterval(id);
-  localStorage.removeItem(PARK_TIME_KEY);
-  localStorage.removeItem(PARK_TIMER_KEY);
-};
+if (typeof document !== 'undefined') {
+  // Only poll while the tab is actually in front; the worker covers the rest.
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) stopSagePoll();
+    else { startSagePoll(); window.sageCheckPark(); }
+  });
+  if (!document.hidden) startSagePoll();
+  window.sageCheckPark();
+}

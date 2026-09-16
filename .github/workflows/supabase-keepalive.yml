@@ -27,7 +27,7 @@ jobs:
           # executes a query (incl. a COUNT plan). Do NOT ping
           # /auth/v1/health — it never touches Postgres and does not
           # reset the 7-day pause timer.
-          TABLES="maintenance_records vehicle_documents media_files emi_record_table"
+          TABLES="maintenance_records vehicle_documents media_files"
           touched=0
           failed=0
 

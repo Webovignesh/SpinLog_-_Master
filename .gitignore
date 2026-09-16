@@ -1,0 +1,58 @@
+# ── OS cruft ──────────────────────────────────────────────────────────
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# ── Editor / IDE ──────────────────────────────────────────────────────
+# .vscode/settings.json is intentionally tracked (shared workspace config).
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+
+# ── Local backups & archives ──────────────────────────────────────────
+# The restructure tooling and manual snapshots drop zips next to the repo,
+# but catch any that land inside it.
+Spinlog-BACKUP-*.zip
+*.bak
+*.orig
+*.rej
+
+# ── Unoptimised design sources ────────────────────────────────────────
+# assets/source/ holds originals that are never served: currently
+# "Bike bg.png" (1.9 MB), whose shipped derivative is assets/img/bike-bg.webp.
+# Deliberately NOT committed — adding 1.9 MB of dead weight to history would
+# need a history rewrite to undo. The files stay on disk locally.
+# See docs/AUDIT.md, finding PERF-1.
+assets/source/
+
+# ── Secrets ───────────────────────────────────────────────────────────
+# This app currently hardcodes its Supabase + Gemini keys in src/js
+# (see docs/AUDIT.md, finding SEC-1). If those move to a config file,
+# that file must land here.
+.env
+.env.*
+!.env.example
+config.local.js
+secrets.json
+
+# ── Node (only if tooling is ever added; there is no build step today) ─
+node_modules/
+npm-debug.log*
+yarn-error.log*
+package-lock.json.orig
+
+# ── Logs & scratch ────────────────────────────────────────────────────
+*.log
+/tmp/
+/.cache/

@@ -1,15 +1,15 @@
 @font-face {
   font-family: 'Blender Pro';
-  src: url('fonts/BlenderPro-Heavy.woff2') format('woff2'),
-       url('fonts/BlenderPro-Heavy.woff') format('woff');
+  src: url('../../assets/fonts/BlenderPro-Heavy.woff2') format('woff2'),
+       url('../../assets/fonts/BlenderPro-Heavy.woff') format('woff');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
 }
 @font-face {
   font-family: 'Blender Pro';
-  src: url('fonts/BlenderPro-Heavy.woff2') format('woff2'),
-       url('fonts/BlenderPro-Heavy.woff') format('woff');
+  src: url('../../assets/fonts/BlenderPro-Heavy.woff2') format('woff2'),
+       url('../../assets/fonts/BlenderPro-Heavy.woff') format('woff');
   font-weight: 700;
   font-style: normal;
   font-display: swap;
@@ -700,7 +700,6 @@ h3 {
 }
 
 
-
 /* Mobile Responsiveness */
 @media (max-width: 900px) {
   .bike-card { 
@@ -841,7 +840,6 @@ h3 {
   outline: none !important;
   box-shadow: none !important;
 }
-
 
 
 /* Custom Popup Styles */
@@ -1331,7 +1329,6 @@ h3 {
 }
 
 
-
 @media (max-width: 600px) {
   .service-table tr {
     background: #181818 !important;
@@ -1359,8 +1356,6 @@ video::-webkit-media-controls-panel {
   box-shadow: 0 0 0 3px #fb690055 !important;
 }
 
-
-/* EMI Section Styling (Enhanced UI + Mobile Responsive + Dotted Border + Dark Background) */
 
 /* Override upload-wrapper spacing to ensure consistent layout */
 .upload-wrapper {
@@ -1433,139 +1428,6 @@ body {
 
 /* Rest of the styles unchanged */
 
-.emi-management-section {
-  padding: 2rem;
-  background-color: #111;
-  border: 2px dotted #444;
-  border-radius: 10px;
-  margin-top: 20px;
-  color: #fff;
-}
-
-.emi-card-header h3,
-.emi-payment-section h4,
-.emi-upload-section h5 {
-  margin-bottom: 0.8rem;
-  font-weight: 600;
-  font-size: 1.2rem;
-  color: #fff;
-}
-
-.emi-loan-details-card {
-  background: #1e1e1e;
-  border-radius: 8px;
-  padding: 1rem;
-  box-shadow: 0 0 10px rgba(255, 255, 255, 0.05);
-  margin-bottom: 20px;
-  border: 1px dotted #888;
-}
-
-.emi-loan-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 1rem;
-}
-
-.emi-detail-item {
-  background: #222;
-  padding: 10px;
-  border-radius: 6px;
-  border: 1px dotted #555;
-}
-
-.emi-detail-label {
-  font-weight: 500;
-  color: #bbb;
-}
-
-.emi-detail-value {
-  display: block;
-  font-size: 1.1rem;
-  margin-top: 4px;
-  color: #fff;
-}
-
-.emi-tabs-container {
-  margin-top: 20px;
-}
-
-.emi-tab-headers {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-
-.emi-tab-btn {
-  flex: 1;
-  padding: 0.75rem;
-  background: #444;
-  border: 1px dotted #777;
-  cursor: pointer;
-  border-radius: 6px;
-  font-weight: 500;
-  color: #fff;
-  transition: background 0.3s;
-}
-
-.emi-tab-btn.active {
-  background: #fb6900;
-  color: white;
-}
-
-.emi-tab-content {
-  display: none;
-  background: #1c1c1c;
-  padding: 1rem;
-  border-radius: 8px;
-  border: 1px dotted #555;
-  box-shadow: 0 0 10px rgba(255, 255, 255, 0.03);
-  opacity: 0;
-  transition: opacity 0.4s ease-in-out;
-}
-
-.emi-tab-content.active {
-  display: block;
-  opacity: 1;
-}
-
-.emi-payment-details {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1rem;
-  margin-bottom: 1rem;
-}
-
-.emi-payment-info {
-  flex: 1 1 150px;
-  background: #2a2a2a;
-  padding: 0.75rem;
-  border-radius: 6px;
-  border: 1px dotted #666;
-}
-
-.emi-payment-label {
-  font-weight: 500;
-  color: #aaa;
-}
-
-.emi-payment-value {
-  display: block;
-  font-size: 1.1rem;
-  margin-top: 4px;
-  color: #fff;
-}
-
-.emi-input-section input[type="number"] {
-  width: 100%;
-  padding: 0.5rem;
-  font-size: 1rem;
-  border: 1px solid #999;
-  border-radius: 6px;
-  margin-bottom: 1rem;
-  background-color: #111;
-  color: #fff;
-}
 
 .upload-wrapper {
   margin-bottom: 1rem;
@@ -1581,28 +1443,6 @@ body {
   height: 100%;
 }
 
-.emi-confirm-btn {
-  background-color: #fb6900;
-  color: white;
-  border: none;
-  padding: 0.7rem 1.2rem;
-  border-radius: 6px;
-  cursor: pointer;
-  font-weight: 600;
-  transition: background-color 0.3s;
-}
-
-.emi-confirm-btn:hover {
-  background-color: #e25c00;
-}
-
-.emi-record-history {
-  border: 2px dotted #666;
-  background-color: #151515;
-}
-.emi-record-history .service-table th {
-  color: #ff8c00;
-}
 
 /* =========================================================
    SpinLog v1.6.6 | Fixed mobile UI + modern service form
@@ -11637,517 +11477,6 @@ section {
 
 
 /* =========================================================
-   SpinLog v1.6.42 | EMI page UI polish
-   - Modern unified EMI surface matching Service/Home styling
-   - Cleaner loan cards, tab pills, upload controls, and history table
-   - Responsive mobile layout with tighter spacing
-   ========================================================= */
-#emi.emi-management-section {
-  position: relative !important;
-  overflow: hidden !important;
-  margin-top: 8px !important;
-  padding: clamp(18px, 3vw, 34px) !important;
-  border: 1px solid rgba(251, 105, 0, 0.34) !important;
-  border-radius: 30px !important;
-  background:
-    radial-gradient(circle at 8% 0%, rgba(251, 105, 0, 0.20), transparent 34rem),
-    radial-gradient(circle at 92% 6%, rgba(255, 176, 0, 0.09), transparent 28rem),
-    linear-gradient(145deg, rgba(28, 28, 28, 0.98), rgba(6, 6, 6, 0.98)) !important;
-  box-shadow: 0 24px 58px rgba(0,0,0,0.48) !important;
-  color: #fff !important;
-}
-
-#emi.emi-management-section::before {
-  content: '';
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 5px;
-  background: linear-gradient(180deg, #fb6900, #ffb000, #fb6900);
-  opacity: 0.95;
-}
-
-#emi > * {
-  position: relative;
-  z-index: 1;
-}
-
-#emi .section-topline {
-  margin-bottom: 10px !important;
-}
-
-#emi-header {
-  color: var(--orange) !important;
-  text-transform: uppercase !important;
-  letter-spacing: 1px !important;
-  margin-bottom: 0 !important;
-}
-
-.emi-section-desc {
-  max-width: 760px;
-  margin: 4px 0 22px !important;
-  color: rgba(255,255,255,0.68);
-  font-size: 1.06rem;
-  line-height: 1.55;
-}
-
-#emi .emi-loan-details-card,
-#emi .emi-tabs-container,
-#emi .emi-history-table-wrap {
-  border: 1px solid rgba(251, 105, 0, 0.22) !important;
-  border-radius: 24px !important;
-  background:
-    radial-gradient(circle at 8% 0%, rgba(251, 105, 0, 0.14), transparent 22rem),
-    linear-gradient(145deg, rgba(22,22,22,0.94), rgba(8,8,8,0.94)) !important;
-  box-shadow: 0 18px 42px rgba(0,0,0,0.32) !important;
-}
-
-#emi .emi-loan-details-card {
-  padding: clamp(16px, 2.2vw, 24px) !important;
-  margin-bottom: 22px !important;
-}
-
-#emi .emi-card-header h3,
-#emi .emi-payment-section h4,
-#emi .emi-upload-section h5,
-#emi .record-history-title {
-  color: var(--orange) !important;
-  font-family: 'Blender Pro', 'Oswald', Arial, sans-serif !important;
-  text-transform: uppercase !important;
-  letter-spacing: 0.08em !important;
-}
-
-#emi .emi-card-header h3 {
-  font-size: 1.15rem !important;
-  margin: 0 0 16px !important;
-}
-
-#emi .emi-loan-grid {
-  display: grid !important;
-  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
-  gap: 12px !important;
-}
-
-#emi .emi-detail-item,
-#emi .emi-payment-info {
-  position: relative !important;
-  overflow: hidden !important;
-  min-height: 92px !important;
-  border: 1px solid rgba(255,255,255,0.09) !important;
-  border-radius: 18px !important;
-  background:
-    linear-gradient(145deg, rgba(255,255,255,0.045), rgba(255,255,255,0.014)) !important;
-  padding: 16px !important;
-  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.30) !important;
-}
-
-#emi .emi-detail-item::before,
-#emi .emi-payment-info::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 14px;
-  bottom: 14px;
-  width: 3px;
-  border-radius: 999px;
-  background: var(--orange);
-  opacity: 0.8;
-}
-
-#emi .emi-detail-label,
-#emi .emi-payment-label {
-  display: block !important;
-  color: rgba(255,255,255,0.54) !important;
-  font-family: 'Blender Pro', 'Oswald', Arial, sans-serif !important;
-  font-size: 0.76rem !important;
-  text-transform: uppercase !important;
-  letter-spacing: 0.12em !important;
-  margin-bottom: 9px !important;
-}
-
-#emi .emi-detail-value,
-#emi .emi-payment-value,
-#emi .emi-due-date {
-  display: block !important;
-  color: #fff !important;
-  font-family: 'Blender Pro', 'Oswald', Arial, sans-serif !important;
-  font-size: clamp(1.02rem, 1.35vw, 1.28rem) !important;
-  line-height: 1.15 !important;
-  letter-spacing: 0.02em !important;
-}
-
-#emi .emi-detail-item:nth-child(2) .emi-detail-value,
-#emi .emi-detail-item:nth-child(5) .emi-detail-value,
-#emi .emi-detail-item:nth-child(8) .emi-detail-value,
-#emi .emi-payment-info:first-child .emi-payment-value {
-  color: var(--orange) !important;
-}
-
-#emi .emi-tabs-container {
-  padding: clamp(14px, 2vw, 20px) !important;
-  margin-top: 20px !important;
-}
-
-#emi .emi-tab-headers {
-  display: grid !important;
-  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-  gap: 10px !important;
-  padding: 6px !important;
-  margin-bottom: 16px !important;
-  border: 1px solid rgba(255,255,255,0.08) !important;
-  border-radius: 18px !important;
-  background: rgba(0,0,0,0.36) !important;
-}
-
-#emi .emi-tab-btn {
-  min-height: 54px !important;
-  border: 1px solid transparent !important;
-  border-radius: 14px !important;
-  background: transparent !important;
-  color: rgba(255,255,255,0.66) !important;
-  font-family: 'Blender Pro', 'Oswald', Arial, sans-serif !important;
-  font-size: 1rem !important;
-  text-transform: uppercase !important;
-  letter-spacing: 0.05em !important;
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  gap: 10px !important;
-}
-
-#emi .emi-tab-btn.active {
-  background: linear-gradient(180deg, #ff780a 0%, var(--orange) 100%) !important;
-  color: #050505 !important;
-  border-color: rgba(251,105,0,0.95) !important;
-  box-shadow: 0 10px 24px rgba(251,105,0,0.23) !important;
-}
-
-#emi .emi-tab-content {
-  border: 1px solid rgba(255,255,255,0.08) !important;
-  border-radius: 20px !important;
-  background: rgba(0,0,0,0.30) !important;
-  padding: clamp(15px, 2vw, 22px) !important;
-  box-shadow: none !important;
-}
-
-#emi .emi-payment-section h4 {
-  font-size: 1rem !important;
-  margin: 0 0 15px !important;
-}
-
-#emi .emi-payment-details {
-  display: grid !important;
-  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
-  gap: 12px !important;
-  margin-bottom: 16px !important;
-}
-
-#emi .emi-upload-section {
-  border: 1px dashed rgba(251,105,0,0.32) !important;
-  border-radius: 20px !important;
-  padding: 16px !important;
-  background: rgba(251,105,0,0.055) !important;
-}
-
-#emi .emi-upload-section h5 {
-  margin: 0 0 12px !important;
-  font-size: 0.95rem !important;
-}
-
-#emi .upload-wrapper,
-#emi .upload-wrapper-flex {
-  display: grid !important;
-  grid-template-columns: auto minmax(160px, 1fr) auto !important;
-  gap: 12px !important;
-  align-items: center !important;
-  margin: 0 !important;
-}
-
-#emi .upload-label {
-  min-height: 48px !important;
-  border: 1px solid rgba(251,105,0,0.70) !important;
-  border-radius: 14px !important;
-  background: rgba(251,105,0,0.14) !important;
-  color: var(--orange) !important;
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  padding: 0 18px !important;
-  font-family: 'Blender Pro', 'Oswald', Arial, sans-serif !important;
-  font-size: 0.94rem !important;
-  text-transform: uppercase !important;
-  letter-spacing: 0.05em !important;
-}
-
-#emi .filename-display {
-  width: 100% !important;
-  max-width: none !important;
-  min-height: 48px !important;
-  display: flex !important;
-  align-items: center !important;
-  border: 1px solid rgba(255,255,255,0.09) !important;
-  border-radius: 14px !important;
-  background: rgba(0,0,0,0.46) !important;
-  color: rgba(255,255,255,0.62) !important;
-  padding: 0 14px !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
-  white-space: nowrap !important;
-}
-
-#emi .filename-display.selected {
-  color: #1ad1a5 !important;
-  border-color: rgba(26,209,165,0.28) !important;
-  background: rgba(26,209,165,0.08) !important;
-}
-
-#emi .emi-confirm-btn {
-  min-height: 48px !important;
-  border: 0 !important;
-  border-radius: 14px !important;
-  background: linear-gradient(180deg, #ff780a 0%, var(--orange) 100%) !important;
-  color: #050505 !important;
-  font-family: 'Blender Pro', 'Oswald', Arial, sans-serif !important;
-  font-size: 0.95rem !important;
-  font-weight: 700 !important;
-  text-transform: uppercase !important;
-  letter-spacing: 0.045em !important;
-  padding: 0 18px !important;
-  box-shadow: 0 12px 24px rgba(251,105,0,0.22) !important;
-}
-
-#emi .emi-confirm-btn:hover,
-#emi .emi-confirm-btn:focus-visible {
-  transform: translateY(-1px) !important;
-  box-shadow: 0 16px 30px rgba(251,105,0,0.28) !important;
-  outline: none !important;
-}
-
-#emi .emi-input-section {
-  margin: 4px 0 16px !important;
-}
-
-#emi .emi-input-section label {
-  display: block !important;
-  color: rgba(255,255,255,0.72) !important;
-  font-family: 'Blender Pro', 'Oswald', Arial, sans-serif !important;
-  text-transform: uppercase !important;
-  letter-spacing: 0.08em !important;
-  margin-bottom: 8px !important;
-}
-
-#emi .emi-input-section input[type="number"] {
-  height: 54px !important;
-  border: 1.5px solid rgba(255,255,255,0.14) !important;
-  border-radius: 16px !important;
-  background: rgba(0,0,0,0.66) !important;
-  color: #fff !important;
-  font-family: 'Oswald', Arial, sans-serif !important;
-  font-size: 1.05rem !important;
-  padding: 0 15px !important;
-  margin: 0 !important;
-}
-
-#emi .emi-input-section input[type="number"]:focus {
-  border-color: var(--orange) !important;
-  box-shadow: 0 0 0 4px rgba(251,105,0,0.13) !important;
-  outline: none !important;
-}
-
-#emi .record-history-title {
-  margin: 24px 0 12px !important;
-  font-size: 1rem !important;
-}
-
-#emi .emi-history-table-wrap {
-  padding: 0 !important;
-  overflow: hidden !important;
-}
-
-#emi .emi-history-table {
-  background: transparent !important;
-}
-
-#emi .emi-history-table th {
-  color: rgba(255,255,255,0.66) !important;
-  background: rgba(255,255,255,0.035) !important;
-  border-bottom: 1px solid rgba(251,105,0,0.52) !important;
-  text-transform: uppercase !important;
-  letter-spacing: 0.08em !important;
-  font-size: 0.82rem !important;
-}
-
-#emi .emi-history-table td {
-  border-bottom: 1px solid rgba(255,255,255,0.07) !important;
-  vertical-align: middle !important;
-}
-
-#emi .docs-preview-pill,
-#emi .emi-preview-pill {
-  text-decoration: none !important;
-  border-radius: 999px !important;
-  border: 1px solid rgba(26,209,165,0.38) !important;
-  background: rgba(26,209,165,0.12) !important;
-  color: #1ad1a5 !important;
-  min-height: 34px !important;
-  padding: 0 12px !important;
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  gap: 8px !important;
-}
-
-#emi .delete-btn {
-  width: 34px !important;
-  height: 34px !important;
-  border-radius: 50% !important;
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  margin: 0 !important;
-  background: rgba(255,64,64,0.14) !important;
-  border: 1px solid rgba(255,64,64,0.48) !important;
-  color: #ff6363 !important;
-  font-size: 1.2rem !important;
-}
-
-@media (max-width: 900px) {
-  #emi .emi-loan-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-  }
-
-  #emi .emi-payment-details {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-  }
-
-  #emi .emi-payment-info:last-child:nth-child(3) {
-    grid-column: 1 / -1 !important;
-  }
-
-  #emi .upload-wrapper,
-  #emi .upload-wrapper-flex {
-    grid-template-columns: 1fr !important;
-  }
-}
-
-@media (max-width: 600px) {
-  #emi.emi-management-section {
-    padding: 18px 14px 20px !important;
-    border-radius: 24px !important;
-    margin-top: 0 !important;
-  }
-
-  .emi-section-desc {
-    font-size: 0.98rem !important;
-    margin-bottom: 16px !important;
-  }
-
-  #emi .emi-loan-details-card,
-  #emi .emi-tabs-container,
-  #emi .emi-history-table-wrap {
-    border-radius: 20px !important;
-  }
-
-  #emi .emi-loan-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-    gap: 10px !important;
-  }
-
-  #emi .emi-detail-item,
-  #emi .emi-payment-info {
-    min-height: 82px !important;
-    padding: 13px 12px !important;
-  }
-
-  #emi .emi-detail-label,
-  #emi .emi-payment-label {
-    font-size: 0.66rem !important;
-    margin-bottom: 7px !important;
-  }
-
-  #emi .emi-detail-value,
-  #emi .emi-payment-value,
-  #emi .emi-due-date {
-    font-size: 1rem !important;
-  }
-
-  #emi .emi-tab-headers {
-    gap: 7px !important;
-    padding: 5px !important;
-  }
-
-  #emi .emi-tab-btn {
-    min-height: 50px !important;
-    font-size: 0.78rem !important;
-    gap: 7px !important;
-    padding: 0 8px !important;
-  }
-
-  #emi .emi-payment-details {
-    grid-template-columns: 1fr !important;
-    gap: 10px !important;
-  }
-
-  #emi .emi-upload-section {
-    padding: 13px !important;
-  }
-
-  #emi .filename-display,
-  #emi .upload-label,
-  #emi .emi-confirm-btn {
-    width: 100% !important;
-    justify-content: center !important;
-  }
-
-  #emi #emiRecordTable thead {
-    display: none !important;
-  }
-
-  #emi #emiRecordTable,
-  #emi #emiRecordTable tbody,
-  #emi #emiRecordTable tr,
-  #emi #emiRecordTable td {
-    display: block !important;
-    width: 100% !important;
-  }
-
-  #emi #emiRecordTable tr {
-    margin: 12px !important;
-    width: calc(100% - 24px) !important;
-    border: 1px solid rgba(251,105,0,0.24) !important;
-    border-radius: 18px !important;
-    background: linear-gradient(145deg, rgba(24,24,24,0.98), rgba(8,8,8,0.98)) !important;
-    padding: 12px !important;
-    box-shadow: none !important;
-  }
-
-  #emi #emiRecordTable td {
-    display: grid !important;
-    grid-template-columns: 104px minmax(0, 1fr) !important;
-    align-items: center !important;
-    gap: 12px !important;
-    padding: 8px 0 !important;
-    border: 0 !important;
-  }
-
-  #emi #emiRecordTable td::before {
-    content: attr(data-label) !important;
-    float: none !important;
-    width: auto !important;
-    color: rgba(255,255,255,0.48) !important;
-    font-family: 'Blender Pro', 'Oswald', Arial, sans-serif !important;
-    font-size: 0.68rem !important;
-    letter-spacing: 0.12em !important;
-    text-transform: uppercase !important;
-  }
-
-  #emi #emiRecordTable td[data-label="Preview"],
-  #emi #emiRecordTable td[data-label="Action"] {
-    align-items: center !important;
-  }
-}
-
-
-/* =========================================================
    SpinLog DB Status | compact card chip
    ========================================================= */
 .db-status-strip {
@@ -12240,50 +11569,236 @@ section {
   animation: dbPulse 1.1s ease-in-out infinite;
 }
 
-.db-status-popup {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+/* ---- DB status popup card -------------------------------------------------
+   The card carries its own state dot, so the shared popup's big
+   spinner/thumbs-up/cross icon is hidden for this one message only. */
+.popup-content:has(.db-status-popup) .popup-icon {
+  display: none;
+}
+
+/* The shell is built around a 48px icon + bold single-line message. Reset that
+   for the card so it isn't swimming in padding. */
+.popup-content:has(.db-status-popup) {
+  box-sizing: border-box;
+  width: min(420px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+  padding: 20px;
   text-align: left;
 }
 
-.db-status-popup strong {
-  color: #fff;
-  font-size: 1.05rem;
+.popup-content:has(.db-status-popup) .popup-message {
+  width: 100%;
+  margin-bottom: 0;
+  font-size: 1rem;
+  font-weight: 400;
+  line-height: 1.4;
 }
 
-.db-status-popup span {
-  color: rgba(255,255,255,0.76);
-  font-size: 0.95rem;
+.db-status-popup {
+  --dbs-accent: #1ad1a5;
+  --dbs-accent-soft: rgba(26,209,165,0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  text-align: left;
 }
 
-.db-status-data-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 4px;
+.db-status-popup[data-state="offline"] {
+  --dbs-accent: #ff4d4d;
+  --dbs-accent-soft: rgba(255,77,77,0.12);
 }
 
-.db-status-data-card {
-  border: 1px solid rgba(251,105,0,0.22);
-  background: rgba(251,105,0,0.08);
-  border-radius: 12px;
-  padding: 9px 10px;
+/* Head: dot + Supabase / state + recheck */
+.dbs-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--dbs-accent-soft);
+  background:
+    linear-gradient(135deg, var(--dbs-accent-soft), rgba(255,255,255,0.02));
 }
 
-.db-status-data-card small {
-  display: block;
-  color: rgba(255,255,255,0.56);
-  font-size: 0.78rem;
+.dbs-dot {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--dbs-accent);
+  box-shadow: 0 0 0 5px var(--dbs-accent-soft), 0 0 16px var(--dbs-accent);
+}
+
+.db-status-popup[data-state="online"] .dbs-dot {
+  animation: dbPulse 2s ease-in-out infinite;
+}
+
+.dbs-head-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.dbs-head-copy small {
+  font-family: 'Blender Pro', 'Oswald', Arial, sans-serif;
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  color: rgba(255,255,255,0.5);
+  line-height: 1.2;
 }
 
-.db-status-data-card b {
-  display: block;
+.dbs-head-copy strong {
+  font-family: 'Blender Pro', 'Oswald', Arial, sans-serif;
+  font-size: 1.22rem;
+  line-height: 1.15;
+  letter-spacing: 0.01em;
+  color: var(--dbs-accent);
+}
+
+.dbs-recheck {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  border: 1px solid rgba(251,105,0,0.28);
+  background: rgba(251,105,0,0.10);
+  color: var(--orange, #fb6900);
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background 0.18s ease, transform 0.18s ease, border-color 0.18s ease;
+}
+
+.dbs-recheck:hover,
+.dbs-recheck:focus-visible {
+  background: rgba(251,105,0,0.2);
+  border-color: rgba(251,105,0,0.5);
+  transform: rotate(-45deg);
+  outline: none;
+}
+
+.dbs-recheck:active {
+  transform: scale(0.94);
+}
+
+.dbs-recheck.is-busy,
+.dbs-recheck:disabled {
+  cursor: default;
+  transform: none;
+  opacity: 0.75;
+}
+
+.dbs-recheck.is-busy i {
+  animation: dbsSpin 0.7s linear infinite;
+}
+
+@keyframes dbsSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* Row-count tiles */
+.dbs-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.dbs-tile {
+  padding: 10px 8px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.04);
+  text-align: center;
+  min-width: 0;
+}
+
+.dbs-tile dt {
+  font-family: 'Blender Pro', 'Oswald', Arial, sans-serif;
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.48);
+  line-height: 1.2;
+}
+
+.dbs-tile dd {
+  margin: 3px 0 0;
+  font-family: 'Blender Pro', 'Oswald', Arial, sans-serif;
+  font-size: 1.3rem;
+  line-height: 1.1;
   color: #fff;
-  font-size: 1.05rem;
-  margin-top: 2px;
+}
+
+/* Offline explainer */
+.dbs-note {
+  margin: 0;
+  padding: 11px 13px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.04);
+  color: rgba(255,255,255,0.74);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+/* Foot: checked time + table probed */
+.dbs-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  font-size: 0.78rem;
+  color: rgba(255,255,255,0.46);
+}
+
+.dbs-foot span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.dbs-foot i {
+  font-size: 0.72rem;
+  opacity: 0.7;
+}
+
+.dbs-table {
+  font-family: 'JetBrains Mono', 'Consolas', monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 360px) {
+  .dbs-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .dbs-foot {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .db-status-popup[data-state="online"] .dbs-dot,
+  .dbs-recheck.is-busy i {
+    animation: none;
+  }
+  .dbs-recheck:hover,
+  .dbs-recheck:focus-visible,
+  .dbs-recheck:active {
+    transform: none;
+  }
 }
 
 @keyframes dbPulse {
@@ -12310,11 +11825,7 @@ section {
   #dbStatusText {
     font-size: 0.95rem;
   }
-  .db-status-data-grid {
-    grid-template-columns: 1fr;
-  }
 }
-
 
 
 /* =========================================================
@@ -12711,10 +12222,9 @@ section {
 .cover-edit-save-btn:active { transform: scale(0.97); }
 
 /* ════════════════════════════════════════════════════════════
-   EMI & DOCS FILTER STYLES (reuse service page pattern)
+   DOCS FILTER STYLES (reuse service page pattern)
    ════════════════════════════════════════════════════════════ */
 
-#emi .service-history-panel,
 #docs .service-history-panel {
   position: relative;
   overflow: visible;
@@ -12730,7 +12240,6 @@ section {
   box-shadow: 0 22px 52px rgba(0, 0, 0, 0.42), 0 0 0 1px rgba(251, 105, 0, 0.04) inset;
 }
 
-#emi .service-history-header,
 #docs .service-history-header {
   display: flex;
   align-items: center;
@@ -12740,7 +12249,6 @@ section {
   margin-bottom: 14px;
 }
 
-#emi .history-header-actions,
 #docs .history-header-actions {
   display: flex;
   gap: 10px;
@@ -12749,7 +12257,6 @@ section {
 }
 
 /* Filter toggle button */
-#emi .history-filter-toggle,
 #docs .history-filter-toggle {
   min-height: 42px;
   display: none;
@@ -12770,8 +12277,6 @@ section {
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 
-#emi .history-filter-toggle:hover,
-#emi .history-filter-toggle[aria-expanded="true"],
 #docs .history-filter-toggle:hover,
 #docs .history-filter-toggle[aria-expanded="true"] {
   background: var(--orange);
@@ -12780,7 +12285,6 @@ section {
 }
 
 /* Clear button */
-#emi .history-clear-btn,
 #docs .history-clear-btn {
   min-height: 42px;
   display: inline-flex;
@@ -12799,7 +12303,6 @@ section {
   transition: background 0.15s, color 0.15s;
 }
 
-#emi .history-clear-btn:hover,
 #docs .history-clear-btn:hover {
   background: var(--orange);
   color: #050505;
@@ -12807,7 +12310,6 @@ section {
 }
 
 /* Filter grid */
-#emi .history-tools,
 #docs .history-tools {
   display: grid;
   grid-template-columns: minmax(240px, 1.7fr) minmax(150px, 1fr) minmax(150px, 0.9fr) minmax(150px, 0.9fr);
@@ -12816,7 +12318,6 @@ section {
 }
 
 /* Controls */
-#emi .history-control,
 #docs .history-control {
   display: flex;
   flex-direction: column;
@@ -12824,7 +12325,6 @@ section {
   min-width: 0;
 }
 
-#emi .history-control > span,
 #docs .history-control > span {
   color: rgba(255, 255, 255, 0.78);
   font-family: 'Blender Pro', 'Oswald', Arial, sans-serif;
@@ -12835,7 +12335,6 @@ section {
 }
 
 /* Input shells */
-#emi .history-input-shell,
 #docs .history-input-shell {
   position: relative;
   display: flex;
@@ -12849,13 +12348,11 @@ section {
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 
-#emi .history-input-shell:focus-within,
 #docs .history-input-shell:focus-within {
   border-color: rgba(251,105,0,0.92);
   box-shadow: 0 0 0 4px rgba(251,105,0,0.12), inset 0 0 0 1px rgba(0,0,0,0.45);
 }
 
-#emi .history-input-shell > i,
 #docs .history-input-shell > i {
   position: absolute;
   left: 14px;
@@ -12867,7 +12364,6 @@ section {
   z-index: 1;
 }
 
-#emi .history-input-shell input[type="search"],
 #docs .history-input-shell input[type="search"] {
   width: 100%;
   height: 48px;
@@ -12882,19 +12378,16 @@ section {
   outline: none;
 }
 
-#emi .history-input-shell input[type="search"]::placeholder,
 #docs .history-input-shell input[type="search"]::placeholder {
   color: rgba(255,255,255,0.38);
 }
 
 /* Date shell — hide native input, show custom display */
-#emi .history-input-shell.date-shell,
 #docs .history-input-shell.date-shell {
   cursor: pointer;
   overflow: hidden;
 }
 
-#emi .history-input-shell.date-shell input[type="date"],
 #docs .history-input-shell.date-shell input[type="date"] {
   position: absolute;
   inset: 0;
@@ -12908,7 +12401,6 @@ section {
   border: 0;
 }
 
-#emi .history-input-shell.date-shell .date-display,
 #docs .history-input-shell.date-shell .date-display {
   position: relative;
   z-index: 1;
@@ -12921,18 +12413,15 @@ section {
   pointer-events: none;
 }
 
-#emi .history-input-shell.date-shell .date-display.has-value,
 #docs .history-input-shell.date-shell .date-display.has-value {
   color: var(--white);
 }
 
 /* Custom dropdown (button-based, matching service page) */
-#emi .custom-history-select,
 #docs .custom-history-select {
   position: relative;
 }
 
-#emi .custom-history-select input[type="hidden"],
 #docs .custom-history-select input[type="hidden"] {
   position: absolute;
   width: 1px;
@@ -12941,7 +12430,6 @@ section {
   pointer-events: none;
 }
 
-#emi .history-select-button,
 #docs .history-select-button {
   width: 100%;
   min-width: 0;
@@ -12958,13 +12446,11 @@ section {
   align-items: center;
 }
 
-#emi .history-select-button:focus-visible,
 #docs .history-select-button:focus-visible {
   outline: none;
 }
 
 /* Chevron arrow for select shell */
-#emi .custom-history-select::after,
 #docs .custom-history-select::after {
   content: '';
   position: absolute;
@@ -12979,7 +12465,6 @@ section {
   z-index: 1;
 }
 
-#emi .history-select-menu,
 #docs .history-select-menu {
   position: absolute;
   z-index: 80;
@@ -12996,14 +12481,12 @@ section {
   list-style: none;
 }
 
-#emi .custom-history-select.is-open .history-select-menu,
 #docs .custom-history-select.is-open .history-select-menu {
   display: grid;
   gap: 4px;
   animation: historyMenuDrop 0.16s ease-out;
 }
 
-#emi .history-select-option,
 #docs .history-select-option {
   width: 100%;
   min-height: 40px;
@@ -13021,8 +12504,6 @@ section {
   align-items: center;
 }
 
-#emi .history-select-option:hover,
-#emi .history-select-option:focus-visible,
 #docs .history-select-option:hover,
 #docs .history-select-option:focus-visible {
   background: rgba(251, 105, 0, 0.16);
@@ -13030,7 +12511,6 @@ section {
   outline: none;
 }
 
-#emi .history-select-option[aria-selected="true"],
 #docs .history-select-option[aria-selected="true"] {
   background: rgba(251, 105, 0, 0.22);
   color: #fff;
@@ -13038,7 +12518,6 @@ section {
 
 /* Responsive: tablet */
 @media (max-width: 1024px) {
-  #emi .history-tools,
   #docs .history-tools {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -13046,24 +12525,20 @@ section {
 
 /* Responsive: mobile — collapsible filter panel */
 @media (max-width: 768px) {
-  #emi .service-history-panel,
   #docs .service-history-panel {
     padding: 16px;
   }
 
-  #emi .history-filter-toggle,
   #docs .history-filter-toggle {
     display: inline-flex;
     width: 100%;
   }
 
-  #emi .history-clear-btn,
   #docs .history-clear-btn {
     width: auto !important;
     min-width: 104px;
   }
 
-  #emi .history-tools,
   #docs .history-tools {
     display: none !important;
     grid-template-columns: 1fr !important;
@@ -13071,20 +12546,17 @@ section {
     margin-top: 0 !important;
   }
 
-  #emi .history-tools.is-open,
   #docs .history-tools.is-open {
     display: grid !important;
     margin-top: 14px !important;
     margin-bottom: 16px !important;
   }
 
-  #emi .service-history-header,
   #docs .service-history-header {
     flex-direction: column;
     align-items: stretch;
   }
 
-  #emi .history-header-actions,
   #docs .history-header-actions {
     width: 100%;
     gap: 10px;
@@ -13092,17 +12564,14 @@ section {
 }
 
 @media (min-width: 769px) {
-  #emi .history-tools,
   #docs .history-tools {
     display: grid !important;
   }
 }
 
 
-
-
 /* ════════════════════════════════════════════════════════════
-   Fix text overflow in Docs & EMI mobile card views
+   Fix text overflow in Docs mobile card views
    ════════════════════════════════════════════════════════════ */
 
 @media (max-width: 768px) {
@@ -13137,30 +12606,1006 @@ section {
     overflow-wrap: break-word !important;
   }
 
-  /* EMI table rows: prevent horizontal overflow */
-  #emi .emi-history-table tr {
-    overflow: hidden !important;
-    max-width: 100% !important;
-  }
-
-  #emi .emi-history-table td {
-    max-width: 100% !important;
-    overflow: hidden !important;
-    text-overflow: ellipsis !important;
-    word-break: break-word !important;
-  }
-
-  #emi .emi-preview-pill {
-    max-width: 100% !important;
-    overflow: hidden !important;
-    text-overflow: ellipsis !important;
-    white-space: nowrap !important;
-  }
-
   /* Global: prevent any table card from overflowing the viewport */
-  #docs .service-table-wrap,
-  #emi .service-table-wrap {
+  #docs .service-table-wrap {
     overflow-x: hidden !important;
     max-width: 100% !important;
   }
 }
+
+/* =========================================================
+   v1.7.10 | Documents first-paint skeleton + scroll cost
+   Appended last on purpose: the #docs rules above are declared
+   in several competing blocks, so source order is the cheapest
+   way to win without adding more !important than needed.
+   ========================================================= */
+
+/* The vehicle grid's first paint comes from static HTML, before the vault
+   query resolves. Without this, every card shows "Upload Document" and a
+   delete button for a moment — even cards whose file is already stored — and
+   they then flip to a "View" pill. That flip is what reads as a ghost entry.
+   script.js adds .is-loading before the fetch and removes it after. */
+.vehicle-docs-grid.is-loading .doc-card .upload-btn,
+.vehicle-docs-grid.is-loading .doc-card .doc-delete-btn {
+  visibility: hidden !important;
+}
+.vehicle-docs-grid.is-loading .doc-card .doc-preview::after {
+  content: '';
+  display: block;
+  height: 46px;
+  border-radius: 14px;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.035),
+    rgba(255, 255, 255, 0.085),
+    rgba(255, 255, 255, 0.035)
+  );
+  background-size: 220% 100%;
+  animation: docsSkeletonSweep 1.15s linear infinite;
+}
+@keyframes docsSkeletonSweep {
+  from { background-position: 220% 0; }
+  to   { background-position: -220% 0; }
+}
+
+/* NOTE: content-visibility: auto was tried on the mobile service rows and
+   removed again. Measured on a 390x844 viewport with ~30 records it cost ~3.5s
+   of extra long-frame time on the first scroll pass (the browser measuring each
+   skipped row) and made no difference at all afterwards — there simply is not
+   enough off-screen content at this list size for the containment to pay for
+   itself. Worth revisiting only if the record count grows into the hundreds. */
+
+@media (prefers-reduced-motion: reduce) {
+  .vehicle-docs-grid.is-loading .doc-card .doc-preview::after {
+    animation: none;
+  }
+}
+
+/* =========================================================
+   v1.7.11 | Docs archives drop-zone scenic backdrops
+   The three historic-upload cards were flat gradient panels. This gives each
+   one a scene layer that bleeds from the top and dissolves into the card body,
+   matching the vault/doc cards' warmth without touching the markup.
+
+   Layering inside each .drop-zone (isolated stacking context):
+     ::before  z0  the scene, masked to fade out toward the bottom
+     ::after   z1  warm scrim + top glow, keeps h4/p/span legible
+     > *       z2  the actual content
+
+   The scene is driven by --dz-scene, so swapping in a real photograph later is
+   a single declaration:  #docs .drop-zone[data-type="image"]{--dz-scene:url(...)}
+   Inline SVG is used instead of bitmaps on purpose: the app ships as an
+   offline PWA, and these cost no extra cache entries or network round-trips.
+   ========================================================= */
+
+#docs .historic-upload-grid .drop-zone {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  transition: border-color .25s ease, box-shadow .25s ease, transform .25s ease;
+}
+
+#docs .historic-upload-grid .drop-zone::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image: var(--dz-scene, none);
+  background-repeat: no-repeat;
+  background-position: center top;
+  background-size: cover;
+  opacity: var(--dz-scene-opacity, .72);
+  transition: opacity .25s ease, transform .35s ease;
+  /* Bottom fade: the copy and format pill sit low in the card, so the scene has
+     to be gone by then. Every scene below is therefore drawn with its horizon
+     around y=80..104 of the 200-unit viewBox — content composed lower than that
+     gets erased here and the card just looks empty.
+     Unsupported mask degrades to the ::after scrim alone, which is still legible. */
+  -webkit-mask-image: linear-gradient(180deg, #000 0%, rgba(0,0,0,.94) 46%, rgba(0,0,0,.48) 70%, rgba(0,0,0,.12) 86%, transparent 100%);
+          mask-image: linear-gradient(180deg, #000 0%, rgba(0,0,0,.94) 46%, rgba(0,0,0,.48) 70%, rgba(0,0,0,.12) 86%, transparent 100%);
+}
+
+#docs .historic-upload-grid .drop-zone::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    radial-gradient(115% 70% at 50% 0%, rgba(251,105,0,.22), rgba(251,105,0,0) 60%),
+    linear-gradient(180deg, rgba(6,6,6,.16) 0%, rgba(6,6,6,.40) 40%, rgba(4,4,4,.80) 74%, rgba(4,4,4,.94) 100%);
+  transition: background .25s ease;
+}
+
+#docs .historic-upload-grid .drop-zone > * {
+  position: relative;
+  z-index: 2;
+}
+
+/* --- Scenes ------------------------------------------------------------- */
+
+/* Engine Sound Archives: waveform bars, loudest through the middle. Baseline is
+   at y=82 so the bar tops read clearly and their feet dissolve into the fade. */
+#docs .historic-upload-grid .drop-zone[data-type="audio"] {
+  --dz-scene: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 200'%3E%3Cdefs%3E%3ClinearGradient id='b' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%23ffc394'/%3E%3Cstop offset='.45' stop-color='%23fb6900'/%3E%3Cstop offset='1' stop-color='%236d2600'/%3E%3C/linearGradient%3E%3CradialGradient id='g' cx='.5' cy='.41' r='.66'%3E%3Cstop offset='0' stop-color='%23ff7d1e' stop-opacity='.5'/%3E%3Cstop offset='1' stop-color='%23ff7d1e' stop-opacity='0'/%3E%3C/radialGradient%3E%3C/defs%3E%3Crect width='400' height='200' fill='%230a0908'/%3E%3Crect width='400' height='200' fill='url(%23g)'/%3E%3Cg fill='url(%23b)'%3E%3Crect x='8' y='72' width='6' height='20' rx='3'/%3E%3Crect x='24' y='63' width='6' height='38' rx='3'/%3E%3Crect x='40' y='69' width='6' height='26' rx='3'/%3E%3Crect x='56' y='54' width='6' height='56' rx='3'/%3E%3Crect x='72' y='65' width='6' height='34' rx='3'/%3E%3Crect x='88' y='45' width='6' height='74' rx='3'/%3E%3Crect x='104' y='59' width='6' height='46' rx='3'/%3E%3Crect x='120' y='36' width='6' height='92' rx='3'/%3E%3Crect x='136' y='53' width='6' height='58' rx='3'/%3E%3Crect x='152' y='25' width='6' height='114' rx='3'/%3E%3Crect x='168' y='47' width='6' height='70' rx='3'/%3E%3Crect x='184' y='17' width='6' height='130' rx='3'/%3E%3Crect x='200' y='40' width='6' height='84' rx='3'/%3E%3Crect x='216' y='21' width='6' height='122' rx='3'/%3E%3Crect x='232' y='50' width='6' height='64' rx='3'/%3E%3Crect x='248' y='30' width='6' height='104' rx='3'/%3E%3Crect x='264' y='56' width='6' height='52' rx='3'/%3E%3Crect x='280' y='39' width='6' height='86' rx='3'/%3E%3Crect x='296' y='62' width='6' height='40' rx='3'/%3E%3Crect x='312' y='48' width='6' height='68' rx='3'/%3E%3Crect x='328' y='66' width='6' height='32' rx='3'/%3E%3Crect x='344' y='57' width='6' height='50' rx='3'/%3E%3Crect x='360' y='71' width='6' height='22' rx='3'/%3E%3Crect x='376' y='65' width='6' height='34' rx='3'/%3E%3Crect x='392' y='74' width='6' height='16' rx='3'/%3E%3C/g%3E%3C/svg%3E");
+}
+
+/* Historic Images: layered ridgelines against a low warm sun, horizon at y=104. */
+#docs .historic-upload-grid .drop-zone[data-type="image"] {
+  --dz-scene: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 200'%3E%3Cdefs%3E%3ClinearGradient id='s' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%230b0b0e'/%3E%3Cstop offset='.5' stop-color='%23492009'/%3E%3Cstop offset='.75' stop-color='%23170d07'/%3E%3Cstop offset='1' stop-color='%230a0605'/%3E%3C/linearGradient%3E%3CradialGradient id='sun' cx='.52' cy='.52' r='.45'%3E%3Cstop offset='0' stop-color='%23ffbe78' stop-opacity='.72'/%3E%3Cstop offset='1' stop-color='%23ffbe78' stop-opacity='0'/%3E%3C/radialGradient%3E%3C/defs%3E%3Crect width='400' height='200' fill='url(%23s)'/%3E%3Cellipse cx='208' cy='104' rx='150' ry='80' fill='url(%23sun)'/%3E%3Cpath d='M0 104 L40 68 L76 92 L118 52 L158 88 L200 58 L242 90 L286 62 L328 92 L368 70 L400 96 L400 200 L0 200Z' fill='%23331b12'/%3E%3Cpath d='M0 104 L40 68 L76 92 L118 52 L158 88 L200 58 L242 90 L286 62 L328 92 L368 70 L400 96' fill='none' stroke='%23ffa254' stroke-opacity='.30' stroke-width='1.6'/%3E%3Cpath d='M0 132 L38 106 L74 126 L114 94 L156 124 L200 100 L242 128 L288 102 L330 130 L368 110 L400 128 L400 200 L0 200Z' fill='%23100907'/%3E%3Crect y='150' width='400' height='50' fill='%23060505'/%3E%3C/svg%3E");
+}
+
+/* Historic Videos: road sweeping left-to-right beneath a treeline.
+   A one-point-perspective road pointing at the horizon was tried first and does
+   not survive here — its depth runs top-to-bottom, straight into the fade, so
+   only a thin sliver near the vanishing point stayed visible and the flanking
+   trees read as a second mountain range. Laying the road across the frame keeps
+   the whole subject inside the top band the mask preserves. */
+#docs .historic-upload-grid .drop-zone[data-type="video"] {
+  --dz-scene: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 200'%3E%3Cdefs%3E%3ClinearGradient id='k' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%230b0b0e'/%3E%3Cstop offset='.34' stop-color='%23522409'/%3E%3Cstop offset='.62' stop-color='%23190d06'/%3E%3Cstop offset='1' stop-color='%230a0605'/%3E%3C/linearGradient%3E%3CradialGradient id='h' cx='.56' cy='.3' r='.44'%3E%3Cstop offset='0' stop-color='%23ffc07a' stop-opacity='.78'/%3E%3Cstop offset='1' stop-color='%23ffc07a' stop-opacity='0'/%3E%3C/radialGradient%3E%3ClinearGradient id='rd' x1='1' y1='0' x2='0' y2='0'%3E%3Cstop offset='0' stop-color='%23917a64'/%3E%3Cstop offset='.5' stop-color='%234a3d33'/%3E%3Cstop offset='1' stop-color='%2325201a'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='400' height='200' fill='url(%23k)'/%3E%3Cellipse cx='224' cy='60' rx='150' ry='56' fill='url(%23h)'/%3E%3Cpath d='M0 200 L0 58 L16 46 L30 62 L44 40 L60 58 L74 48 L90 64 L104 50 L122 62 L138 44 L156 60 L172 50 L190 64 L206 48 L224 60 L240 42 L258 58 L274 50 L292 64 L308 52 L326 62 L342 46 L358 60 L374 52 L390 64 L400 56 L400 200Z' fill='%23130c08'/%3E%3Cpath d='M0 158 C110 156 210 134 300 78 L294 72 C200 122 100 130 0 130 Z' fill='url(%23rd)'/%3E%3Cpath d='M0 130 C100 130 200 122 294 72' fill='none' stroke='%23ffb066' stroke-opacity='.22' stroke-width='1.4'/%3E%3Cpath d='M0 144 C105 142 205 128 297 75' fill='none' stroke='%23ffc78f' stroke-opacity='.32' stroke-width='3' stroke-dasharray='16 14'/%3E%3Cpath d='M0 176 L0 120 L10 108 L20 124 L30 112 L40 130 L48 120 L58 140 L64 132 L72 152 L60 176Z' fill='%23090605'/%3E%3Cpath d='M400 170 L400 104 L392 92 L384 108 L374 96 L366 114 L358 104 L350 124 L344 116 L336 138 L352 170Z' fill='%23090605'/%3E%3C/svg%3E");
+}
+
+/* --- Content sitting on top of the scene -------------------------------- */
+
+/* Round badge with a lit rim, so the icon reads as a subject in the scene
+   rather than a chip floating over it. */
+#docs .historic-upload-grid .drop-zone-icon {
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 28%, rgba(255,152,66,.40), rgba(251,105,0,.22) 56%, rgba(11,8,6,.88) 100%);
+  border: 1px solid rgba(251,105,0,.58);
+  color: #ffa257;
+  box-shadow:
+    0 0 0 6px rgba(251,105,0,.07),
+    0 12px 26px rgba(0,0,0,.55),
+    inset 0 1px 0 rgba(255,255,255,.10);
+}
+
+#docs .historic-upload-grid .drop-zone h4 {
+  text-shadow: 0 2px 10px rgba(0,0,0,.75);
+}
+
+#docs .historic-upload-grid .drop-zone p {
+  color: rgba(255,255,255,.74);
+  text-shadow: 0 1px 8px rgba(0,0,0,.7);
+}
+
+/* Format list becomes a pill: plain grey text loses the fight with the scene. */
+#docs .historic-upload-grid .drop-zone span {
+  color: rgba(255,255,255,.60);
+  background: rgba(8,8,8,.62);
+  border: 1px solid rgba(255,255,255,.09);
+  border-radius: 999px;
+  padding: 4px 11px;
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+/* --- Hover / drag ------------------------------------------------------- */
+
+#docs .historic-upload-grid .drop-zone:hover::before,
+#docs .historic-upload-grid .drop-zone.dragover::before {
+  opacity: calc(var(--dz-scene-opacity, .72) + .22);
+  transform: scale(1.04);
+}
+
+#docs .historic-upload-grid .drop-zone:hover::after,
+#docs .historic-upload-grid .drop-zone.dragover::after {
+  background:
+    radial-gradient(115% 78% at 50% 2%, rgba(251,105,0,.30), rgba(251,105,0,0) 64%),
+    linear-gradient(180deg, rgba(6,6,6,.16) 0%, rgba(6,6,6,.48) 44%, rgba(4,4,4,.86) 82%, rgba(4,4,4,.94) 100%);
+}
+
+#docs .historic-upload-grid .drop-zone.dragover {
+  transform: translateY(-2px);
+}
+
+/* Smaller cards crop the scene hard, so pull it back and keep it top-anchored
+   where the ridgelines and horizon actually live. */
+@media (max-width: 760px) {
+  #docs .historic-upload-grid .drop-zone {
+    --dz-scene-opacity: .44;
+  }
+  #docs .historic-upload-grid .drop-zone::before {
+    background-position: center 20%;
+  }
+  #docs .historic-upload-grid .drop-zone span {
+    padding: 3px 8px;
+  }
+  /* The v1.6.22 mobile block pins this to 15px !important, which would drop the
+     badge back to a squircle below 760px. Matched here rather than loosened
+     there, since that block is shared with the vault cards. */
+  #docs .historic-upload-grid .drop-zone-icon {
+    border-radius: 50% !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #docs .historic-upload-grid .drop-zone,
+  #docs .historic-upload-grid .drop-zone::before,
+  #docs .historic-upload-grid .drop-zone::after {
+    transition: none;
+  }
+  #docs .historic-upload-grid .drop-zone:hover::before,
+  #docs .historic-upload-grid .drop-zone.dragover::before {
+    transform: none;
+  }
+  #docs .historic-upload-grid .drop-zone.dragover {
+    transform: none;
+  }
+}
+
+/* =========================================================
+   v1.7.12 | Docs archives backdrop handover to three.js
+   docs3d.js animates the three scenes the v1.7.11 block above draws as static
+   SVG. It injects one canvas spanning the grid and adds .dz3d-live only after a
+   glReadPixels check confirms the shader actually painted — so if WebGL is
+   missing, the context is lost, or the program fails to compile, none of these
+   rules ever apply and the SVG scenes above stay exactly as they are.
+
+   What moves to the canvas: the scene layer and the card fill.
+   What stays in CSS: the dashed border, the ::after scrim, and all content.
+   The scrim staying put is the point — legibility does not depend on the shader.
+   ========================================================= */
+
+/* Positioning context for the injected canvas. Absolute children of a grid
+   container are taken out of flow, so this cannot disturb the track sizing or
+   #uploadProgressBar's grid-column. */
+#docs .historic-upload-grid {
+  position: relative;
+}
+
+#docs .historic-upload-grid .dz3d-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;   /* clicks and drops belong to the cards */
+  opacity: 0;
+  transition: opacity .45s ease;
+}
+
+#docs .historic-upload-grid.dz3d-live .dz3d-canvas {
+  opacity: 1;
+}
+
+/* Cards sit above the canvas and become transparent so it shows through.
+   z-index is explicit rather than relying on DOM order, because .drop-zone
+   already creates its own stacking context via isolation: isolate. */
+#docs .historic-upload-grid.dz3d-live .drop-zone {
+  z-index: 1;
+  background: transparent;
+}
+
+/* The static scene fades out (its own .25s opacity transition) as the canvas
+   fades in over .45s, so the handover reads as a crossfade rather than a flash
+   of empty card.
+   The :hover and .dragover variants are listed explicitly: those rules in the
+   v1.7.11 block raise ::before opacity and tie with this selector on
+   specificity, so source order alone decides it. Being explicit means a later
+   edit that reorders the blocks cannot silently bring the SVG scene back on
+   top of the live canvas. */
+#docs .historic-upload-grid.dz3d-live .drop-zone::before,
+#docs .historic-upload-grid.dz3d-live .drop-zone:hover::before,
+#docs .historic-upload-grid.dz3d-live .drop-zone.dragover::before {
+  opacity: 0;
+}
+
+/* The hover/dragover gradient would paint straight over the canvas. The shader
+   takes the state instead: taller bars, faster dashes, a stronger scene. */
+#docs .historic-upload-grid.dz3d-live .drop-zone:hover,
+#docs .historic-upload-grid.dz3d-live .drop-zone.dragover {
+  background: transparent;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   SAGE SETTINGS
+   Gemini key, quiet hours, per-category toggles. Rides on the shared
+   .sl-modal-overlay / .sl-modal-card shell above.
+   ══════════════════════════════════════════════════════════════════════ */
+
+.sage-settings-card { max-width: 520px; }
+
+.sage-settings-body {
+  padding: 4px 20px 20px;
+  max-height: min(74vh, 640px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Each group draws its own bottom rule, so the last one doubles as the divider
+   above the footer. The footer therefore carries no border of its own. */
+.sage-set-group {
+  padding: 16px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+.sage-set-heading {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0 0 6px;
+  font-family: 'Blender Pro', 'Oswald', sans-serif;
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--orange, #fb6900);
+}
+.sage-set-heading i { font-size: 0.85rem; }
+
+.sage-set-note {
+  margin: 0 0 12px;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: rgba(255,255,255,0.45);
+}
+/* Sits directly under the control it explains. */
+.sage-set-note--tight { margin: 6px 0 0; font-size: 0.72rem; }
+
+.sage-set-label {
+  display: block;
+  margin: 12px 0 5px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: rgba(255,255,255,0.7);
+}
+.sage-set-label output { color: var(--orange, #fb6900); font-variant-numeric: tabular-nums; }
+
+.sage-set-input {
+  width: 100%;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 12px;
+  color: #fff;
+  font-size: 0.88rem;
+  font-family: inherit;
+  transition: border-color 0.15s, background 0.15s;
+}
+.sage-set-input:focus-visible {
+  outline: none;
+  border-color: rgba(251,105,0,0.6);
+  background: rgba(255,255,255,0.08);
+}
+.sage-set-input::placeholder { color: rgba(255,255,255,0.3); }
+select.sage-set-input { appearance: none; cursor: pointer; }
+select.sage-set-input option { background: #181818; color: #fff; }
+
+/* Key field + reveal toggle share a row */
+.sage-key-row { display: flex; gap: 8px; align-items: stretch; }
+.sage-key-row .sage-set-input { flex: 1; min-width: 0; letter-spacing: 0.06em; }
+
+.sage-icon-btn {
+  flex: 0 0 auto;
+  width: 42px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 12px;
+  color: rgba(255,255,255,0.55);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.sage-icon-btn:hover { color: #fff; border-color: rgba(255,255,255,0.25); }
+.sage-icon-btn:focus-visible { outline: 2px solid rgba(251,105,0,0.6); outline-offset: 2px; }
+
+.sage-set-duo { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.sage-set-duo .sage-set-label { margin-top: 0; }
+
+.sage-set-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+.sage-set-row .sage-btn { flex: 1 1 auto; }
+
+/* ── Range sliders ── */
+.sage-set-range {
+  width: 100%;
+  height: 4px;
+  margin: 4px 0 2px;
+  appearance: none;
+  background: rgba(255,255,255,0.14);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.sage-set-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: var(--orange, #fb6900);
+  border: 2px solid #181818;
+  box-shadow: 0 0 0 1px rgba(251,105,0,0.5);
+  cursor: pointer;
+}
+.sage-set-range::-moz-range-thumb {
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: var(--orange, #fb6900);
+  border: 2px solid #181818;
+  cursor: pointer;
+}
+.sage-set-range:focus-visible { outline: 2px solid rgba(251,105,0,0.6); outline-offset: 4px; }
+
+/* ── Toggles ── */
+.sage-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 10px 0;
+  cursor: pointer;
+  user-select: none;
+}
+.sage-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+
+.sage-toggle-mark {
+  flex: 0 0 auto;
+  position: relative;
+  width: 38px; height: 22px;
+  margin-top: 1px;
+  background: rgba(255,255,255,0.14);
+  border-radius: 999px;
+  transition: background 0.18s;
+}
+.sage-toggle-mark::after {
+  content: '';
+  position: absolute;
+  top: 3px; left: 3px;
+  width: 16px; height: 16px;
+  background: rgba(255,255,255,0.65);
+  border-radius: 50%;
+  transition: transform 0.18s, background 0.18s;
+}
+.sage-toggle input:checked + .sage-toggle-mark { background: rgba(251,105,0,0.5); }
+.sage-toggle input:checked + .sage-toggle-mark::after {
+  transform: translateX(16px);
+  background: var(--orange, #fb6900);
+}
+.sage-toggle input:focus-visible + .sage-toggle-mark {
+  outline: 2px solid rgba(251,105,0,0.7);
+  outline-offset: 3px;
+}
+
+.sage-toggle-text {
+  font-size: 0.84rem;
+  line-height: 1.35;
+  color: rgba(255,255,255,0.82);
+}
+.sage-toggle-text small {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.72rem;
+  color: rgba(255,255,255,0.4);
+}
+
+.sage-cat-list { display: flex; flex-direction: column; }
+.sage-cat-list .sage-toggle { border-bottom: 1px solid rgba(255,255,255,0.04); }
+.sage-cat-list .sage-toggle:last-child { border-bottom: none; }
+
+/* ── Buttons ── */
+.sage-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 10px 16px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 12px;
+  color: rgba(255,255,255,0.85);
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.sage-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
+.sage-btn:focus-visible { outline: 2px solid rgba(251,105,0,0.6); outline-offset: 2px; }
+.sage-btn:disabled { opacity: 0.5; cursor: default; }
+
+.sage-btn--primary {
+  background: var(--orange, #fb6900);
+  border-color: var(--orange, #fb6900);
+  color: #0d0d0d;
+}
+.sage-btn--primary:hover { background: #ff7d1a; border-color: #ff7d1a; color: #0d0d0d; }
+
+.sage-set-footer {
+  display: flex;
+  gap: 8px;
+  padding-top: 16px;
+}
+.sage-set-footer .sage-btn { flex: 1; }
+
+/* ── Status line ── */
+.sage-set-status {
+  min-height: 1.15rem;
+  margin: 10px 0 0;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: rgba(255,255,255,0.5);
+}
+.sage-set-status.is-ok { color: #5fd38d; }
+.sage-set-status.is-bad { color: #ff6b6b; }
+.sage-set-status.is-warn { color: var(--warn, #fba600); }
+
+@media (max-width: 380px) {
+  .sage-set-duo { grid-template-columns: 1fr; }
+  .sage-set-footer { flex-direction: column; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sage-toggle-mark,
+  .sage-toggle-mark::after,
+  .sage-btn,
+  .sage-set-input { transition: none; }
+}
+
+/* The hero settings button was removed — it made the chrome grid a third child
+   and pushed the Sage button onto its own row. Settings are reached from the
+   sliders button in the Sage panel header instead. */
+
+/* ══════════════════════════════════════════════════════════════════════
+   SAGE CHAT
+   The "Talk to Sage" pill in the hero actions row, and the conversation
+   panel in the #sage section. The search field moved into that section
+   unchanged, so .dk-search styling above still applies to it.
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* Screen-reader-only label helper. */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── "Talk to Sage" button (hero). Class name kept as sage-call-* ── */
+/* ── "Talk to Sage" — the third pill in the hero actions row ──
+   The wide button that used to sit in the hero chrome is gone; this is now the
+   only way into the Sage section. It carries her photo instead of a generic
+   speech bubble, with a small green tell so it reads as a person. */
+.sage-nav-avatar {
+  position: relative;
+  flex: 0 0 auto;
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.35);
+  border: 1px solid rgba(251,105,0,0.45);
+}
+/* The image is rounded rather than clipped by overflow:hidden, so the status dot
+   below can hang outside the circle. */
+.sage-nav-avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+/* Anchored to the avatar, not the button, so it follows the icon when the pill
+   stacks icon-over-label on a phone. */
+.sage-nav-avatar::after {
+  content: '';
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #5fd38d;
+  border: 2px solid #1a1a1a;
+  animation: sagePulse 2.4s ease-in-out infinite;
+}
+@keyframes sagePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ── Chat layout ── */
+.sage-chat-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 0 4px 20px;
+}
+
+/* The relocated search field needs its own stacking context here so the results
+   panel is not clipped by the chat card below it.
+   The doubled class is deliberate: home.css loads second and caps .dk-search at
+   360px for the hero it used to live in, which would leave it stranded narrow
+   inside this much wider panel. */
+.dk-search.sage-chat-search {
+  position: relative;
+  z-index: 5;
+  max-width: none;
+}
+
+.sage-chat-card {
+  display: flex;
+  flex-direction: column;
+  background: #161616;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 20px;
+  overflow: hidden;
+}
+
+.sage-chat-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  background: rgba(255,255,255,0.02);
+}
+.sage-chat-avatar {
+  flex: 0 0 auto;
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 1px solid rgba(251,105,0,0.35);
+}
+.sage-chat-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.sage-chat-who { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.sage-chat-who strong {
+  font-family: 'Blender Pro', 'Oswald', sans-serif;
+  font-size: 0.95rem;
+  letter-spacing: 0.04em;
+  color: var(--orange, #fb6900);
+}
+.sage-chat-who small { font-size: 0.72rem; color: rgba(255,255,255,0.45); }
+
+/* ── Message log ── */
+.sage-chat-log {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  min-height: 380px;
+  max-height: min(66vh, 640px);
+  padding: 16px 14px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+/* dvh tracks the visible area as mobile browser bars slide in and out, so the
+   log does not jump or get cut off the way vh does there. */
+@supports (height: 1dvh) {
+  .sage-chat-log { max-height: min(66dvh, 640px); }
+}
+
+.sage-chat-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin: auto;
+  padding: 18px;
+  text-align: center;
+}
+.sage-chat-empty img {
+  width: 74px; height: 74px;
+  border-radius: 50%;
+  object-fit: cover;
+  opacity: 0.8;
+  border: 1px solid rgba(251,105,0,0.25);
+}
+.sage-chat-empty p {
+  margin: 0;
+  max-width: 30ch;
+  font-size: 0.83rem;
+  line-height: 1.45;
+  color: rgba(255,255,255,0.42);
+}
+
+.sage-msg {
+  max-width: 82%;
+  padding: 9px 13px;
+  border-radius: 16px;
+  font-size: 0.87rem;
+  line-height: 1.45;
+}
+.sage-msg p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.sage-msg time {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.64rem;
+  opacity: 0.45;
+  font-variant-numeric: tabular-nums;
+}
+
+.sage-msg.is-sage {
+  align-self: flex-start;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-bottom-left-radius: 6px;
+  color: rgba(255,255,255,0.9);
+}
+.sage-msg.is-me {
+  align-self: flex-end;
+  background: rgba(251,105,0,0.16);
+  border: 1px solid rgba(251,105,0,0.3);
+  border-bottom-right-radius: 6px;
+  color: #fff;
+}
+
+/* Typing indicator */
+.sage-msg.is-thinking p { display: flex; gap: 4px; align-items: center; height: 1.2em; }
+.sage-msg.is-thinking span {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.55);
+  animation: sageDot 1.2s ease-in-out infinite;
+}
+.sage-msg.is-thinking span:nth-child(2) { animation-delay: 0.15s; }
+.sage-msg.is-thinking span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes sageDot {
+  0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-3px); }
+}
+
+/* ── Suggestion chips ── */
+.sage-chat-suggest {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 0 14px;
+}
+.sage-chat-suggest:empty { display: none; }
+
+.sage-chip {
+  padding: 7px 12px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 999px;
+  color: rgba(255,255,255,0.7);
+  font-family: inherit;
+  font-size: 0.76rem;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.sage-chip:hover {
+  color: #fff;
+  border-color: rgba(251,105,0,0.4);
+  background: rgba(251,105,0,0.1);
+}
+.sage-chip:focus-visible { outline: 2px solid rgba(251,105,0,0.6); outline-offset: 2px; }
+
+/* ── Composer ── */
+.sage-chat-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 12px 14px 6px;
+}
+
+.sage-chat-input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 13px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 16px;
+  color: #fff;
+  font-family: inherit;
+  font-size: 0.87rem;
+  line-height: 1.4;
+  resize: none;
+  overflow-y: auto;
+  max-height: 120px;
+}
+.sage-chat-input:focus-visible {
+  outline: none;
+  border-color: rgba(251,105,0,0.55);
+  background: rgba(255,255,255,0.08);
+}
+.sage-chat-input::placeholder { color: rgba(255,255,255,0.3); }
+
+.sage-chat-send {
+  flex: 0 0 auto;
+  width: 42px; height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--orange, #fb6900);
+  border: none;
+  border-radius: 14px;
+  color: #0d0d0d;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+}
+.sage-chat-send:hover { background: #ff7d1a; }
+.sage-chat-send:disabled { opacity: 0.45; cursor: default; }
+.sage-chat-send:focus-visible { outline: 2px solid rgba(251,105,0,0.8); outline-offset: 2px; }
+
+#sageChatStatus { padding: 0 14px 12px; margin: 0; }
+
+@media (max-width: 640px) {
+  /* On a phone the input and the send button were competing for one row, which
+     left the box short. The button now floats inside the input's right edge, so
+     the box spans the full width of the card — roughly 50px more room to type.
+     Anchored to the bottom so it stays put as the input grows. */
+  .sage-chat-form { position: relative; gap: 0; padding: 10px 12px 6px; }
+  .sage-chat-input {
+    width: 100%;
+    min-height: 50px;
+    padding: 13px 56px 13px 15px;
+    font-size: 0.9rem;
+  }
+  .sage-chat-send {
+    position: absolute;
+    right: 18px;
+    bottom: 11px;
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    font-size: 0.85rem;
+  }
+  .sage-chat-suggest { padding: 0 12px; }
+  #sageChatStatus { padding: 0 12px 10px; }
+  /* Taller on a phone: there is nothing else competing for the screen here, and
+     a short log with a long empty page below it looked broken. */
+  .sage-chat-log { padding: 14px 11px; min-height: 56vh; max-height: 62vh; }
+}
+@supports (height: 1dvh) {
+  @media (max-width: 640px) {
+    .sage-chat-log { min-height: 56dvh; max-height: 62dvh; }
+  }
+}
+
+@media (max-width: 480px) {
+  .sage-chat-wrap { padding: 0 0 16px; }
+  .sage-chat-card { border-radius: 16px; }
+  .sage-msg { max-width: 88%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sage-nav-avatar::after,
+  .sage-msg.is-thinking span { animation: none; }
+  .sage-chip,
+  .sage-chat-send,
+  .sage-chat-input { transition: none; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   SAGE HEALTH CARD
+   Weekly read on the bike, on the home screen. Rides on the existing
+   .dk-panel shell so it sits naturally beside the other home panels.
+   ══════════════════════════════════════════════════════════════════════ */
+
+.sage-health { margin-bottom: 14px; }
+
+.sage-health-word {
+  margin: 0 0 12px;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: rgba(255,255,255,0.82);
+}
+.sage-health-word.is-ok { color: #7fe0a6; }
+.sage-health-word.is-warn { color: var(--warn, #fba600); }
+.sage-health-word.is-bad { color: #ff8a8a; }
+
+/* ── Flags ── */
+.sage-health-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.sage-health-flags:empty { display: none; }
+
+.sage-health-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 999px;
+  font-size: 0.73rem;
+  line-height: 1.3;
+  color: rgba(255,255,255,0.7);
+}
+.sage-health-flag i { font-size: 0.68rem; opacity: 0.8; }
+.sage-health-flag.is-warn {
+  background: rgba(251,166,0,0.12);
+  border-color: rgba(251,166,0,0.32);
+  color: var(--warn, #fba600);
+}
+.sage-health-flag.is-bad {
+  background: rgba(255,77,77,0.12);
+  border-color: rgba(255,77,77,0.34);
+  color: #ff8a8a;
+}
+
+/* ── Stats grid ── */
+.sage-health-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 1px;
+  margin: 0 0 12px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.sage-health-stats:empty { display: none; }
+
+.sage-health-stat {
+  padding: 9px 11px;
+  background: #171717;
+}
+.sage-health-stat dt {
+  margin: 0 0 2px;
+  font-size: 0.66rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.38);
+}
+.sage-health-stat dd {
+  margin: 0;
+  font-family: 'Blender Pro', 'Oswald', sans-serif;
+  font-size: 0.92rem;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+
+.sage-health-foot {
+  margin: 0;
+  font-size: 0.68rem;
+  line-height: 1.4;
+  color: rgba(255,255,255,0.32);
+}
+
+#sageHealthRefresh:disabled { opacity: 0.5; cursor: default; }
+
+@media (max-width: 420px) {
+  .sage-health-stats { grid-template-columns: 1fr 1fr; }
+}
+
+/* ── Key ring ── */
+.sage-key-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 4px; }
+
+.sage-key-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+}
+.sage-key-item.is-resting { opacity: 0.55; }
+
+.sage-key-dot {
+  flex: 0 0 auto;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: #5fd38d;
+}
+.sage-key-item.is-resting .sage-key-dot { background: var(--warn, #fba600); }
+
+.sage-key-mask {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  color: rgba(255,255,255,0.75);
+}
+
+.sage-key-state {
+  flex: 0 0 auto;
+  font-size: 0.64rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.4);
+}
+
+.sage-key-remove { width: 30px; height: 30px; font-size: 0.8rem; }

@@ -181,9 +181,14 @@ function showPopup(type, message) {
   }
   
   popup.classList.add('show');
-  if ((type === 'success' || type === 'error') && 
-      typeof message === 'string' && 
-      !message.includes('Hold')) {
+
+  // Most result popups self-dismiss. Ones the user is meant to read or click
+  // (the DB status card and its Check again button) opt out with
+  // data-popup-persist; backdrop click and Escape still close them.
+  const persistent = typeof message === 'string' &&
+    (message.includes('Hold') || message.includes('data-popup-persist'));
+
+  if ((type === 'success' || type === 'error') && !persistent) {
     setTimeout(hidePopup, 3000);
   }
 }
@@ -208,6 +213,26 @@ function showPopup(type, message) {
     }
     setTimeout(hidePopup, 3000);
   }
+
+  // Exposed so code outside this closure can reuse the real popup instead of
+  // re-implementing it. The park feature's showAppPopup() tested for a bare
+  // `showPopup` identifier it could never see from its own IIFE, so it always
+  // fell through to a duplicate implementation.
+  window.showPopup = showPopup;
+  window.hidePopup = hidePopup;
+  window.updatePopup = updatePopup;
+
+  // Dismiss the popup by clicking the dimmed backdrop, or with Escape. Only a
+  // click on the overlay itself counts — clicks inside .popup-content must not
+  // close it.
+  (function enablePopupDismiss() {
+    const overlay = document.getElementById('customPopup');
+    if (!overlay) return;
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) hidePopup(); });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && overlay.classList.contains('show')) hidePopup();
+    });
+  })();
 
   // Test Supabase connection
   async function testConnection() {
@@ -268,18 +293,16 @@ function showPopup(type, message) {
   }
 
   async function fetchDbStatusData() {
-    const [serviceRecords, vehicleDocs, historicUploads, emiRecords] = await Promise.all([
+    const [serviceRecords, vehicleDocs, historicUploads] = await Promise.all([
       getDbTableCount('maintenance_records'),
       getDbTableCount('vehicle_documents'),
-      getDbTableCount('media_files'),
-      getDbTableCount('emi_record_table')
+      getDbTableCount('media_files')
     ]);
 
     return {
       serviceRecords,
       vehicleDocs,
-      historicUploads,
-      emiRecords
+      historicUploads
     };
   }
 
@@ -308,23 +331,67 @@ function showPopup(type, message) {
   function showDbStatusDetails(status) {
     const isOnline = status.state === 'online';
     const data = status.data || {};
+    const table = status.table || 'maintenance_records';
+
+    // Built as a self-contained status card rather than a stack of
+    // "label: value" lines, which read like console output. The shared popup's
+    // own icon is hidden for this one (see .popup-content:has(.db-status-popup)
+    // in styles.css) because the card carries its own state indicator.
     showPopup(isOnline ? 'success' : 'error', `
-      <div class="db-status-popup">
-        <strong>${isOnline ? 'Database is working' : 'Database is not responding'}</strong>
-        <span>Status: ${isOnline ? 'Online' : 'Offline / Paused'}</span>
-        <span>Last checked: ${formatDbStatusTime(status.checkedAt)}</span>
-        <span>Health check: ${status.table || 'maintenance_records'}</span>
+      <div class="db-status-popup" data-state="${isOnline ? 'online' : 'offline'}" data-popup-persist>
+        <div class="dbs-head">
+          <span class="dbs-dot" aria-hidden="true"></span>
+          <span class="dbs-head-copy">
+            <small>Supabase</small>
+            <strong>${isOnline ? 'Online' : 'Not responding'}</strong>
+          </span>
+          <button type="button" class="dbs-recheck" onclick="window.dkRecheckDb && window.dkRecheckDb()"
+                  aria-label="Check again">
+            <i class="fas fa-rotate" aria-hidden="true"></i>
+          </button>
+        </div>
+
         ${isOnline ? `
-          <div class="db-status-data-grid" aria-label="Database table counts">
-            <div class="db-status-data-card"><small>Service</small><b>${formatDbCount(data.serviceRecords)}</b></div>
-            <div class="db-status-data-card"><small>Docs</small><b>${formatDbCount(data.vehicleDocs)}</b></div>
-            <div class="db-status-data-card"><small>Media</small><b>${formatDbCount(data.historicUploads)}</b></div>
-            <div class="db-status-data-card"><small>EMI</small><b>${formatDbCount(data.emiRecords)}</b></div>
-          </div>
-        ` : ''}
+          <dl class="dbs-grid" aria-label="Row counts">
+            <div class="dbs-tile">
+              <dt>Service</dt>
+              <dd>${formatDbCount(data.serviceRecords)}</dd>
+            </div>
+            <div class="dbs-tile">
+              <dt>Docs</dt>
+              <dd>${formatDbCount(data.vehicleDocs)}</dd>
+            </div>
+            <div class="dbs-tile">
+              <dt>Media</dt>
+              <dd>${formatDbCount(data.historicUploads)}</dd>
+            </div>
+          </dl>
+        ` : `
+          <p class="dbs-note">
+            The project is probably paused. Open the Supabase dashboard and resume it,
+            then check again.
+          </p>
+        `}
+
+        <div class="dbs-foot">
+          <span><i class="fas fa-clock" aria-hidden="true"></i> ${formatDbStatusTime(status.checkedAt)}</span>
+          <span class="dbs-table"><i class="fas fa-table" aria-hidden="true"></i> ${table}</span>
+        </div>
       </div>
     `);
   }
+
+  // Lets the Check again button inside the status card re-run the same check the
+  // chip does. The button spins while the request is in flight; refreshDbStatus
+  // re-renders the whole card on completion, which replaces the button.
+  window.dkRecheckDb = () => {
+    const btn = document.querySelector('.db-status-popup .dbs-recheck');
+    if (btn) {
+      btn.classList.add('is-busy');
+      btn.disabled = true;
+    }
+    return refreshDbStatus(true);
+  };
 
   function initDbStatusMonitor() {
     const button = document.getElementById('dbStatusButton');
@@ -342,12 +409,13 @@ function showPopup(type, message) {
 
 // ==== DOCS SECTION: VEHICLE DOCS LOGIC ====
 
+// The four fixed slots. Anything else in vehicle_documents.document_type is a
+// user-added document and gets its own card built at load time.
 const VEHICLE_TYPES = [
   'Driving License',
   'Registration Certificate',
   'Pollution Certificate',
-  'Insurance Policy',
-  'Other Document'
+  'Insurance Policy'
 ];
 
 // Helper: get signed URL for private bucket
@@ -603,6 +671,9 @@ async function getLatestVehicleDoc(type) {
 }
 
 // The main initializer for docs section. Fast path: one DB query for all vehicle docs, no signed URLs until View is tapped.
+// Kept so a refresh can re-render the fixed cards without re-wiring them.
+let docsFixedCards = [];
+
 async function initDocsUpload() {
   if (spinlogLazyState.docsSetup) return;
   spinlogLazyState.docsSetup = true;
@@ -620,7 +691,15 @@ async function initDocsUpload() {
     };
   }).filter(Boolean);
 
-  cards.forEach(({ type, fileInput, uploadBtn, previewEl, headerDeleteBtn }) => {
+  cards.forEach(wireDocCard);
+  docsFixedCards = cards;
+
+  await loadVehicleDocsFast(cards);
+}
+
+/** Wire one document card's upload / delete behaviour. */
+function wireDocCard({ type, fileInput, uploadBtn, previewEl, headerDeleteBtn }) {
+  {
     uploadBtn?.addEventListener('click', () => fileInput.click());
 
     if (headerDeleteBtn) {
@@ -678,19 +757,188 @@ async function initDocsUpload() {
       showUploadedBadge(previewEl);
       fileInput.value = '';
     });
+  }
+}
+
+/**
+ * Build a card for a user-added document type and wire it like the fixed ones.
+ * Returns the same descriptor shape loadVehicleDocsFast() expects.
+ */
+function createCustomDocCard(type, notes) {
+  const grid = document.querySelector('.vehicle-docs-grid');
+  if (!grid) return null;
+
+  const existing = grid.querySelector(`.doc-card[data-type="${CSS.escape(type)}"]`);
+  if (existing) return null;
+
+  const card = document.createElement('div');
+  card.className = 'doc-card is-custom';
+  card.dataset.type = type;
+  card.innerHTML = `
+    <div class="doc-card-top">
+      <div class="doc-icon"><i class="fas fa-file-lines"></i></div>
+      <button class="doc-delete-btn" title="Delete ${docsEscapeAttr(type)}" aria-label="Delete ${docsEscapeAttr(type)}">
+        <i class="fas fa-trash"></i>
+      </button>
+    </div>
+    <h4>${docsEscapeHtml(type)}</h4>
+    ${notes ? `<span class="doc-note">${docsEscapeHtml(notes)}</span>` : '<p>Added by you.</p>'}
+    <span class="doc-status-chip">Custom</span>
+    <input type="file" accept="image/*,.pdf" hidden />
+    <button class="upload-btn angled-btn" type="button"><i class="fas fa-cloud-arrow-up"></i> Upload Document</button>
+    <div class="doc-preview"></div>`;
+
+  // keep the add tile last
+  const tile = document.getElementById('docAddTile');
+  if (tile) grid.insertBefore(card, tile); else grid.appendChild(card);
+
+  const descriptor = {
+    type,
+    card,
+    fileInput: card.querySelector('input[type="file"]'),
+    uploadBtn: card.querySelector('.upload-btn'),
+    previewEl: card.querySelector('.doc-preview'),
+    headerDeleteBtn: card.querySelector('.doc-delete-btn'),
+  };
+  wireDocCard(descriptor);
+  return descriptor;
+}
+
+/* ── Add-a-document flow ───────────────────────────────────────────────── */
+
+function setupDocAddFlow() {
+  const tile = document.getElementById('docAddTile');
+  const modal = document.getElementById('docAddModal');
+  const nameEl = document.getElementById('docAddName');
+  const notesEl = document.getElementById('docAddNotes');
+  const pickBtn = document.getElementById('docAddPick');
+  const fileEl = document.getElementById('docAddFile');
+  const fileName = document.getElementById('docAddFileName');
+  const hint = document.getElementById('docAddHint');
+  const saveBtn = document.getElementById('docAddSave');
+  if (!tile || !modal || !nameEl || !fileEl) return;
+
+  const RESERVED = new Set(VEHICLE_TYPES.map(t => t.toLowerCase()));
+
+  function setHint(msg, bad) {
+    if (!hint) return;
+    hint.textContent = msg;
+    hint.classList.toggle('is-bad', !!bad);
+  }
+
+  function close() {
+    modal.classList.remove('sl-modal--open');
+    modal.setAttribute('aria-hidden', 'true');
+  }
+
+  function open() {
+    nameEl.value = '';
+    if (notesEl) notesEl.value = '';
+    fileEl.value = '';
+    if (fileName) fileName.textContent = 'Choose a file…';
+    pickBtn?.classList.remove('has-file');
+    setHint('Give it a short name so you can find it later.', false);
+    modal.classList.add('sl-modal--open');
+    modal.setAttribute('aria-hidden', 'false');
+    setTimeout(() => nameEl.focus({ preventScroll: true }), 60);
+  }
+
+  tile.addEventListener('click', open);
+  document.getElementById('docAddClose')?.addEventListener('click', close);
+  modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && modal.classList.contains('sl-modal--open')) close();
   });
 
-  await loadVehicleDocsFast(cards);
+  pickBtn?.addEventListener('click', () => fileEl.click());
+  fileEl.addEventListener('change', () => {
+    const f = fileEl.files[0];
+    if (fileName) fileName.textContent = f ? f.name : 'Choose a file…';
+    pickBtn?.classList.toggle('has-file', !!f);
+  });
+
+  saveBtn?.addEventListener('click', async () => {
+    const type = nameEl.value.trim().replace(/\s+/g, ' ');
+    const file = fileEl.files[0];
+
+    if (!type) { setHint('Name the document first.', true); nameEl.focus(); return; }
+    if (RESERVED.has(type.toLowerCase())) {
+      setHint(`"${type}" already has its own card above.`, true); return;
+    }
+    if (document.querySelector(`.doc-card[data-type="${CSS.escape(type)}"]`)) {
+      setHint(`You already have a document called "${type}".`, true); return;
+    }
+    if (!file) { setHint('Pick a file to upload.', true); return; }
+    if (typeof validateFileUpload === 'function' && !validateFileUpload(file)) return;
+
+    const clean = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
+    const storedName = `${Date.now()}-${clean}`;
+    const contentType = file.type || 'application/octet-stream';
+
+    close();
+    startUploadPercent();
+
+    const { error: uploadErr } = await supabase.storage
+      .from('vehicle-documents')
+      .upload(storedName, file, { contentType, cacheControl: '3600', upsert: false });
+    if (uploadErr) { updatePopup('error', 'Upload failed'); return; }
+
+    const notes = (notesEl?.value || '').trim();
+    const row = {
+      file_name: storedName,
+      original_name: file.name,
+      document_type: type,
+      file_size: file.size,
+      content_type: contentType,
+      upload_date: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    // Older deployments of this table have no notes column. Try with notes,
+    // and fall back to the bare row rather than failing the whole upload.
+    let { error } = await supabase.from('vehicle_documents').insert([{ ...row, notes }]);
+    if (error && /notes/i.test(error.message || '')) {
+      console.warn('[SpinLog] vehicle_documents has no notes column; saving without it.');
+      ({ error } = await supabase.from('vehicle_documents').insert([row]));
+    }
+    if (error) {
+      updatePopup('error', 'DB error');
+      await supabase.storage.from('vehicle-documents').remove([storedName]);
+      return;
+    }
+
+    const descriptor = createCustomDocCard(type, notes);
+    if (descriptor) {
+      renderVehicleDocPreview(descriptor.previewEl, type, storedName, file.name, descriptor.uploadBtn);
+      showUploadedBadge(descriptor.previewEl);
+    }
+    updatePopup('success', 'Document added!');
+    if (window.triggerRecordSavedNotif) window.triggerRecordSavedNotif();
+  });
 }
+
+/* Guards against two overlapping refreshes finishing out of order and leaving
+   the grid showing the older result. Same pattern as serviceRenderRun. */
+let docsRenderRun = 0;
 
 async function loadVehicleDocsFast(cards) {
   if (!cards?.length) return;
-  const types = cards.map(c => c.type);
-  const { data, error } = await supabase
+  const renderId = ++docsRenderRun;
+  // No document_type filter: user-added documents are exactly the rows whose
+  // type is not one of the fixed four, and we need them to rebuild their cards.
+  // notes is optional in older schemas, so ask for it and retry without.
+  let { data, error } = await supabase
     .from('vehicle_documents')
-    .select('file_name,original_name,document_type,upload_date')
-    .in('document_type', types)
+    .select('file_name,original_name,document_type,upload_date,notes')
     .order('upload_date', { ascending: false });
+  if (error && /notes/i.test(error.message || '')) {
+    ({ data, error } = await supabase
+      .from('vehicle_documents')
+      .select('file_name,original_name,document_type,upload_date')
+      .order('upload_date', { ascending: false }));
+  }
+
+  if (renderId !== docsRenderRun) return;
 
   const latestByType = new Map();
   if (!error && data) {
@@ -699,7 +947,30 @@ async function loadVehicleDocsFast(cards) {
     }
   }
 
-  cards.forEach(({ type, previewEl, uploadBtn, headerDeleteBtn }) => {
+  const known = new Set(VEHICLE_TYPES);
+
+  /* Drop custom cards the vault no longer has a row for. createCustomDocCard()
+     only ever added, so a deleted custom document kept its card until a full
+     reload — and since the section keeps its DOM while hidden, that stale card
+     was still there on the next visit. Skipped when the query failed, so a
+     network blip never wipes the grid. */
+  if (!error) {
+    document.querySelectorAll('.vehicle-docs-grid .doc-card.is-custom').forEach((card) => {
+      const type = card.dataset.type;
+      if (type && !latestByType.has(type)) card.remove();
+    });
+  }
+
+  // rebuild a card for every custom type found in the data
+  const all = cards.filter(({ card }) => card.isConnected);
+  for (const type of latestByType.keys()) {
+    if (known.has(type)) continue;
+    const descriptor = createCustomDocCard(type, latestByType.get(type)?.notes);
+    // already on the page from a previous load — reuse its nodes
+    all.push(descriptor || describeExistingDocCard(type));
+  }
+
+  all.filter(Boolean).forEach(({ type, previewEl, uploadBtn, headerDeleteBtn }) => {
     const row = latestByType.get(type);
     if (row) {
       renderVehicleDocPreview(previewEl, type, row.file_name, row.original_name, uploadBtn);
@@ -710,13 +981,50 @@ async function loadVehicleDocsFast(cards) {
       if (headerDeleteBtn) headerDeleteBtn.style.display = 'none';
     }
   });
+
+  // the static markup's Upload/Delete buttons were hidden until now
+  document.querySelector('.vehicle-docs-grid')?.classList.remove('is-loading');
+}
+
+/**
+ * Descriptor for a custom card that is already in the DOM (wired on a previous
+ * load), so a refresh can re-render it without duplicating listeners.
+ */
+function describeExistingDocCard(type) {
+  const card = document.querySelector(`.vehicle-docs-grid .doc-card[data-type="${CSS.escape(type)}"]`);
+  if (!card) return null;
+  return {
+    type,
+    card,
+    fileInput: card.querySelector('input[type="file"]'),
+    uploadBtn: card.querySelector('.upload-btn'),
+    previewEl: card.querySelector('.doc-preview'),
+    headerDeleteBtn: card.querySelector('.doc-delete-btn'),
+  };
 }
 
 async function ensureDocsLoaded() {
-  if (spinlogLazyState.docsLoaded) return;
-  spinlogLazyState.docsLoaded = true;
-  await initDocsUpload();
-  await loadHistoricUploads();
+  if (!spinlogLazyState.docsLoaded) {
+    spinlogLazyState.docsLoaded = true;
+    setupDocAddFlow();
+    /* The grid's first paint comes from static HTML, before the vault query
+       resolves, so every card would briefly show "Upload Document" and a delete
+       button — including cards whose document is already stored. Hide those
+       controls behind a skeleton until the data lands. */
+    document.querySelector('.vehicle-docs-grid')?.classList.add('is-loading');
+    await initDocsUpload();
+    await loadHistoricUploads();
+    return;
+  }
+
+  /* Every later visit. #docs keeps its DOM while hidden (section { display:none }
+     with a fadeIn on .active), so without this you are looking at whatever was
+     rendered last time and it never self-corrects — that is the "old entry
+     appears for a split second" ghost. */
+  await Promise.all([
+    loadVehicleDocsFast(docsFixedCards),
+    loadHistoricUploads(),
+  ]);
 }
 
 // --- HISTORIC MEDIA LOGIC ---
@@ -854,8 +1162,7 @@ async function getHistoricMediaUrl(fileName) {
 }
 
 window._historicMediaRows = new Map();
-window._emiRows = new Map();
-const spinlogLazyState = { docsSetup: false, docsLoaded: false, emiLoaded: false, serviceLoaded: false };
+const spinlogLazyState = { docsSetup: false, docsLoaded: false, serviceLoaded: false };
 
 
 function buildHistoricPreview(row) {
@@ -916,9 +1223,6 @@ async function loadHistoricUploads() {
   }
   if (!data.length) {
     window._historicMediaRows = new Map();
-window._emiRows = new Map();
-const spinlogLazyState = { docsSetup: false, docsLoaded: false, emiLoaded: false, serviceLoaded: false };
-
     table.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#777;">No uploads yet</td></tr>';
     return;
   }
@@ -1179,7 +1483,24 @@ window._showImagePreview = function(url) {
   const mobileMenu = document.getElementById('mobileMenu');
   const mobileOverlay = document.getElementById('mobileOverlay');
 
+  // ── Which page you were on, remembered across refreshes ──────────────
+  const SECTION_KEY = 'spinlogActiveSection';
+
+  /** Only accept a name that is actually a section in this document. */
+  function isKnownSection(name) {
+    return !!name && !!document.getElementById(name)
+      && document.getElementById(name).matches('main section');
+  }
+
+  function rememberSection(section) {
+    try { localStorage.setItem(SECTION_KEY, section); } catch { /* private mode */ }
+    // Best effort only. On a file:// origin some browsers refuse replaceState,
+    // and localStorage above is the part that actually has to work.
+    try { history.replaceState(null, '', `#${section}`); } catch { /* ignore */ }
+  }
+
   function setActiveSection(section) {
+    if (!isKnownSection(section)) return;
     navItems.forEach(nav => nav.classList.remove('active'));
     navButtons.forEach(btn => btn.removeAttribute('aria-current'));
     document.querySelectorAll(`[data-section="${section}"]`).forEach(nav => {
@@ -1189,10 +1510,19 @@ window._showImagePreview = function(url) {
     });
     sections.forEach(sec => sec.classList.remove('active'));
     document.getElementById(section).classList.add('active');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    // Instant, not smooth: animating a long scroll while the incoming section
+    // is doing its first layout is what made navigation feel sluggish.
+    window.scrollTo({ top: 0, behavior: 'auto' });
+    // The backdrop stays on screen everywhere, but it only needs to ANIMATE on
+    // home. Off home it is a static image behind a long scrolling list, and a
+    // full-viewport shader redrawing per frame is pure scroll cost.
+    window.SpinLog3D?.setAnimating?.(section === 'home');
     closeMobileMenu();
     ensureSectionData(section);
+    rememberSection(section);
   }
+  // Exposed so the v1.7 command-center search can navigate between sections.
+  window.dkNavigate = setActiveSection;
   navButtons.forEach(button => {
     button.addEventListener('click', e => {
       e.preventDefault();
@@ -1416,17 +1746,37 @@ window._showImagePreview = function(url) {
     const diff = Math.ceil((dueDate - today) / 86400000);
     const formatted = due.split('-').reverse().join('-');
     el.classList.remove('expired', 'expiring');
+
+    // Two-part output matching the .dk-cover-status contract in home.css:
+    // a coloured state pill plus the plain date underneath.
+    let state, icon, note;
     if (diff < 0) {
-      el.textContent = 'Expired on ' + formatted; el.classList.add('expired');
+      el.classList.add('expired');
+      state = 'Expired';
+      icon = 'fa-circle-exclamation';
+      note = 'Lapsed on ' + formatted;
     } else if (diff <= 30) {
-      el.textContent = `Expiring in ${diff} day${diff === 1 ? '' : 's'} (${formatted})`; el.classList.add('expiring');
+      el.classList.add('expiring');
+      state = `${diff} day${diff === 1 ? '' : 's'} left`;
+      icon = 'fa-triangle-exclamation';
+      note = 'Renew by ' + formatted;
     } else {
-      el.textContent = 'Active until ' + formatted;
+      state = 'Active';
+      icon = 'fa-circle-check';
+      note = 'Valid till ' + formatted;
     }
+
+    el.innerHTML =
+      `<b class="dk-cover-state"><i class="fas ${icon}" aria-hidden="true"></i>${state}</b>` +
+      `<small>${note}</small>`;
   }
   window.updateCoverBadge = updateCoverBadge;
   setupCoverDateEditing();
-  document.querySelectorAll('.status[data-due]').forEach(updateCoverBadge);
+  document.querySelectorAll('.dk-cover-status[data-due]').forEach(updateCoverBadge);
+  // Then pull the authoritative dates from vehicle_cover and repaint. Left
+  // unawaited on purpose: the cards already show the local values, so this is
+  // a correction pass rather than a blocking load.
+  window.dkCoverStore.hydrate();
 
   // Hide Next Due for Mods/Updates
   document.getElementById('serviceType')?.addEventListener('change', function() {
@@ -1738,6 +2088,9 @@ window._showImagePreview = function(url) {
       updateHomeText('home-last-mobile', 'N/A');
       updateHomeText('home-next', 'N/A');
       updateHomeText('home-next-mobile', 'N/A');
+      if (window.dkHomeInsights) {
+        window.dkHomeInsights({ all: serviceEntries, services: [], maxOdo: 0, latest: null });
+      }
       return;
     }
 
@@ -1756,16 +2109,43 @@ window._showImagePreview = function(url) {
     updateHomeText('home-next', nextDate);
     updateHomeText('home-next-mobile', nextDate);
 
-    // ── Sage notification triggers ──
-    if (window.checkServiceNotif)  window.checkServiceNotif(maxOdo, latest.next_due || null);
-
-    // Sync next service date to service worker for background notifications
-    if (latest.next_due && navigator.serviceWorker && navigator.serviceWorker.controller) {
-      navigator.serviceWorker.controller.postMessage({
-        type: 'SPINLOG_SYNC_NOTIF_DATA',
-        payload: { nextServiceDate: latest.next_due, lastAppOpen: Date.now() }
-      });
+    // Hand the same data to the v1.7 command-center widgets (odometer delta,
+    // relative dates, maintenance timeline, next-service projection).
+    if (window.dkHomeInsights) {
+      window.dkHomeInsights({ all: serviceEntries, services: serviceOnly, maxOdo, latest });
     }
+
+    // ── Sage notification triggers ──
+    // serviceOnly is handed over so the scheduler can estimate today's odometer
+    // and warn on distance, not just on the calendar.
+    if (window.checkServiceNotif) {
+      window.checkServiceNotif(maxOdo, latest.next_due || null, serviceOnly);
+    }
+
+    // The health card needs real records, so it is built here rather than at
+    // boot when the snapshot is still empty.
+    if (window.sageRefreshHealthCard) window.sageRefreshHealthCard();
+
+    // Sync service data to the worker for background notifications. Only the
+    // service keys are sent — the worker merges, so the cover dates written by
+    // syncNotifDataToSW() survive this write.
+    //
+    // kmPerDay and the last reading go along too, so the worker can re-project
+    // the odometer at wake time instead of reusing a stale estimate.
+    const kmPerDay = window.SageScheduler?.averageKmPerDay
+      ? window.SageScheduler.averageKmPerDay(serviceOnly)
+      : null;
+    postToSW({
+      type: 'SPINLOG_SYNC_NOTIF_DATA',
+      payload: {
+        nextServiceDate: latest.next_due || null,
+        maxOdo,
+        lastRecordOdo: maxOdo,
+        lastRecordDate: latest.date || null,
+        kmPerDay,
+        lastAppOpen: Date.now(),
+      }
+    });
   }
 
   function getServiceTypeClass(type) {
@@ -2196,513 +2576,14 @@ function createFileInfoElement() {
 };
 
 
-// ========================================
-// COMPLETE EMI MANAGEMENT SYSTEM
-// ========================================
-
-// EMI Configuration - Update these values as needed
-const EMI_CONFIG = {
-  loanAmount: 199704,
-  emiAmount: 5788,
-  totalEMIs: 48,
-  startDate: '2025-08-03', // First EMI date (3rd August 2025)
-  interestRate: 17.04
-};
-
-// ========================================
-// 1. INITIALIZE EMI SYSTEM
-// ========================================
-function initEMISystem() {
-  if (spinlogLazyState.emiLoaded) return;
-  spinlogLazyState.emiLoaded = true;
- 
-  // Setup tab switching
-  setupEMITabs();
-  
-  // Setup file uploads
-  setupEMIFileUploads();
-  
-  // Calculate and display due dates
-  calculateEMIDueDates();
-  
-  // Load EMI history
-  loadEMIHistory();
-  
-  // Setup dynamic EMI counter
-  updateEMIProgress();
-}
-
-// ========================================
-// 2. TAB SWITCHING FUNCTIONALITY
-// ========================================
-function setupEMITabs() {
-  const tabButtons = document.querySelectorAll('.emi-tab-btn');
-  const tabContents = document.querySelectorAll('.emi-tab-content');
-  
-  tabButtons.forEach((button, index) => {
-    button.addEventListener('click', () => {
-      // Remove active class from all tabs and contents
-      tabButtons.forEach(btn => btn.classList.remove('active'));
-      tabContents.forEach(content => content.classList.remove('active'));
-      
-      // Add active class to clicked tab and corresponding content
-      button.classList.add('active');
-      tabContents[index].classList.add('active');
-    });
-  });
-}
-
-// ========================================
-// 3. DUE DATE CALCULATION
-// ========================================
-function calculateEMIDueDates() {
-  const startDate = new Date(EMI_CONFIG.startDate);
-  const currentDate = new Date();
-  
-  // Calculate next EMI due date
-  const nextEMIDate = new Date(startDate);
-  let monthsElapsed = 0;
-  
-  // Find how many months have passed since start date
-  while (nextEMIDate <= currentDate) {
-    monthsElapsed++;
-    nextEMIDate.setMonth(startDate.getMonth() + monthsElapsed);
-    nextEMIDate.setFullYear(startDate.getFullYear() + Math.floor((startDate.getMonth() + monthsElapsed) / 12));
-  }
-  
-  // Update due date in UI
-  const dueDateElements = document.querySelectorAll('.emi-due-date');
-  dueDateElements.forEach(el => {
-    el.textContent = nextEMIDate.toLocaleDateString('en-GB');
-  });
-
-  // ── Sage EMI notification ──
-  if (window.checkEMINotif) window.checkEMINotif(nextEMIDate);
-}
-
-// ========================================
-// 4. FILE UPLOAD SYSTEM
-// ========================================
-function setupEMIFileUploads() {
-  // Setup file input change listeners
-  const fileInputs = document.querySelectorAll('input[type="file"]');
-  fileInputs.forEach(input => {
-    input.addEventListener('change', handleFileSelection);
-  });
-  
-  // Setup upload button listeners
-  const uploadButtons = document.querySelectorAll('.emi-confirm-btn');
-  uploadButtons.forEach(button => {
-    button.addEventListener('click', handleEMIUpload);
-  });
-}
-
-function handleFileSelection(event) {
-  const input = event.target;
-  const file = input.files[0];
-  const wrapper = input.closest('.upload-wrapper');
-  const filenameDisplay = wrapper.querySelector('.filename-display');
-  
-  if (file) {
-    // Validate file
-    if (!validateEMIFile(file)) {
-      input.value = '';
-      filenameDisplay.textContent = 'Choose file';
-      filenameDisplay.classList.remove('selected');
-      return;
-    }
-    
-    // Show selected filename
-    filenameDisplay.textContent = file.name;
-    filenameDisplay.classList.add('selected');
-  } else {
-    filenameDisplay.textContent = 'Choose file';
-    filenameDisplay.classList.remove('selected');
-  }
-}
-
-function validateEMIFile(file) {
-  const maxSize = 5 * 1024 * 1024; // 5MB
-  const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf', 'image/webp'];
-  
-  if (file.size > maxSize) {
-    showPopup('error', 'File size must be less than 5MB');
-    return false;
-  }
-  
-  if (!allowedTypes.includes(file.type)) {
-    showPopup('error', 'Only JPG, PNG, PDF, and WebP files are allowed');
-    return false;
-  }
-  
-  return true;
-}
-
-// ========================================
-// 5. UPLOAD HANDLER
-// ========================================
-async function handleEMIUpload(event) {
-  const button = event.target;
-  const type = button.dataset.type; // 'Monthly' or 'Part'
-  const inputId = button.dataset.inputId;
-  const input = document.getElementById(inputId);
-  const file = input.files[0];
-  
-  if (!file) {
-    showPopup('error', 'Please select a file first');
-    return;
-  }
-  
-  // Get amount based on type
-  let amount = EMI_CONFIG.emiAmount; // Default monthly amount
-  
-  if (type === 'Part') {
-    const customAmountInput = document.getElementById('customPartAmount');
-    const customAmount = parseFloat(customAmountInput.value);
-    
-    if (!customAmount || customAmount <= 0) {
-      showPopup('error', 'Please enter a valid part payment amount');
-      return;
-    }
-    amount = customAmount;
-  }
-
-  // Disable button during upload
-  const originalText = button.innerHTML;
-  button.disabled = true;
-  button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Uploading...';
-  
-  try {
-    await uploadEMIReceipt(file, type, amount);
-    
-    // Clear form
-    input.value = '';
-    const filenameDisplay = input.closest('.upload-wrapper').querySelector('.filename-display');
-    filenameDisplay.textContent = 'Choose file';
-    filenameDisplay.classList.remove('selected');
-    
-    if (type === 'Part') {
-      document.getElementById('customPartAmount').value = '';
-    }
-    
-  } catch (error) {
-    console.error('Upload failed:', error);
-    showPopup('error', 'Upload failed: ' + error.message);
-  } finally {
-    // Re-enable button
-    button.disabled = false;
-    button.innerHTML = originalText;
-  }
-}
-
-// ========================================
-// 6. SUPABASE UPLOAD FUNCTION
-// ========================================
-async function uploadEMIReceipt(file, type, amount) {
-  
-  // Generate unique filename
-  const timestamp = Date.now();
-  const cleanName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
-  const fileName = `${timestamp}-${cleanName}`;
-  
-  // Start upload progress
-  startUploadPercent();
-  
-  try {
-    // 1. Upload file to Supabase Storage
-    const { error: uploadError } = await supabase
-      .storage
-      .from('emi-files')
-      .upload(fileName, file, {
-        contentType: file.type,
-        cacheControl: '3600',
-        upsert: false
-      });
-    
-    if (uploadError) {
-      throw new Error(`Storage upload failed: ${uploadError.message}`);
-    }
-    
-    // 2. Insert record into database
-    const { data, error: dbError } = await supabase
-      .from('emi_record_table')
-      .insert([{
-        date_paid: new Date().toISOString().split('T')[0],
-        amount: amount,
-        type: type,
-        file_name: fileName,
-        original_name: file.name,
-        upload_date: new Date().toISOString()
-      }])
-      .select();
-    
-    if (dbError) {
-      // If database insert fails, clean up the uploaded file
-      await supabase.storage.from('emi-files').remove([fileName]);
-      throw new Error(`Database insert failed: ${dbError.message}`);
-    }
-    
-    // 3. Success actions
-    finishUploadPercent();
-    showPopup('success', `${type} payment receipt uploaded successfully!`);
-    
-    // Reload the history table
-    await loadEMIHistory();
-    
-    // Update EMI progress
-    updateEMIProgress();
-    
-  } catch (error) {
-    errorUploadPercent();
-    throw error;
-  }
-}
-
-// ========================================
-// 7. LOAD EMI HISTORY
-// ========================================
-async function loadEMIHistory() {
-  const tbody = document.querySelector('#emiRecordTable tbody');
-  if (!tbody) {
-    console.warn('⚠️ EMI table not found');
-    return;
-  }
-  
-  // Show loading state
-  tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#888;">Loading records...</td></tr>';
-  
-  try {
-    const { data, error } = await supabase
-      .from('emi_record_table')
-      .select('*')
-      .order('upload_date', { ascending: false });
-    
-    if (error) {
-      throw new Error(error.message);
-    }
-    
-    if (!data || data.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#666;">No EMI records found</td></tr>';
-      return;
-    }
-    
-    // Clear loading state
-    tbody.innerHTML = '';
-    
-    // Render each record
-    window._emiRows = new Map();
-    for (const record of data) {
-      renderEMIRecord(record, tbody);
-    }
-    
-  } catch (error) {
-    console.error('Failed to load EMI history:', error);
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#b44;">Failed to load records</td></tr>';
-  }
-}
-
-function renderEMIRecord(record, tbody) {
-  try {
-    window._emiRows.set(Number(record.id), record);
-
-    const truncateFilename = (filename, maxLength = 25) => {
-      if (!filename) return 'Receipt';
-      if (filename.length <= maxLength) return filename;
-      const ext = filename.split('.').pop();
-      const nameWithoutExt = filename.substring(0, filename.lastIndexOf('.')) || filename;
-      return nameWithoutExt.substring(0, Math.max(8, maxLength - ext.length - 5)) + '.....' + ext;
-    };
-
-    const displayName = truncateFilename(record.original_name);
-    const preview = `<button class="docs-preview-pill emi-preview-pill" type="button" onclick="window._openEMIReceipt && window._openEMIReceipt(${Number(record.id)})" title="Open receipt: ${docsEscapeAttr(record.original_name || '')}"><i class="fas fa-arrow-up-right-from-square"></i> ${docsEscapeHtml(displayName)}</button>`;
-    const deleteBtn = `<button class="delete-btn" title="Delete record" onclick="deleteEMIRecord(${Number(record.id)}, '${docsEscapeAttr(record.file_name)}', this)">×</button>`;
-
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td data-label="Date Paid">${new Date(record.date_paid).toLocaleDateString('en-GB')}</td>
-      <td data-label="Amount (₹)">₹${Number(record.amount || 0).toLocaleString('en-IN')}</td>
-      <td data-label="Type">${docsEscapeHtml(record.type || '-')}</td>
-      <td data-label="Preview">${preview}</td>
-      <td data-label="Action">${deleteBtn}</td>
-    `;
-
-    tbody.appendChild(tr);
-  } catch (error) {
-    console.error('Failed to render EMI record:', error);
-  }
-}
-
-window._openEMIReceipt = async function(id) {
-  const record = window._emiRows?.get(Number(id));
-  if (!record?.file_name) {
-    updatePopup('error', 'Could not find this receipt. Refresh and try again.');
-    return;
-  }
-  showPopup('loading', 'Opening receipt...');
-  const signedUrl = await getEMIFileUrl(record.file_name);
-  hidePopup();
-  if (!signedUrl) {
-    updatePopup('error', 'Could not create receipt link.');
-    return;
-  }
-  window.open(signedUrl, '_blank', 'noopener');
-};
-
-// ========================================
-// 8. GET SIGNED URL FOR FILES
-// ========================================
-async function getEMIFileUrl(fileName) {
-  try {
-    const { data, error } = await supabase
-      .storage
-      .from('emi-files')
-      .createSignedUrl(fileName, 3600); // Valid for 1 hour
-    
-    if (error || !data) {
-      console.warn(`Failed to get signed URL for ${fileName}:`, error);
-      return null;
-    }
-    
-    return data.signedUrl;
-  } catch (error) {
-    console.error('Error getting signed URL:', error);
-    return null;
-  }
-}
-
-// ========================================
-// 9. DELETE EMI RECORD
-// ========================================
-async function deleteEMIRecord(id, fileName, buttonElement) {
-  confirmDeleteWithHold(
-    "Are you sure you want to delete this EMI record?<br><b>This action cannot be undone.</b>",
-    async () => {
-      showPopup('loading', 'Deleting EMI record...');
-      
-      try {
-        // Delete from database
-        const { error: dbError } = await supabase
-          .from('emi_record_table')
-          .delete()
-          .eq('id', id);
-        
-        if (dbError) {
-          throw new Error(`Database delete failed: ${dbError.message}`);
-        }
-        
-        // Delete from storage
-        const { error: storageError } = await supabase
-          .storage
-          .from('emi-files')
-          .remove([fileName]);
-        
-        if (storageError) {
-          // Don't throw error for storage delete failures
-        }
-        
-        // Remove row from table
-        buttonElement.closest('tr').remove();
-        
-        // Update progress
-        updateEMIProgress();
-        
-        updatePopup('success', 'EMI record deleted successfully!');
-        
-      } catch (error) {
-        updatePopup('error', 'Failed to delete record: ' + error.message);
-      }
-    }
-  );
-}
-
-// Make delete function globally available
-window.deleteEMIRecord = deleteEMIRecord;
-
-// ========================================
-// 10. UPDATE EMI PROGRESS & COUNTERS (FIXED)
-// ========================================
-async function updateEMIProgress() {
-  try {
-    // Get all monthly EMI payments
-    const { data, error } = await supabase
-      .from('emi_record_table')
-      .select('*')
-      .eq('type', 'Monthly')
-      .order('date_paid', { ascending: true });
-    
-    if (error) {
-      console.warn('Failed to fetch EMI progress:', error);
-      return;
-    }
-    
-    const paidEMIs = data ? data.length : 0;
-    const remainingEMIs = Math.max(0, EMI_CONFIG.totalEMIs - paidEMIs);
-    
-    // Update remaining EMIs display - FIXED TO USE CORRECT ID
-    const remainingElement = document.getElementById('remainingEMIs');
-    if (remainingElement) {
-      remainingElement.textContent = remainingEMIs.toString();
-    } else {
-      console.warn('⚠️ Remaining EMIs element not found!');
-    }
-    
-    // Update part payment status
-    await updatePartPaymentStatus();
-    
-  } catch (error) {
-    console.error('Failed to update EMI progress:', error);
-  }
-}
-
-async function updatePartPaymentStatus() {
-  try {
-    // Get all part payments
-    const { data, error } = await supabase
-      .from('emi_record_table')
-      .select('*')
-      .eq('type', 'Part')
-      .order('date_paid', { ascending: true });
-    
-    if (error) {
-      console.warn('Failed to fetch part payments:', error);
-      return;
-    }
-    
-    const partPayments = data || [];
-    
-    // Update part payment status displays
-    for (let i = 1; i <= 3; i++) {
-      const statusElement = document.getElementById(`part${i}Status`);
-      if (statusElement) {
-        if (partPayments[i - 1]) {
-          const payment = partPayments[i - 1];
-          statusElement.textContent = `Paid ₹${payment.amount.toLocaleString('en-IN')} on ${new Date(payment.date_paid).toLocaleDateString('en-GB')}`;
-          statusElement.style.color = '#28a745';
-        } else {
-          statusElement.textContent = 'Pending';
-          statusElement.style.color = '#ffc107';
-        }
-      }
-    }
-    
-  } catch (error) {
-    console.error('Failed to update part payment status:', error);
-  }
-}
-
-// ========================================
-// 11. INITIALIZE EVERYTHING
-// ========================================
-
-// EMI data is loaded lazily when the EMI section is opened.
-
   function ensureSectionData(section) {
     if (section === 'docs') {
       ensureDocsLoaded();
       return;
     }
-    if (section === 'emi') {
-      initEMISystem();
+    if (section === 'sage') {
+      // Repaint the conversation and re-read her mood on every visit.
+      if (window.sageOnSectionOpen) window.sageOnSectionOpen();
       return;
     }
     if (section === 'service' && !spinlogLazyState.serviceLoaded) {
@@ -2724,11 +2605,31 @@ async function updatePartPaymentStatus() {
     // ── Sage notification system boot ──
     if (window.checkReEngagementNotif) window.checkReEngagementNotif();
     if (window.checkAnniversaryNotif) window.checkAnniversaryNotif('2025-06-27');
-    document.querySelectorAll('.home-cover-card .status[data-due]').forEach(el => {
-      const label = el.closest('.home-stat-card')?.querySelector('.home-stat-label')?.textContent?.trim() || 'Cover';
+    document.querySelectorAll('.dk-cover-card .dk-cover-status[data-due]').forEach(el => {
+      const label = el.closest('.dk-cover-card')?.querySelector('.dk-cover-label')?.textContent?.trim() || 'Cover';
       if (window.checkInsuranceNotif) window.checkInsuranceNotif(el.getAttribute('data-due'));
       if (window.checkDocNotif) window.checkDocNotif(el.getAttribute('data-due'), label);
     });
+
+    // Sunday morning: queue the weekly read on herself.
+    if (window.SageScheduler?.checkWeeklyInsight) {
+      window.SageScheduler.checkWeeklyInsight().catch(() => {});
+    }
+
+    // Anything the scheduler deferred earlier (quiet hours, daily cap, min gap)
+    // gets another chance now that the app is open.
+    if (window.sagePump) window.sagePump();
+
+    // Top up Sage's written-ahead lines while we have a network. This is what
+    // lets background notifications sound like her without the service worker
+    // ever calling Gemini. Unawaited — nothing waits on her prose.
+    //
+    // Held back a few seconds so it does not share the opening moments with the
+    // health insight. Requests are serialized anyway, but keeping them out of the
+    // same minute is what actually keeps us under the free-tier ceiling.
+    if (window.SageAI?.refreshPools) {
+      setTimeout(() => window.SageAI.refreshPools().catch(() => {}), 8000);
+    }
 
     // ── Sync notification data to service worker for background checks ──
     syncNotifDataToSW();
@@ -2739,38 +2640,76 @@ async function updatePartPaymentStatus() {
     // Load only service records on startup because Home needs ODO / last service / next service.
     spinlogLazyState.serviceLoaded = true;
     loadServiceEntries();
+
+    // Go back to whatever page you were last on. Deliberately last in initApp:
+    // the service lazy-load above has already run and set its flag, so
+    // restoring "service" here re-uses it instead of fetching twice.
+    restoreSection();
   }
+
+  /**
+   * Reopen the last-used section after a refresh.
+   * The URL hash wins when present, so a shared or bookmarked link still works;
+   * otherwise fall back to what was stored on the previous visit.
+   */
+  function restoreSection() {
+    const fromHash = (location.hash || '').replace(/^#/, '');
+    let stored = null;
+    try { stored = localStorage.getItem(SECTION_KEY); } catch { stored = null; }
+
+    const target = isKnownSection(fromHash) ? fromHash
+      : (isKnownSection(stored) ? stored : null);
+    // Home is already the markup default, so there is nothing to switch to.
+    if (!target || target === 'home') return;
+    setActiveSection(target);
+  }
+
+  // Browser back and forward move between sections rather than leaving the page.
+  window.addEventListener('hashchange', () => {
+    const name = (location.hash || '').replace(/^#/, '');
+    if (isKnownSection(name)) setActiveSection(name);
+  });
+
+  // ── Service worker messaging ────────────────────────────────────────
+  // navigator.serviceWorker.controller is null on the very first page load
+  // (nothing controls the page until the worker activates and claims it), so
+  // the old guard meant a fresh install never handed its notification data
+  // over. Going through the registration works on first load too.
+  async function postToSW(message) {
+    try {
+      if (!navigator.serviceWorker) return false;
+      const reg = await navigator.serviceWorker.ready;
+      const target = reg.active || navigator.serviceWorker.controller;
+      if (!target) return false;
+      target.postMessage(message);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  window.dkPostToSW = postToSW;
 
   // ── Sync notification-relevant data to service worker for background checks ──
   function syncNotifDataToSW() {
-    if (!navigator.serviceWorker || !navigator.serviceWorker.controller) return;
     // Gather insurance expiry dates from the cover cards
-    const coverCards = document.querySelectorAll('.home-cover-card .status[data-due]');
+    const coverCards = document.querySelectorAll('.dk-cover-card .dk-cover-status[data-due]');
     let earliestInsurance = null;
     coverCards.forEach(el => {
       const due = el.getAttribute('data-due');
       if (due && (!earliestInsurance || due < earliestInsurance)) earliestInsurance = due;
     });
 
-    // EMI next due date (3rd of each month, starting Aug 2025)
-    const emiStart = new Date(2025, 7, 3); // Aug 3, 2025
-    const now = new Date();
-    let nextEMI = new Date(now.getFullYear(), now.getMonth(), 3);
-    if (nextEMI <= now) nextEMI.setMonth(nextEMI.getMonth() + 1);
-    if (nextEMI < emiStart) nextEMI = emiStart;
-
+    // nextServiceDate is deliberately omitted rather than sent as null: the
+    // worker merges and skips null values, so omitting it leaves whatever
+    // updateHomeServiceInfo() already stored intact.
     const payload = {
       insuranceExpiry: earliestInsurance || null,
-      nextEMIDate: nextEMI.toISOString(),
-      nextServiceDate: null, // Will be updated after service records load
       lastAppOpen: Date.now(),
     };
 
-    navigator.serviceWorker.controller.postMessage({
-      type: 'SPINLOG_SYNC_NOTIF_DATA',
-      payload
-    });
+    return postToSW({ type: 'SPINLOG_SYNC_NOTIF_DATA', payload });
   }
+  window.dkSyncNotifData = syncNotifDataToSW;
 
   // ── Register periodic background sync ──
   async function registerPeriodicSync() {
@@ -2779,8 +2718,12 @@ async function updatePartPaymentStatus() {
       if ('periodicSync' in reg) {
         const status = await navigator.permissions.query({ name: 'periodic-background-sync' });
         if (status.state === 'granted') {
+          // minInterval is a floor, not a schedule — the browser decides the real
+          // cadence from engagement. Asking for 2 hours instead of 12 gives park
+          // reminders a chance to land while the app is closed; the scheduler's
+          // own cooldowns and daily cap stop that turning into spam.
           await reg.periodicSync.register('spinlog-sage-notifs', {
-            minInterval: 12 * 60 * 60 * 1000, // 12 hours
+            minInterval: 2 * 60 * 60 * 1000,
           });
         }
       }
@@ -2877,7 +2820,8 @@ async function updatePartPaymentStatus() {
         saveParkHistory(history);
         updateParkUI();
         showAppPopup('success', `Saved! ±${Math.round(accuracy)}m`);
-        if (window.triggerParkingNotif) window.triggerParkingNotif();
+        // The timestamp is what starts the reminder clock, so hand it over.
+        if (window.triggerParkingNotif) window.triggerParkingNotif(entry.timestamp);
         const addr = await reverseGeocode(lat, lng);
         if (addr) {
           const h = getParkHistory();
@@ -2918,6 +2862,8 @@ async function updatePartPaymentStatus() {
 
     list.querySelectorAll('.park-del-btn').forEach(btn => btn.addEventListener('click', () => {
       const h = getParkHistory(); h.splice(parseInt(btn.dataset.idx), 1); saveParkHistory(h); updateParkUI(); renderParkHistory();
+      // Reminders follow the newest entry, so deleting it ends the session.
+      if (window.sageSyncParkSession) window.sageSyncParkSession(h[0]?.timestamp || null);
     }));
     modal.setAttribute('aria-hidden', 'false');
     modal.classList.add('sl-modal--open');
@@ -2940,6 +2886,12 @@ async function updatePartPaymentStatus() {
 
   window.setupParkFeature = function() {
     updateParkUI();
+    // Re-point the reminder session at the newest entry on every open, so a
+    // cleared IndexedDB or a fresh install picks the session back up. Idempotent:
+    // the same timestamp does not restart the 2-hour clock.
+    if (window.sageSyncParkSession) {
+      window.sageSyncParkSession(getParkHistory()[0]?.timestamp || null);
+    }
     const mobileCard = document.getElementById('parkCardMobile');
     if (mobileCard) makeLongPress(mobileCard, saveCurrentParkLocation, renderParkHistory);
     document.getElementById('parkHistoryClose')?.addEventListener('click', closeParkModal);
@@ -2948,15 +2900,162 @@ async function updatePartPaymentStatus() {
 })();
 
 // ════════════════════════════════════════════════════════════
+// COVER STORE — expiry dates backed by Supabase
+//
+// Cover expiry used to live only in the data-due attributes in index.html,
+// with edits saved to localStorage. That made the dates invisible to anything
+// server-side and lost them on a browser data wipe. They now live in the
+// vehicle_cover table (see supabase/vehicle_cover.sql).
+//
+// Read precedence, highest first:
+//   1. vehicle_cover row      — source of truth when the DB is reachable
+//   2. localStorage           — offline fallback, written on every edit
+//   3. data-due in index.html — the original seed values
+//
+// Everything degrades quietly: if the table hasn't been created yet the app
+// behaves exactly as it did before.
+// ════════════════════════════════════════════════════════════
+window.dkCoverStore = (function() {
+  const COVER_KEY = 'spinlogCoverDates';
+  const TABLE = 'vehicle_cover';
+
+  /** Stable machine key for a cover, so relabelling a card keeps its row. */
+  function slug(label) {
+    return String(label || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  }
+
+  function readLocal() {
+    try { return JSON.parse(localStorage.getItem(COVER_KEY) || '{}'); } catch { return {}; }
+  }
+
+  function writeLocal(label, date) {
+    const dates = readLocal();
+    dates[label] = date;
+    try { localStorage.setItem(COVER_KEY, JSON.stringify(dates)); } catch { /* quota — DB still has it */ }
+  }
+
+  /** Every cover card on the page, paired with its label and status element. */
+  function cards() {
+    return Array.from(document.querySelectorAll('.dk-cover-card')).map(card => ({
+      label: card.querySelector('.dk-cover-label')?.textContent?.trim() || '',
+      statusEl: card.querySelector('.dk-cover-status[data-due]'),
+    })).filter(c => c.label && c.statusEl);
+  }
+
+  /** True when the failure is "table not created yet" rather than a real fault. */
+  function isMissingTable(error) {
+    if (!error) return false;
+    return error.code === '42P01' || /does not exist|schema cache|not find the table/i.test(error.message || '');
+  }
+
+  async function loadFromDb() {
+    const supabase = window.supabaseClient;
+    if (!supabase) return null;
+    try {
+      const { data, error } = await supabase.from(TABLE).select('cover_type, label, expiry_date');
+      if (error) {
+        if (isMissingTable(error)) {
+          console.warn(`[SpinLog] ${TABLE} table not found — run supabase/vehicle_cover.sql. Using local dates.`);
+        } else {
+          console.warn('[SpinLog] Could not load cover dates:', error.message);
+        }
+        return null;
+      }
+      return data || [];
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Write one cover date. Selects then updates or inserts rather than using
+   * upsert, so it works whether or not cover_type carries a unique constraint.
+   */
+  async function saveToDb(label, date) {
+    const supabase = window.supabaseClient;
+    if (!supabase) return false;
+    const coverType = slug(label);
+    try {
+      const { data: existing, error: readErr } = await supabase
+        .from(TABLE).select('id').eq('cover_type', coverType).limit(1);
+      if (readErr) {
+        if (!isMissingTable(readErr)) console.warn('[SpinLog] Cover lookup failed:', readErr.message);
+        return false;
+      }
+
+      const row = { cover_type: coverType, label, expiry_date: date };
+      const { error } = existing && existing.length
+        ? await supabase.from(TABLE).update(row).eq('id', existing[0].id)
+        : await supabase.from(TABLE).insert([row]);
+
+      if (error) {
+        console.warn('[SpinLog] ❌ Cover date not saved to DB:', error.message);
+        return false;
+      }
+      console.log(`[SpinLog] ✅ Cover date saved: ${label} → ${date}`);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Give any cover with no DB row one, using whatever the card currently shows. */
+  async function seedMissing(rows) {
+    const known = new Set((rows || []).map(r => r.cover_type));
+    for (const { label, statusEl } of cards()) {
+      if (known.has(slug(label))) continue;
+      const due = statusEl.getAttribute('data-due');
+      if (due) await saveToDb(label, due);
+    }
+  }
+
+  /**
+   * Pull the authoritative dates in and repaint. Safe to call before or after
+   * setupCoverDateEditing() — it only ever moves dates forward in precedence.
+   */
+  async function hydrate() {
+    const rows = await loadFromDb();
+    if (!rows) return false;
+
+    const byType = new Map(rows.map(r => [r.cover_type, r.expiry_date]));
+    let changed = false;
+
+    cards().forEach(({ label, statusEl }) => {
+      const dbDate = byType.get(slug(label));
+      if (!dbDate) return;
+      // Supabase date columns can come back as a full timestamp; keep YYYY-MM-DD.
+      const date = String(dbDate).slice(0, 10);
+      if (statusEl.getAttribute('data-due') !== date) {
+        statusEl.setAttribute('data-due', date);
+        changed = true;
+      }
+      writeLocal(label, date);
+      if (typeof window.updateCoverBadge === 'function') window.updateCoverBadge(statusEl);
+      if (window.checkInsuranceNotif) window.checkInsuranceNotif(date);
+      if (window.checkDocNotif) window.checkDocNotif(date, label);
+    });
+
+    await seedMissing(rows);
+
+    // The worker's stored insuranceExpiry was based on the pre-hydrate dates.
+    if (changed && window.dkSyncNotifData) window.dkSyncNotifData();
+    return changed;
+  }
+
+  return { slug, readLocal, writeLocal, loadFromDb, saveToDb, hydrate };
+})();
+
+// ════════════════════════════════════════════════════════════
 // COVER DATE EDITING — long-press cover cards
 // ════════════════════════════════════════════════════════════
 window.setupCoverDateEditing = function() {
-  const COVER_KEY = 'spinlogCoverDates';
-  const saved = (() => { try { return JSON.parse(localStorage.getItem(COVER_KEY) || '{}'); } catch { return {}; } })();
+  // Local dates are applied synchronously for a correct first paint; the
+  // authoritative DB values arrive shortly after via dkCoverStore.hydrate().
+  const saved = window.dkCoverStore.readLocal();
 
-  document.querySelectorAll('.home-cover-card').forEach(card => {
-    const label    = card.querySelector('.home-stat-label')?.textContent?.trim();
-    const statusEl = card.querySelector('.status[data-due]');
+  document.querySelectorAll('.dk-cover-card').forEach(card => {
+    const label    = card.querySelector('.dk-cover-label')?.textContent?.trim();
+    const statusEl = card.querySelector('.dk-cover-status[data-due]');
     if (label && saved[label] && statusEl) statusEl.setAttribute('data-due', saved[label]);
   });
 
@@ -2970,154 +3069,55 @@ window.setupCoverDateEditing = function() {
   const openModal  = () => { modal?.setAttribute('aria-hidden', 'false'); modal?.classList.add('sl-modal--open'); };
   const closeModal = () => { modal?.classList.remove('sl-modal--open'); modal?.setAttribute('aria-hidden', 'true'); };
 
-  function makeLongPressCard(el, onLong, ms = 650) {
-    let timer = null, fired = false, startX = 0, startY = 0;
-    const MOVE_THRESHOLD = 10;
-    const cancel = () => { clearTimeout(timer); timer = null; };
-    el.addEventListener('pointerdown', (e) => { fired = false; startX = e.clientX; startY = e.clientY; timer = setTimeout(() => { fired = true; onLong(); }, ms); });
-    el.addEventListener('pointerup',   cancel);
-    el.addEventListener('pointerleave', cancel);
-    el.addEventListener('pointermove',  (e) => { if (timer && (Math.abs(e.clientX - startX) > MOVE_THRESHOLD || Math.abs(e.clientY - startY) > MOVE_THRESHOLD)) cancel(); });
+  /** Open the editor for a given cover card. */
+  function openCoverEditor(card) {
+    const statusEl = card.querySelector('.dk-cover-status[data-due]');
+    const label    = card.querySelector('.dk-cover-label')?.textContent?.trim();
+    if (!statusEl || !label) return;
+    editTarget = { statusEl, label };
+    if (titleEl) titleEl.innerHTML = `<i class="fas fa-calendar-pen"></i> ${label}`;
+    if (input) input.value = statusEl.getAttribute('data-due') || '';
+    openModal();
+    setTimeout(() => input?.focus({ preventScroll: true }), 60);
   }
 
-  document.querySelectorAll('.home-cover-card').forEach(card => {
-    makeLongPressCard(card, () => {
-      const statusEl = card.querySelector('.status[data-due]');
-      const label    = card.querySelector('.home-stat-label')?.textContent?.trim();
-      editTarget = { statusEl, label };
-      if (titleEl) titleEl.innerHTML = `<i class="fas fa-calendar-pen"></i> ${label}`;
-      if (input && statusEl) input.value = statusEl.getAttribute('data-due') || '';
-      openModal();
+  document.querySelectorAll('.dk-cover-card').forEach(card => {
+    // The whole card is the target now that the pencil is gone, so a plain
+    // click or keyboard activation opens the editor.
+    card.addEventListener('click', () => openCoverEditor(card));
+    card.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openCoverEditor(card); }
     });
   });
 
-  saveBtn?.addEventListener('click', () => {
+  saveBtn?.addEventListener('click', async () => {
     if (!editTarget || !input?.value) return;
     const { statusEl, label } = editTarget;
-    statusEl.setAttribute('data-due', input.value);
-    const dates = (() => { try { return JSON.parse(localStorage.getItem(COVER_KEY) || '{}'); } catch { return {}; } })();
-    dates[label] = input.value;
-    localStorage.setItem(COVER_KEY, JSON.stringify(dates));
+    const date = input.value;
+
+    // Paint and store locally first so the edit feels instant and survives a
+    // failed write, then persist to the DB.
+    statusEl.setAttribute('data-due', date);
+    window.dkCoverStore.writeLocal(label, date);
     if (typeof window.updateCoverBadge === 'function') window.updateCoverBadge(statusEl);
     closeModal();
+
+    // These checks used to run only once, during initApp(), so a date edited
+    // into the warning window stayed silent until the next full reload. Re-run
+    // them here and push the new date to the worker for background checks.
+    if (window.checkInsuranceNotif) window.checkInsuranceNotif(date);
+    if (window.checkDocNotif) window.checkDocNotif(date, label);
+    if (window.dkSyncNotifData) window.dkSyncNotifData();
+
+    const stored = await window.dkCoverStore.saveToDb(label, date);
     if (typeof showPopup === 'function') {
-      showPopup('success', 'Cover date updated!');
+      showPopup('success', stored ? 'Cover date updated!' : 'Cover date saved on this device.');
     }
   });
 
   closeBtn?.addEventListener('click', closeModal);
   modal?.addEventListener('click', e => { if (e.target === modal) closeModal(); });
 };
-
-// ════════════════════════════════════════════════════════════
-// EMI HISTORY FILTERS
-// ════════════════════════════════════════════════════════════
-(function() {
-  function setupEMIFilters() {
-    const search = document.getElementById('emiHistorySearch');
-    const typeFilter = document.getElementById('emiHistoryTypeFilter');
-    const fromDate = document.getElementById('emiHistoryFromDate');
-    const toDate = document.getElementById('emiHistoryToDate');
-    const toggle = document.getElementById('emiHistoryFilterToggle');
-    const filterPanel = document.getElementById('emiHistoryFilters');
-    const clearBtn = document.getElementById('emiHistoryClearFilters');
-    const typeButton = document.getElementById('emiHistoryTypeButton');
-    const typeMenu = document.getElementById('emiHistoryTypeMenu');
-    const typeValueEl = document.getElementById('emiHistoryTypeValue');
-    const typeWrapper = document.querySelector('[data-emi-type-filter]');
-    const table = document.querySelector('#emiRecordTable tbody');
-    if (!search || !table) return;
-
-    // Toggle filter panel on mobile
-    toggle?.addEventListener('click', () => {
-      const isOpen = filterPanel?.classList.toggle('is-open');
-      toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
-    });
-
-    // Custom type dropdown
-    typeButton?.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const isOpen = typeWrapper?.classList.toggle('is-open');
-      typeButton.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
-    });
-
-    typeMenu?.querySelectorAll('.history-select-option').forEach(option => {
-      option.addEventListener('click', (e) => {
-        e.preventDefault();
-        const value = option.dataset.value || '';
-        typeFilter.value = value;
-        if (typeValueEl) typeValueEl.textContent = option.textContent;
-        typeWrapper?.classList.remove('is-open');
-        typeButton?.setAttribute('aria-expanded', 'false');
-        typeMenu.querySelectorAll('.history-select-option').forEach(o => o.setAttribute('aria-selected', 'false'));
-        option.setAttribute('aria-selected', 'true');
-        filterEMITable();
-      });
-    });
-
-    document.addEventListener('click', (e) => {
-      if (typeWrapper && !typeWrapper.contains(e.target)) {
-        typeWrapper.classList.remove('is-open');
-        typeButton?.setAttribute('aria-expanded', 'false');
-      }
-    });
-
-    // Clear button
-    clearBtn?.addEventListener('click', () => {
-      search.value = '';
-      typeFilter.value = '';
-      if (typeValueEl) typeValueEl.textContent = 'All types';
-      fromDate.value = '';
-      toDate.value = '';
-      typeMenu?.querySelectorAll('.history-select-option').forEach((o, i) => o.setAttribute('aria-selected', i === 0 ? 'true' : 'false'));
-      filterEMITable();
-    });
-
-    function filterEMITable() {
-      const query = search.value.toLowerCase().trim();
-      const type = typeFilter?.value || '';
-      const from = fromDate?.value || '';
-      const to = toDate?.value || '';
-      const rows = table.querySelectorAll('tr');
-
-      rows.forEach(row => {
-        const cells = row.querySelectorAll('td');
-        if (!cells.length) return;
-        const datePaid = cells[0]?.textContent?.trim() || '';
-        const amount = cells[1]?.textContent?.trim() || '';
-        const rowType = cells[2]?.textContent?.trim() || '';
-        const text = (datePaid + ' ' + amount + ' ' + rowType).toLowerCase();
-
-        let show = true;
-        if (query && !text.includes(query)) show = false;
-        if (type && rowType !== type) show = false;
-
-        if (from || to) {
-          const parts = datePaid.split('/');
-          if (parts.length === 3) {
-            const rowDate = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
-            if (from && rowDate < from) show = false;
-            if (to && rowDate > to) show = false;
-          }
-        }
-
-        row.style.display = show ? '' : 'none';
-      });
-    }
-
-    let emiFilterTimer;
-    search.addEventListener('input', () => { clearTimeout(emiFilterTimer); emiFilterTimer = setTimeout(filterEMITable, 150); });
-    fromDate?.addEventListener('change', filterEMITable);
-    toDate?.addEventListener('change', filterEMITable);
-  }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', setupEMIFilters);
-  } else {
-    setupEMIFilters();
-  }
-})();
 
 // ════════════════════════════════════════════════════════════
 // DOCS MEDIA HISTORY FILTERS
@@ -3235,5 +3235,606 @@ window.setupCoverDateEditing = function() {
     document.addEventListener('DOMContentLoaded', setupDocsFilters);
   } else {
     setupDocsFilters();
+  }
+})();
+
+// ════════════════════════════════════════════════════════════════════════
+// SpinLog v1.7 | COMMAND CENTER UI
+//   Auto-hiding top bar, global search, and the derived home widgets
+//   (odometer context, maintenance timeline, next-service projection).
+//
+//   Service data arrives through the window.dkHomeInsights(payload) hook,
+//   which updateHomeServiceInfo() calls after every service-table render.
+//   Everything degrades quietly if an element is missing.
+//
+//   Dark theme only. The odometer is read-only: it reflects the highest
+//   odometer logged against a service record, never a manual entry.
+// ════════════════════════════════════════════════════════════════════════
+(function () {
+  'use strict';
+
+  const $ = (id) => document.getElementById(id);
+  const nf = (n) => Number(n || 0).toLocaleString('en-IN');
+  const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+
+  /** Duke 250 service interval. Deliberately a stated constant rather than
+      something inferred from history: this owner services far more often than
+      required, so the median observed gap came out near 1,000 km and badly
+      under-reported when the next service is actually due. */
+  const SERVICE_INTERVAL = { min: 3500, max: 5000 };
+
+  /** "3.5k–5k km" */
+  const intervalLabel = () =>
+    `${String(SERVICE_INTERVAL.min / 1000).replace(/\.0$/, '')}k–${SERVICE_INTERVAL.max / 1000}k km`;
+
+  /** Past services shown on the rail before the projected node. */
+  const RAIL_LENGTH = 3;
+
+  let snapshot = { all: [], services: [], maxOdo: 0, latest: null };
+
+  /* ── date + format helpers ───────────────────────────────────────────── */
+
+  const midnight = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
+  const dayDiff = (from, to) => Math.round((midnight(to) - midnight(from)) / 86400000);
+
+  function parseDate(value) {
+    if (!value) return null;
+    const d = new Date(`${value}T00:00:00`);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  const fmtDate = (d) =>
+    d ? d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '-';
+
+  /** Days offset relative to today, phrased for a human. */
+  function relDays(n) {
+    if (n === 0) return 'today';
+    if (n === 1) return 'tomorrow';
+    if (n === -1) return 'yesterday';
+    return n > 0 ? `in ${n} days` : `${Math.abs(n)} days ago`;
+  }
+
+  /** Compact duration: 9 d / 3 wk / 7 mo / 1 yr 2 mo. */
+  function fmtSpan(days) {
+    const d = Math.abs(Math.round(days));
+    if (d < 14) return `${d} d`;
+    if (d < 60) return `${Math.round(d / 7)} wk`;
+    if (d < 365) return `${Math.round(d / 30)} mo`;
+    const yr = Math.floor(d / 365);
+    const mo = Math.round((d % 365) / 30);
+    return mo ? `${yr} yr ${mo} mo` : `${yr} yr`;
+  }
+
+  function ordinal(n) {
+    const teens = n % 100;
+    if (teens >= 11 && teens <= 13) return `${n}th`;
+    switch (n % 10) {
+      case 1: return `${n}st`;
+      case 2: return `${n}nd`;
+      case 3: return `${n}rd`;
+      default: return `${n}th`;
+    }
+  }
+
+  function typeIcon(type) {
+    const t = String(type || '').toLowerCase();
+    if (t.includes('mods')) return 'fa-bolt';
+    if (t.includes('showroom')) return 'fa-shop';
+    if (t.includes('3rd')) return 'fa-toolbox';
+    return 'fa-screwdriver-wrench';
+  }
+
+  /* ── 1. Chrome ───────────────────────────────────────────────────────── */
+
+  /* The status chip and search sit inside the hero card now, so they scroll
+     away with it and are home-only by construction. That removed the whole
+     sticky bar, scroll-direction and per-section visibility layer this file
+     used to carry. */
+  function revealChrome() {
+    const input = $('dkSearchInput');
+    if (!input) return;
+    // keep the field on screen when "/" focuses it from further down the page
+    input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  /* ── 2. Renderers ────────────────────────────────────────────────────── */
+
+  function renderStatFeet(asc, latest) {
+    const odoFoot = $('dkOdoFoot');
+    if (odoFoot) {
+      odoFoot.classList.remove('is-good', 'is-warn', 'is-bad');
+      if (asc.length >= 2) {
+        const prev = asc[asc.length - 2];
+        const gapKm = (Number(latest.odo) || 0) - (Number(prev.odo) || 0);
+        const gapDays = dayDiff(parseDate(prev.date), parseDate(latest.date));
+        odoFoot.innerHTML = `<i class="fas fa-arrow-trend-up" aria-hidden="true"></i> `
+          + `+${nf(gapKm)} km in ${esc(fmtSpan(gapDays))} since previous service`;
+      } else if (latest) {
+        odoFoot.textContent = 'Recorded at last service';
+      } else {
+        odoFoot.textContent = 'Awaiting service data';
+      }
+    }
+
+    const lastFoot = $('dkLastFoot');
+    if (lastFoot) {
+      const d = latest ? parseDate(latest.date) : null;
+      lastFoot.textContent = d
+        ? `${latest.type || 'Service'} · ${relDays(dayDiff(new Date(), d))}`
+        : 'No records yet';
+    }
+
+    // Completes the Vehicle Overview grid with something derived rather than a
+    // fact already shown elsewhere on the page.
+    const services = $('dkFactServices');
+    if (services) {
+      const mods = (snapshot.all || []).length - asc.length;
+      services.textContent = asc.length
+        ? `${asc.length}${mods > 0 ? ` (+${mods} mods)` : ''}`
+        : 'None yet';
+    }
+
+    // The "Next Service" stat card was removed as a duplicate of the Next
+    // Service In panel, so this foot may legitimately be absent.
+    const nextFoot = $('dkNextFoot');
+    if (nextFoot) {
+      nextFoot.classList.remove('is-good', 'is-warn', 'is-bad');
+      const due = latest ? parseDate(latest.next_due) : null;
+      if (!due) {
+        nextFoot.textContent = 'Not scheduled';
+      } else {
+        const n = dayDiff(new Date(), due);
+        nextFoot.textContent = n < 0 ? `overdue by ${Math.abs(n)} days` : relDays(n);
+        nextFoot.classList.add(n < 0 ? 'is-bad' : n <= 14 ? 'is-warn' : 'is-good');
+      }
+    }
+  }
+
+  function renderTimeline(asc) {
+    const host = $('dkTimeline');
+    if (!host) return;
+
+    if (!asc.length) {
+      host.innerHTML = '<p class="dk-timeline-empty">'
+        + '<i class="fas fa-circle-info" aria-hidden="true"></i>'
+        + ' No service records yet — log your first one to build the timeline.</p>';
+      return;
+    }
+
+    const latest = asc[asc.length - 1];
+    const shown = asc.slice(-RAIL_LENGTH);
+    const firstShown = asc.length - shown.length;
+    const hidden = firstShown;
+
+    const targetOdo = (Number(latest.odo) || 0) + SERVICE_INTERVAL.max;
+    const due = parseDate(latest.next_due);
+    const daysLeft = due ? dayDiff(new Date(), due) : null;
+    const overdue = daysLeft !== null && daysLeft < 0;
+
+    // An empty slot keeps every column the same height. It must be
+    // visibility:hidden rather than absent, otherwise the chip's background
+    // shows up as a stray dot under nodes with nothing to report.
+    const blankGap = '<span class="dk-tl-gap dk-tl-gap--blank" aria-hidden="true">&nbsp;</span>';
+
+    const nodes = shown.map((s, i) => {
+      const date = parseDate(s.date);
+      // What actually helps when scanning history is what the visit cost —
+      // the old "+720 km in 7 wk" tag restated odometer deltas the reader can
+      // already see from the row above.
+      const cost = Number(s.cost) || 0;
+      const gap = cost > 0
+        ? `<span class="dk-tl-gap" title="Spent on this service">`
+          + `<i class="fas fa-indian-rupee-sign" aria-hidden="true"></i>`
+          + `${nf(cost)}</span>`
+        : blankGap;
+      return `
+        <li class="dk-tl-node is-done" style="--i:${i}">
+          <span class="dk-tl-dot"><i class="fas fa-check" aria-hidden="true"></i></span>
+          <span class="dk-tl-body">
+            <span class="dk-tl-kicker">${esc(ordinal(firstShown + i + 1))} Service</span>
+            <span class="dk-tl-odo">${nf(s.odo)} km</span>
+            <span class="dk-tl-meta">${esc(fmtDate(date))} · ${esc(s.type || 'Service')}</span>
+            ${gap}
+          </span>
+        </li>`;
+    });
+
+    nodes.push(`
+      <li class="dk-tl-node ${overdue ? 'is-overdue' : 'is-next'}" style="--i:${shown.length}">
+        <span class="dk-tl-dot"><i class="fas ${overdue ? 'fa-triangle-exclamation' : 'fa-screwdriver-wrench'}" aria-hidden="true"></i></span>
+        <span class="dk-tl-body">
+          <span class="dk-tl-kicker">Next Service</span>
+          <span class="dk-tl-odo">~${nf(targetOdo)} km</span>
+          <span class="dk-tl-meta">${due ? esc(fmtDate(due)) : 'Not scheduled'} · every ${intervalLabel()}</span>
+          ${blankGap}
+        </span>
+        <span class="dk-tl-flag">${
+          daysLeft === null ? 'No date set'
+            : overdue ? `${Math.abs(daysLeft)} days overdue`
+            : `${daysLeft} days to go`
+        }</span>
+      </li>`);
+
+    // Segment-aware fill. Every segment joining two completed services is
+    // full; only the final segment fills partially, by elapsed time toward the
+    // due date. A single percentage across the whole rail (the previous
+    // approach) made the fill stop at an arbitrary-looking point.
+    const segments = Math.max(1, nodes.length - 1);
+    const doneSegments = Math.max(0, nodes.length - 2);
+    let currentFrac = 0;
+    const lastDate = parseDate(latest.date);
+    if (due && lastDate) {
+      const total = Math.max(1, dayDiff(lastDate, due));
+      currentFrac = Math.max(0, Math.min(1, dayDiff(lastDate, new Date()) / total));
+    }
+    const pct = Math.max(0, Math.min(100, ((doneSegments + currentFrac) / segments) * 100));
+
+    const more = hidden > 0
+      ? `<button type="button" class="dk-tl-more">
+           <i class="fas fa-clock-rotate-left" aria-hidden="true"></i>
+           ${hidden} earlier service${hidden === 1 ? '' : 's'} in history
+         </button>`
+      : '';
+
+    host.innerHTML = `
+      <div class="dk-tl-inner dk-tl-inview" style="--tl-n:${nodes.length}">
+        <span class="dk-tl-track" aria-hidden="true"><span style="--tl-p:${pct.toFixed(1)}%"></span></span>
+        <ol class="dk-tl-nodes">${nodes.join('')}</ol>
+      </div>${more}`;
+
+    armTimelineReveal(host.querySelector('.dk-tl-inview'));
+
+    host.querySelector('.dk-tl-more')?.addEventListener('click',
+      () => go('service', '#service .service-history-panel'));
+  }
+
+  /* Timeline reveal.
+     The panel is well below the fold, so its rail draw-in and node stagger fire
+     on scroll rather than at load. rootMargin extends the root 14% past the
+     bottom edge so the class lands just BEFORE the panel is on screen — without
+     that lead-in the first animated frame can appear after the panel is already
+     visible, which reads as a flicker.
+     renderTimeline() replaces the whole subtree, so this re-observes the fresh
+     node on every data refresh. */
+  const tlRevealObserver = ('IntersectionObserver' in window)
+    ? new IntersectionObserver((entries, obs) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          entry.target.classList.add('is-inview');
+          obs.unobserve(entry.target);   // one-shot
+        }
+      }, { threshold: 0, rootMargin: '0px 0px 14% 0px' })
+    : null;
+
+  function armTimelineReveal(inner) {
+    if (!inner) return;
+    // No observer support: the CSS base state is already the finished state, so
+    // adding the class immediately just means no entrance animation.
+    if (!tlRevealObserver) { inner.classList.add('is-inview'); return; }
+    tlRevealObserver.observe(inner);
+  }
+
+  function renderNextService(latest) {
+    const daysEl = $('dkNextDays');
+    const kmEl = $('dkNextKm');
+    const daysCell = daysEl?.parentElement;
+    const bar = $('dkNextBar');
+    const fill = $('dkNextBarFill');
+    const note = $('dkNextNote');
+    if (!daysEl || !kmEl) return;
+
+    daysCell?.classList.remove('is-overdue');
+    bar?.classList.remove('is-overdue');
+
+    if (!latest) {
+      daysEl.textContent = '--';
+      kmEl.textContent = '--';
+      fill?.style.setProperty('--p', '0%');
+      bar?.setAttribute('aria-valuenow', '0');
+      if (note) note.textContent = 'Log a service to start tracking the interval.';
+      return;
+    }
+
+    const lastDate = parseDate(latest.date);
+    const due = parseDate(latest.next_due);
+    const days = due ? dayDiff(new Date(), due) : null;
+    const overdue = days !== null && days < 0;
+
+    daysEl.textContent = days === null ? '--' : String(Math.abs(days));
+    kmEl.textContent = nf(SERVICE_INTERVAL.max);
+
+    // Progress is time-based: without a live odometer reading, distance
+    // covered since the last service is simply not knowable.
+    let pct = 0;
+    if (due && lastDate) {
+      const total = Math.max(1, dayDiff(lastDate, due));
+      pct = Math.max(0, Math.min(100, (dayDiff(lastDate, new Date()) / total) * 100));
+    }
+    fill?.style.setProperty('--p', `${pct.toFixed(1)}%`);
+    bar?.setAttribute('aria-valuenow', String(Math.round(pct)));
+
+    if (overdue) {
+      daysCell?.classList.add('is-overdue');
+      bar?.classList.add('is-overdue');
+    }
+
+    if (note) {
+      const basis = `service every ${intervalLabel()}`;
+      if (days === null) note.textContent = `No date scheduled · ${basis}`;
+      else if (overdue) note.textContent = `Was due ${fmtDate(due)} · ${basis}`;
+      else note.textContent = `Due ${fmtDate(due)} · ${Math.round(pct)}% elapsed · ${basis}`;
+    }
+  }
+
+  /** Re-render every derived home widget from the current snapshot. */
+  function render() {
+    const services = snapshot.services || [];
+    const asc = services.slice().sort((a, b) => parseDate(a.date) - parseDate(b.date));
+    const latest = asc.length ? asc[asc.length - 1] : null;
+
+    renderStatFeet(asc, latest);
+    renderTimeline(asc);
+    renderNextService(latest);
+    searchIndex = null; // service data changed, rebuild lazily
+  }
+
+  /** Hook called by updateHomeServiceInfo() after each service-table render. */
+  window.dkHomeInsights = function (payload) {
+    snapshot = payload || { all: [], services: [], maxOdo: 0, latest: null };
+    render();
+  };
+
+  /**
+   * Read-only view of the same snapshot, so Sage's AI context builder can see
+   * the service data without another Supabase round trip. serviceEntries itself
+   * is closure-private and stays that way.
+   */
+  window.dkGetSnapshot = function () {
+    return snapshot || { all: [], services: [], maxOdo: 0, latest: null };
+  };
+
+  /* ── 4. Global search ────────────────────────────────────────────────── */
+
+  const SECTIONS = [
+    { id: 'home', title: 'Command Center', sub: 'Bike status, timeline and specs', icon: 'fa-house' },
+    { id: 'service', title: 'Service Records', sub: 'Log and review maintenance', icon: 'fa-screwdriver-wrench' },
+    { id: 'docs', title: 'Documents', sub: 'RC, insurance, PUC and media', icon: 'fa-folder-open' },
+    { id: 'sage', title: 'Sage', sub: 'Chat with your bike', icon: 'fa-comment-dots' },
+  ];
+
+  let searchIndex = null;
+  let activeResult = -1;
+
+  function flash(el) {
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.remove('dk-flash');
+    void el.offsetWidth; // reflow so the animation restarts on repeat hits
+    el.classList.add('dk-flash');
+    setTimeout(() => el.classList.remove('dk-flash'), 1700);
+  }
+
+  /**
+   * Highlight a target that may not exist yet. Sections lazy-load their data,
+   * so a service row can appear well after the navigation — a fixed delay
+   * missed it and the highlight silently never happened.
+   */
+  function flashWhenReady(selector, tries = 24) {
+    let n = 0;
+    const tick = () => {
+      const el = document.querySelector(selector);
+      if (el) { flash(el); return; }
+      if (++n < tries) setTimeout(tick, 120);
+    };
+    tick();
+  }
+
+  function go(sectionId, flashSelector) {
+    if (typeof window.dkNavigate === 'function') window.dkNavigate(sectionId);
+    if (flashSelector) flashWhenReady(flashSelector);
+  }
+
+  /** Any [data-home-section] control may name a target to highlight on arrival. */
+  function initNavHighlights() {
+    document.querySelectorAll('[data-home-section][data-flash]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const sel = btn.getAttribute('data-flash');
+        if (sel) flashWhenReady(sel);
+      });
+    });
+  }
+
+  function buildIndex() {
+    const items = [];
+
+    SECTIONS.forEach((s) => items.push({
+      group: 'Sections', icon: s.icon, title: s.title, sub: s.sub, meta: '',
+      hay: `${s.title} ${s.sub} ${s.id}`,
+      run: () => go(s.id),
+    }));
+
+    (snapshot.all || []).forEach((r) => {
+      const d = parseDate(r.date);
+      items.push({
+        group: 'Service Records',
+        icon: typeIcon(r.type),
+        // The note is what identifies a record to a human, so it leads; the
+        // type and odometer become the supporting line.
+        title: r.notes || `${r.type || 'Service'} · ${nf(r.odo)} km`,
+        sub: `${r.type || 'Service'} · ${nf(r.odo)} km`,
+        meta: d ? fmtDate(d) : '',
+        hay: `${r.type || ''} ${r.notes || ''} ${r.odo || ''} ${r.cost || ''} ${r.date || ''} ${r.next_due || ''}`,
+        run: () => go('service', `.service-record-row[data-record-id="${CSS.escape(String(r.id))}"]`),
+      });
+    });
+
+    // Fact and spec rows are static markup — index them live so the two can
+    // never drift apart.
+    document.querySelectorAll('#home .dk-fact, #home .dk-spec-list > div').forEach((row) => {
+      const label = row.querySelector('dt')?.textContent?.trim();
+      const value = row.querySelector('dd')?.textContent?.trim();
+      if (!label || !value) return;
+      const group = row.classList.contains('dk-fact') ? 'Bike Details' : 'Specifications';
+      items.push({
+        group,
+        icon: group === 'Bike Details' ? 'fa-id-card' : 'fa-gear',
+        title: label, sub: value, meta: '',
+        hay: `${label} ${value}`,
+        run: () => { go('home'); setTimeout(() => flash(row), 240); },
+      });
+    });
+
+    items.forEach((it) => { it.hay = it.hay.toLowerCase(); });
+    return items;
+  }
+
+  function highlight(text, query) {
+    const safe = esc(text);
+    if (!query) return safe;
+    const i = safe.toLowerCase().indexOf(query.toLowerCase());
+    if (i === -1) return safe;
+    return safe.slice(0, i) + '<mark>' + safe.slice(i, i + query.length) + '</mark>' + safe.slice(i + query.length);
+  }
+
+  function initSearch() {
+    const input = $('dkSearchInput');
+    const panel = $('dkSearchPanel');
+    const clear = $('dkSearchClear');
+    if (!input || !panel) return;
+
+    // The full prompt is cut off mid-word once the field shares a row with the
+    // status pill on a phone, so trade it for something that fits.
+    const FULL_PROMPT = input.getAttribute('placeholder');
+    const fitPlaceholder = () => {
+      input.setAttribute('placeholder', window.innerWidth < 560 ? 'Search…' : FULL_PROMPT);
+    };
+    fitPlaceholder();
+    window.addEventListener('resize', fitPlaceholder, { passive: true });
+
+    const results = () => Array.from(panel.querySelectorAll('.dk-search-item'));
+
+    function closePanel() {
+      panel.hidden = true;
+      input.setAttribute('aria-expanded', 'false');
+      activeResult = -1;
+    }
+
+    function setActive(i) {
+      const list = results();
+      if (!list.length) return;
+      activeResult = (i + list.length) % list.length;
+      list.forEach((el, n) => el.classList.toggle('is-active', n === activeResult));
+      list[activeResult].scrollIntoView({ block: 'nearest' });
+    }
+
+    function run(query) {
+      const q = query.trim().toLowerCase();
+      if (clear) clear.hidden = !query;
+      if (!q) { closePanel(); return; }
+      if (!searchIndex) searchIndex = buildIndex();
+
+      const hits = searchIndex.filter((it) => it.hay.includes(q)).slice(0, 24);
+
+      if (!hits.length) {
+        panel.innerHTML = `<p class="dk-search-empty">Nothing matches “${esc(query)}”.</p>`;
+      } else {
+        const groups = new Map();
+        hits.forEach((h) => {
+          if (!groups.has(h.group)) groups.set(h.group, []);
+          groups.get(h.group).push(h);
+        });
+
+        let html = '';
+        groups.forEach((list, name) => {
+          html += `<div class="dk-search-group"><p class="dk-search-group-title">${esc(name)}</p>`;
+          list.forEach((h) => {
+            html += `<button type="button" class="dk-search-item" role="option" aria-selected="false">
+              <i class="fas ${h.icon}" aria-hidden="true"></i>
+              <span class="dk-search-main">
+                <strong>${highlight(h.title, query.trim())}</strong>
+                <small>${highlight(h.sub, query.trim())}</small>
+              </span>
+              ${h.meta ? `<span class="dk-search-meta">${esc(h.meta)}</span>` : ''}
+            </button>`;
+          });
+          html += '</div>';
+        });
+        panel.innerHTML = html;
+
+        // render order is flat group order, so indexes map straight through
+        const ordered = [];
+        groups.forEach((list) => list.forEach((h) => ordered.push(h)));
+        results().forEach((btn, i) => {
+          btn.addEventListener('click', () => {
+            closePanel();
+            input.value = '';
+            if (clear) clear.hidden = true;
+            ordered[i].run();
+          });
+        });
+      }
+
+      panel.hidden = false;
+      input.setAttribute('aria-expanded', 'true');
+      activeResult = -1;
+    }
+
+    let debounce = 0;
+    input.addEventListener('input', () => {
+      clearTimeout(debounce);
+      debounce = setTimeout(() => run(input.value), 110);
+    });
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setActive(activeResult + 1); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(activeResult - 1); }
+      else if (e.key === 'Enter') {
+        const list = results();
+        if (activeResult >= 0 && list[activeResult]) { e.preventDefault(); list[activeResult].click(); }
+      } else if (e.key === 'Escape') {
+        if (!panel.hidden) { e.preventDefault(); closePanel(); }
+        else { input.value = ''; if (clear) clear.hidden = true; input.blur(); }
+      }
+    });
+
+    input.addEventListener('focus', () => { if (input.value.trim()) run(input.value); });
+
+    clear?.addEventListener('click', () => {
+      input.value = '';
+      clear.hidden = true;
+      closePanel();
+      input.focus();
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!panel.hidden && !panel.contains(e.target) && e.target !== input) closePanel();
+    });
+
+    // "/" focuses search, the way most dashboards behave
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+      e.preventDefault();
+      revealChrome();
+      input.focus();
+      input.select();
+    });
+  }
+
+  /* ── 5. Boot ─────────────────────────────────────────────────────────── */
+
+  function boot() {
+    initSearch();
+    initNavHighlights();
+    render(); // paint empty states now; real data arrives via dkHomeInsights
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot, { once: true });
+  } else {
+    boot();
   }
 })();
