@@ -1466,6 +1466,27 @@ main { padding: 0 !important; background: transparent !important; }
 /* park card is a phone-first feature (needs GPS) — hide it on real desktops */
 @media (min-width: 1024px) {
   .dk-stat--park { display: none !important; }
+
+  /* Let the chip hug its content instead of reserving room for the widest
+     status string. The base min-width:138px is not padding — it is almost
+     exactly the width of "Checking..." (137.4px measured). That keeps the chip
+     from resizing when the check resolves, but it buys that one-off stability
+     with permanent dead space, because the state you actually sit looking at is
+     narrower: "Online" needs 103.8px and "Offline" 111.2px, leaving 34px and
+     27px of emptiness respectively.
+
+     Dropping the floor costs one width change as "Checking..." resolves, and
+     nothing reflows around it: on desktop .dk-pill--chrome is display:none, so
+     the chip is the only item in .dk-hero-chrome and only its own right edge
+     moves. The max-width:1023px block already makes the same trade with
+     min-width:0, so this simply matches the phone behaviour.
+
+     text-align centres the kicker over the status line, which still matters for
+     the states where they differ in width ("Offline", "Checking..."). It beats
+     the base .dk-db-copy{text-align:left} on source order alone — same
+     specificity, later in the file, so no !important needed. */
+  .dk-db-chip { min-width: 0; }
+  .dk-db-copy { text-align: center; }
 }
 
 /* ── 13  Motion, focus, print ────────────────────────────────────────────── */
