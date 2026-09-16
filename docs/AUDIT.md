@@ -175,9 +175,20 @@ caches.match('/index.html')  -> true
 
 So offline, `https://host/index.html` works and `https://host/` shows a network
 error. This is **pre-existing, not introduced by the restructure** — the
-precache never contained `/`. An installed PWA is unaffected because `start_url`
-is `./index.html`, which hides the bug from exactly the testing path most likely
-to be used.
+precache never contained `/`.
+
+**This matters more than it first appears.** The site is deployed to GitHub
+Pages at `https://webovignesh.github.io/SpinLog_-_Master/` (**Verified** via the
+Pages API: source `main`, path `/`). That canonical URL — the one you would
+bookmark or share — ends in `/`, which is exactly the form that has no cache
+entry. The precached entry resolves to `/SpinLog_-_Master/index.html`, so:
+
+- offline visit to `…/SpinLog_-_Master/` → network error
+- offline visit to `…/SpinLog_-_Master/index.html` → works
+
+An *installed* PWA dodges it because `start_url` is `./index.html`. So the bug
+is invisible from the install flow and hits precisely the shareable link. Worth
+promoting up the priority list for that reason.
 
 Fix — handle navigations explicitly:
 
@@ -347,17 +358,35 @@ and keyboard-only navigation, plus expert review.
 | # | Finding | Severity | Effort |
 |---|---|---|---|
 | 1 | SEC-1 Open RLS policies / no auth | High | Medium |
-| 2 | SEC-2 Pin + SRI (or vendor) `supabase-js` | Medium | Low |
-| 3 | SEC-3 Verify storage bucket policies | Medium | Low |
-| 4 | PWA-1 Navigation fallback in SW | Medium | Low |
+| 2 | PWA-1 Navigation fallback in SW — breaks the canonical Pages URL offline | Medium | Low |
+| 3 | SEC-2 Pin + SRI (or vendor) `supabase-js` | Medium | Low |
+| 4 | SEC-3 Verify storage bucket policies | Medium | Low |
 | 5 | MNT-6 Commit the full schema | Medium | Low |
 | 6 | PERF-1 Delete the 1.9 MB dead PNG | Medium | Trivial |
 | 7 | PWA-2 Timeout on network-first | Medium | Low |
 | 8 | MNT-1 Stop new `!important`; unwind slowly | High (maint.) | Ongoing |
 | 9 | PWA-3, MNT-3/4/5, PERF-3, A11Y-1/2 | Low | Low |
 
-Items 2, 4, 5, 6 and 7 are all small, independent, and together remove most of
-the concrete risk.
+Items 2 through 7 are all small, independent, and together remove most of the
+concrete risk. Item 2 is now the best value for effort: a handful of lines, and
+it fixes offline loading of the link you would actually give someone.
+
+## Deployment
+
+**Verified** post-merge against the live site
+`https://webovignesh.github.io/SpinLog_-_Master/`: all 21 shipped paths return
+200, and the five pre-restructure locations (`styles.css`, `script.js`,
+`Imgs/sage.webp`, `icons/icon-192.png`, and the uncommitted source PNG) all
+return 404 as intended. The served `index.html` contains 12 references into
+`src/` or `assets/` and zero pre-move references.
+
+Because Pages serves this from a project subpath rather than a domain root,
+every path in the app must stay **relative** (`src/js/script.js`, `./assets/...`,
+`../../vendor/...`). Introducing a root-absolute path such as `/src/js/script.js`
+would resolve to `webovignesh.github.io/src/js/script.js` and 404 in production
+while still working on a local server at the root. `tools/audit-refs.mjs` treats
+a leading `/` as repo-root-relative and so would *not* catch that — it is the
+one class of path mistake the checker cannot see.
 
 ---
 
