@@ -1,7 +1,7 @@
 // Bump this on every asset-list change: the activate handler deletes any
 // spinlog-cache-* key that is not the current name, which is what forces the
 // new precache to be written.
-const CACHE_NAME = 'spinlog-cache-v1.7.35-restructure';
+const CACHE_NAME = 'spinlog-cache-v1.7.83-emoji-by-mood-no-tics';
 const OFFLINE_URL = 'index.html';
 
 // The scheduler is shared with the page so foreground and background agree on
@@ -17,8 +17,14 @@ const PRECACHE = [
   './src/css/styles.css',
   './src/css/home.css',
   './src/js/script.js',
+  './src/js/cloud-store.js',
+  './src/js/sage-confirm.js',
   './src/js/sage-scheduler.js',
+  './src/js/sage-memory.js',
+  './src/js/sage-tools.js',
   './src/js/sage-ai.js',
+  './src/js/sage-keyvault.js',
+  './src/js/sage-autofill.js',
   './src/js/sage-ui.js',
   './src/js/notifications.js',
   './src/js/home3d.js',

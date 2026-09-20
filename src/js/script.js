@@ -1,3 +1,163 @@
+// ════════════════════════════════════════════════════════════════════════
+// SpinLog | VEHICLE IDENTITY
+//
+// The bike's own facts had no single owner. The purchase date in particular
+// existed twice — as "27-06-2025" text in the Ownership Snapshot and as the
+// ISO literal '2025-06-27' passed to checkAnniversaryNotif() — so "how old is
+// she" could not be answered without scraping markup. This module is now the
+// one place that knows, and it is read by the Vehicle Overview age row, the
+// anniversary notification and Sage's context builder.
+//
+// Deliberately outside the DOMContentLoaded closure: the command-center IIFE
+// at the bottom of this file needs it too, and neither can see the other's
+// scope.
+// ════════════════════════════════════════════════════════════════════════
+window.dkVehicle = (function () {
+  'use strict';
+
+  const FACTS = {
+    make: 'KTM',
+    name: 'Duke 250 Gen 3',
+    registration: 'TN 60 BV 1227',
+    engineNo: 'S-962*15524*',
+    vin: 'MD2JPEXC0SN078159',
+    purchaseDate: '2025-06-27',   // ISO. Shown as 27-06-2025 in the snapshot.
+    purchasePrice: 284000,
+    primaryUse: 'Daily + Weekend Rides',
+    // Age counts from HERE, not from purchaseDate, and the two are deliberately
+    // three days apart. This is the date she was registered and handed over —
+    // what KTM's own app counts from — while purchaseDate is the date the sale
+    // was recorded in SpinLog and is what the anniversary notification uses.
+    // If your papers say something else, call dkVehicle.setAgeFrom('YYYY-MM-DD')
+    // once and it sticks; nothing here needs editing.
+    registeredDate: '2025-06-24',
+  };
+
+  // A correction to the registration date, so it can be aligned with the KTM app
+  // without touching source.
+  const isIso = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
+
+  /**
+   * The date her age is measured from, honouring any correction you have made.
+   *
+   * Stored in the cloud, so "together for 1 yr 2 mo" is the same figure on the
+   * phone as on the laptop. Falls back to the shipped registration date until the
+   * store has loaded, which is also what a first run looks like.
+   */
+  function ageFrom() {
+    const store = cloudStore();
+    const stored = store ? store.setting('ageFrom', null) : null;
+    if (isIso(stored)) return stored;
+    return FACTS.registeredDate || FACTS.purchaseDate;
+  }
+
+  /**
+   * Align her age with what your registration actually says.
+   * @param {string} iso 'YYYY-MM-DD', or '' to go back to the shipped date.
+   */
+  function setAgeFrom(iso) {
+    const store = cloudStore();
+    if (!store) return false;
+    if (!iso) { store.setSetting('ageFrom', null); return true; }
+    if (!isIso(iso)) return false;
+    store.setSetting('ageFrom', iso);
+    return true;
+  }
+
+  function parseIso(iso) {
+    const [y, m, d] = String(iso || '').split('-').map(Number);
+    if (!y || !m || !d) return null;
+    const date = new Date(y, m - 1, d);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  /**
+   * "1 yr 2 mo 21 d" — the compact form the fact grid has room for.
+   * Zero units are dropped rather than shown as "0 mo", so an exact anniversary
+   * reads as "1 yr" instead of "1 yr 0 mo 0 d".
+   */
+  function shortLabel(years, months, days) {
+    const parts = [];
+    if (years) parts.push(`${years} yr`);
+    if (months) parts.push(`${months} mo`);
+    if (days) parts.push(`${days} d`);
+    if (parts.length) return parts.join(' ');
+    return 'Day one';
+  }
+
+  /** "1 year, 2 months and 21 days" — the form Sage can say out loud. */
+  function longLabel(years, months, days) {
+    const parts = [];
+    if (years) parts.push(`${years} year${years === 1 ? '' : 's'}`);
+    if (months) parts.push(`${months} month${months === 1 ? '' : 's'}`);
+    if (days) parts.push(`${days} day${days === 1 ? '' : 's'}`);
+    if (!parts.length) return 'brand new today';
+    if (parts.length === 1) return parts[0];
+    return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+  }
+
+  /**
+   * Calendar age, counted the way a person counts it: a month is only complete
+   * once the day-of-month comes round again, so 27 Jun to 26 Jul is still
+   * 0 months rather than 1.
+   *
+   * @returns {{years:number, months:number, days:number, totalDays:number,
+   *            label:string, long:string, since:string}|null}
+   */
+  function age(now) {
+    const from = parseIso(ageFrom());
+    if (!from) return null;
+    const to = now ? new Date(now) : new Date();
+    if (Number.isNaN(to.getTime()) || to < from) return null;
+
+    let years = to.getFullYear() - from.getFullYear();
+    let months = to.getMonth() - from.getMonth();
+    let days = to.getDate() - from.getDate();
+
+    if (days < 0) {
+      months--;
+      // Borrow from the month that has just ended, not from a flat 30.
+      days += new Date(to.getFullYear(), to.getMonth(), 0).getDate();
+    }
+    if (months < 0) { years--; months += 12; }
+
+    return {
+      years, months, days,
+      totalDays: Math.floor((to - from) / 86400000),
+      label: shortLabel(years, months, days),
+      long: longLabel(years, months, days),
+      since: from.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+    };
+  }
+
+  return { ...FACTS, parseIso, age, ageFrom, setAgeFrom };
+})();
+
+// ════════════════════════════════════════════════════════════
+// THE CLOUD STORE, REACHED FROM HERE
+//
+// Park history, upload notes, upload dates and the purchase-date override are in
+// the database now rather than on whichever machine you typed them into. See
+// src/js/cloud-store.js for where each one lives.
+//
+// This accessor MUST STAY AT TOP LEVEL, and that is not a style preference.
+//
+// This file is one enormous DOMContentLoaded handler from roughly line 200 to
+// roughly line 3850, and several sections — LAST PARKED LOCATION, COVER DATE
+// EDITING — sit AFTER it at true top level. Indentation is inconsistent enough
+// that column 0 says nothing about scope. Declared inside the handler, this is
+// invisible to those sections, and the first one to call it throws a
+// ReferenceError during script evaluation. Everything below that point then never
+// gets defined, so initApp() reaches setupParkFeature() and dies — which looks
+// like an app stuck on "CHECKING…" with one section rendered. That shipped once;
+// `node tools/audit-boot.mjs` is what catches it.
+// ════════════════════════════════════════════════════════════
+
+/** The cloud store, or null. Every caller degrades quietly without it. */
+function cloudStore() {
+  return window.dkCloudStore || null;
+}
+
 document.addEventListener('DOMContentLoaded', function() {
   // Supabase configuration
   const SUPABASE_URL = 'https://ysjkedaekburdxgoccwd.supabase.co';
@@ -92,71 +252,23 @@ function showPdfModal(signedUrl) {
   };
 }
 
-function confirmDeleteWithHold(message, onConfirm) {
-  showPopup('error', `
-    <div style="font-size:1rem;">${message}</div>
-    <button id="confirmDeleteBtn" style="
-      margin-top:12px;padding:10px 36px 10px 30px;
-      background:#e74c3c;color:#fff;border:none;
-      border-radius:5px;cursor:pointer;font-size:1.05em;font-family:inherit;
-      position:relative;overflow:hidden;
-    ">Hold 2s to Delete</button>
-    <div id="holdTimer" style="font-size:0.96em;color:#aaa;margin-top:8px;letter-spacing:1px;"></div>
-  `);
-
-  // Add click-outside-to-close functionality
-  const popup = document.getElementById('customPopup');
-  const popupContent = popup.querySelector('#popupMessage');
-  
-  // Close popup when clicking outside (on the overlay)
-  popup.onclick = function(e) {
-    if (e.target === popup) {
-      hidePopup();
-    }
-  };
-  
-  // Prevent closing when clicking inside the popup content
-  popupContent.onclick = function(e) {
-    e.stopPropagation();
-  };
-
-  let timer = null, held = 0, done = false;
-  setTimeout(() => {
-    const btn = document.getElementById('confirmDeleteBtn');
-    if (!btn) return;
-
-    btn.addEventListener('mousedown', startHold);
-    btn.addEventListener('touchstart', startHold);
-    btn.addEventListener('mouseup', stopHold);
-    btn.addEventListener('mouseleave', stopHold);
-    btn.addEventListener('touchend', stopHold);
-
-    function startHold(e) {
-      e.preventDefault();
-      held = 0; done = false;
-      timer = setInterval(() => {
-        held += 100;
-        const timerEl = document.getElementById('holdTimer');
-        if (timerEl) {
-          timerEl.textContent = `Holding... ${Math.ceil((2000-held)/1000)}s`;
-        }
-        if (held >= 2000 && !done) {
-          done = true;
-          clearInterval(timer);
-          onConfirm();
-          hidePopup();
-        }
-      }, 100);
-    }
-    function stopHold() {
-      clearInterval(timer);
-      const timerEl = document.getElementById('holdTimer');
-      if (timerEl) {
-        timerEl.textContent = "Cancelled. Hold for 2s.";
-      }
-    }
-  }, 100);
-}
+// confirmDeleteWithHold() used to live here as a press-and-hold button injected
+// into #customPopup. It now comes from src/js/sage-confirm.js, which loads before
+// this file, and every delete in the app goes through one slide-to-delete dialog
+// instead.
+//
+// It was deleted rather than left unused on purpose. A top-level `function
+// confirmDeleteWithHold` in this file becomes a window property, and this file
+// loads *after* sage-confirm.js — so keeping the old one here would silently win
+// and nothing would change on screen.
+//
+// Three things the old one got wrong, so they do not come back:
+//   · It built its dialog inside #customPopup, the same element showPopup() uses
+//     for "Deleting…". The confirmation and the progress it caused were one node.
+//   · mouseleave cancelled the hold, so a finger that drifted a pixel reset the
+//     countdown with no explanation.
+//   · There was no cancel callback at all, which is why askToConfirm() below had
+//     to watch the overlay's class list to notice a dismissal.
 
   // Popup functions
 // Fixed showPopup function - replace your existing one with this
@@ -418,6 +530,51 @@ const VEHICLE_TYPES = [
   'Insurance Policy'
 ];
 
+/**
+ * Today in the rider's own calendar.
+ *
+ * toISOString() is UTC, so east of Greenwich it returns yesterday for the whole
+ * evening — which quietly dated late-night uploads and edits to the day before.
+ */
+function localIsoDate(value) {
+  const d = value ? new Date(value) : new Date();
+  if (Number.isNaN(d.getTime())) return null;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/* Custom document types remembered from the last visit.
+   Custom cards only exist in the DOM once the vault query has come back, so on
+   every load the grid painted four fixed cards and then visibly grew as the
+   user-added ones arrived. Keeping the list locally lets those cards go up in
+   the first paint alongside the fixed four; loadVehicleDocsFast() then reconciles
+   them against the real data, so the cache being stale is self-correcting. */
+const CUSTOM_DOCS_KEY = 'spinlogCustomDocTypes';
+
+function readCustomDocCache() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(CUSTOM_DOCS_KEY) || '[]');
+    return Array.isArray(raw) ? raw.filter(row => row && typeof row.type === 'string' && row.type) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeCustomDocCache(rows) {
+  try { localStorage.setItem(CUSTOM_DOCS_KEY, JSON.stringify(rows.slice(0, 40))); }
+  catch { /* quota — the cards still arrive with the query, just a beat later */ }
+}
+
+/** Put last visit's custom cards up now, before the vault answers. */
+function primeCustomDocCards() {
+  const built = [];
+  readCustomDocCache().forEach(({ type, notes }) => {
+    if (VEHICLE_TYPES.includes(type)) return;
+    const descriptor = createCustomDocCard(type, notes);
+    if (descriptor) built.push(descriptor);
+  });
+  return built;
+}
+
 // Helper: get signed URL for private bucket
 async function getSignedUrl(fileName) {
   const { data, error } = await supabase
@@ -462,37 +619,44 @@ function docsIconForType(type, fileName = '') {
   return 'fa-file-lines';
 }
 
-function getHistoricNotesStore() {
-  try { return JSON.parse(localStorage.getItem('spinlogHistoricNotes') || '{}'); }
-  catch { return {}; }
-}
+// Notes and dates on historic uploads.
+//
+// Columns on the media_files row they describe, reached through the cloud store.
+// They were a JSON map in localStorage keyed by the row id — a foreign key
+// pretending not to be one — which is why a note typed on the laptop was not on
+// the phone, and why deleting an upload left its note behind for ever.
+//
+// The names still say "Local" because a dozen call sites use them and the word is
+// the only thing about them that is now wrong.
 
 function setHistoricLocalNote(id, notes) {
-  const store = getHistoricNotesStore();
-  store[String(id)] = notes;
-  localStorage.setItem('spinlogHistoricNotes', JSON.stringify(store));
+  const store = cloudStore();
+  if (store) store.setNote(id, notes);
 }
 
 function getHistoricLocalNote(id) {
-  return getHistoricNotesStore()[String(id)] || '';
-}
-
-function getHistoricDateStore() {
-  try { return JSON.parse(localStorage.getItem('spinlogHistoricDates') || '{}'); }
-  catch { return {}; }
+  const store = cloudStore();
+  return store ? store.note(id) : '';
 }
 
 function setHistoricLocalDate(id, isoDate) {
-  const store = getHistoricDateStore();
-  store[String(id)] = isoDate;
-  localStorage.setItem('spinlogHistoricDates', JSON.stringify(store));
+  const store = cloudStore();
+  if (store) store.setUploadDate(id, isoDate);
 }
 
 function getHistoricLocalDate(id) {
-  return getHistoricDateStore()[String(id)] || '';
+  const store = cloudStore();
+  return store ? store.uploadDate(id) : '';
 }
 
-function showHistoricNotesModal({ title = 'Add upload notes', help = 'Write what this file is about. Notes are required.', initial = '', required = true } = {}) {
+/**
+ * @param {object} [options]
+ * @param {object|null} [options.context] What the file actually is
+ *   ({fileName, mediaType, uploadedOn}). Handed to Sage's autofill so her
+ *   "draft it" button knows what it is writing about; without it that button
+ *   stays hidden rather than inventing something.
+ */
+function showHistoricNotesModal({ title = 'Add upload notes', help = 'Write what this file is about. Notes are required.', initial = '', required = true, context = null } = {}) {
   return new Promise(resolve => {
     const modal = document.getElementById('historicNotesModal');
     const titleEl = document.getElementById('historicNotesTitle');
@@ -511,7 +675,10 @@ function showHistoricNotesModal({ title = 'Add upload notes', help = 'Write what
 
     titleEl.textContent = title;
     helpEl.textContent = help;
+    helpEl.classList.remove('is-bad');
     input.value = initial || '';
+    // Reveals (or hides) the "let Sage draft it" button for this upload.
+    window.SageAutofill?.setMediaContext(context);
     modal.classList.add('show');
     modal.setAttribute('aria-hidden', 'false');
     setTimeout(() => input.focus(), 50);
@@ -519,6 +686,7 @@ function showHistoricNotesModal({ title = 'Add upload notes', help = 'Write what
     const clean = () => {
       modal.classList.remove('show');
       modal.setAttribute('aria-hidden', 'true');
+      window.SageAutofill?.setMediaContext(null);
       saveBtn.onclick = null;
       cancelBtn.onclick = null;
       closeBtn.onclick = null;
@@ -635,7 +803,7 @@ async function getCurrentFileForDelete(type, deleteBtn, previewEl, uploadBtn) {
 
   const fileRow = data[0];
   confirmDeleteWithHold(
-    `Are you sure you want to delete this ${type}?<br><b>This cannot be undone.</b>`,
+    'It comes off the vault and off this device.<br><b>This cannot be undone.</b>',
     async () => {
       showPopup('loading', 'Deleting...');
       await supabase.from('vehicle_documents').delete().eq('file_name', fileRow.file_name).eq('document_type', type);
@@ -645,7 +813,10 @@ async function getCurrentFileForDelete(type, deleteBtn, previewEl, uploadBtn) {
       uploadBtn.innerHTML = '<i class="fas fa-cloud-arrow-up"></i> Upload document';
       deleteBtn.style.display = 'none';
       updatePopup('success', 'Deleted!');
-    }
+    },
+    // The document type names what is going, so the heading can say it rather
+    // than asking "are you sure" about an unnamed thing.
+    { title: `Delete your ${type}?`, icon: 'fa-file-circle-xmark' }
   );
 }
 
@@ -693,6 +864,10 @@ async function initDocsUpload() {
 
   cards.forEach(wireDocCard);
   docsFixedCards = cards;
+
+  // Last visit's custom cards go up with the fixed four, so the grid does not
+  // visibly grow a moment later when the vault query lands.
+  primeCustomDocCards();
 
   await loadVehicleDocsFast(cards);
 }
@@ -949,6 +1124,17 @@ async function loadVehicleDocsFast(cards) {
 
   const known = new Set(VEHICLE_TYPES);
 
+  // Remember which custom documents exist, so the next load can paint them
+  // immediately instead of waiting on this query. Only written on a clean read —
+  // caching the result of a failed query would erase the list.
+  if (!error) {
+    writeCustomDocCache(
+      Array.from(latestByType.entries())
+        .filter(([type]) => !known.has(type))
+        .map(([type, row]) => ({ type, notes: row?.notes || '' }))
+    );
+  }
+
   /* Drop custom cards the vault no longer has a row for. createCustomDocCard()
      only ever added, so a deleted custom document kept its card until a full
      reload — and since the section keeps its DOM while hidden, that stale card
@@ -1051,7 +1237,16 @@ async function handleHistoricUpload(file, type, dropZone) {
     title: 'Add notes for this upload',
     help: 'Notes are required for Historic Audio & Images uploads.',
     initial: '',
-    required: true
+    required: true,
+    // The File itself goes over, so she describes what is actually in it rather
+    // than guessing from the name.
+    context: {
+      file,
+      fileName: file.name,
+      mediaType: type,
+      sizeBytes: file.size,
+      uploadedOn: localIsoDate(),
+    }
   });
   if (!notes) {
     const input = dropZone?.querySelector('input[type="file"]');
@@ -1160,6 +1355,10 @@ async function getHistoricMediaUrl(fileName) {
   if (error || !data) return null;
   return data.signedUrl;
 }
+// Exposed so Sage's autofill can fetch a stored upload and actually look at it
+// when re-writing its notes from Record History. Read-only, and the signed URL
+// it returns expires in an hour.
+window.dkGetHistoricMediaUrl = getHistoricMediaUrl;
 
 window._historicMediaRows = new Map();
 const spinlogLazyState = { docsSetup: false, docsLoaded: false, serviceLoaded: false };
@@ -1265,11 +1464,22 @@ async function loadHistoricUploads() {
 window._editHistoricNotes = async function(id, btn) {
   const rowEl = btn.closest('tr');
   const current = rowEl?.querySelector('.docs-notes-cell')?.textContent?.trim() || getHistoricLocalNote(id) || '';
+  // The stored row is what tells Sage which file this note belongs to.
+  const row = window._historicMediaRows?.get(Number(id)) || null;
   const notes = await showHistoricNotesModal({
     title: 'Edit upload notes',
     help: 'Update the context for this historic upload.',
     initial: current === 'No notes saved' ? '' : current,
-    required: true
+    required: true,
+    // storageName lets her pull the file back out of the vault and look at it;
+    // sizeBytes lets her skip that when it is too big to send.
+    context: row ? {
+      storageName: row.file_name,
+      fileName: row.original_name,
+      mediaType: row.media_type,
+      sizeBytes: row.file_size,
+      uploadedOn: String(getHistoricLocalDate(id) || row.upload_date || '').slice(0, 10),
+    } : null
   });
   if (!notes) return;
   showPopup('loading', 'Saving notes...');
@@ -1302,7 +1512,7 @@ async function persistHistoricDateToDatabase(id, selectedDate) {
 }
 
 window._editHistoricDate = function(id, currentDate, btn) {
-  const currentIso = currentDate ? String(currentDate).slice(0, 10) : new Date().toISOString().slice(0, 10);
+  const currentIso = currentDate ? String(currentDate).slice(0, 10) : localIsoDate();
   const popup = document.getElementById('customPopup');
   const spinner = document.getElementById('popupSpinner');
   const success = document.getElementById('popupSuccess');
@@ -1376,7 +1586,8 @@ window._editHistoricDate = function(id, currentDate, btn) {
 // Delete handler: attach to window so inline HTML can call it
 window._delHistoricUpload = async function(id, fileName, btn) {
   confirmDeleteWithHold(
-    'Are you sure you want to delete this file?<br><b>This cannot be undone.</b>',
+    `“${docsEscapeHtml(fileName)}” goes from storage, and its note and date with it.`
+    + '<br><b>This cannot be undone.</b>',
     async () => {
       showPopup('loading', 'Deleting...');
       const { error: dbError } = await supabase.from('media_files').delete().eq('id', id);
@@ -1389,16 +1600,15 @@ window._delHistoricUpload = async function(id, fileName, btn) {
         updatePopup('error', 'File delete failed: ' + storageError.message);
         return;
       }
-      const store = getHistoricNotesStore();
-      delete store[String(id)];
-      localStorage.setItem('spinlogHistoricNotes', JSON.stringify(store));
-      const dateStore = getHistoricDateStore();
-      delete dateStore[String(id)];
-      localStorage.setItem('spinlogHistoricDates', JSON.stringify(dateStore));
+      // Nothing to clean up in the database: the note and the date are columns on
+      // the row that was just deleted, so they went with it. This only drops the
+      // local copy so the table does not redraw them.
+      cloudStore()?.forgetUpload(id);
       btn.closest('tr')?.remove();
       updatePopup('success', 'Deleted!');
       setTimeout(() => { hidePopup(); }, 1200);
-    }
+    },
+    { title: 'Delete this upload?', icon: 'fa-file-circle-xmark' }
   );
 };
 
@@ -1777,6 +1987,44 @@ window._showImagePreview = function(url) {
   // unawaited on purpose: the cards already show the local values, so this is
   // a correction pass rather than a blocking load.
   window.dkCoverStore.hydrate();
+
+  // Everything that used to live only on this machine — park history, upload notes
+  // and dates, the purchase-date override, the conversation — is read from the
+  // database here. The screen repaints through the listener rather than by
+  // reloading, so a spot saved on the laptop appears on the phone without a flash.
+  if (window.dkCloudStore) {
+    window.dkCloudStore.onChange(what => {
+      const all = what === 'all';
+
+      if ((all || what === 'park') && typeof window.dkRefreshParkUI === 'function') {
+        window.dkRefreshParkUI();
+      }
+      // The same repaint the setAgeFrom control uses, rather than a second one
+      // that could drift from it.
+      if ((all || what === 'setting')
+        && typeof window.dkHomeInsights === 'function'
+        && typeof window.dkGetSnapshot === 'function') {
+        window.dkHomeInsights(window.dkGetSnapshot());
+      }
+      // Notes and dates are read as the historic table renders, so the table is
+      // what has to be rebuilt. Only when it is already on screen — rebuilding a
+      // table nobody is looking at costs a query for nothing.
+      //
+      // Called directly, not through window. loadHistoricUploads is declared
+      // inside this same DOMContentLoaded handler, so it is NOT a window property
+      // however far left it sits — a `typeof window.loadHistoricUploads` guard
+      // here was simply always false, and the table quietly never repainted.
+      if ((all || what === 'notes' || what === 'dates') && spinlogLazyState.docsLoaded) {
+        loadHistoricUploads();
+      }
+      if ((all || what === 'chat') && typeof window.SageUI?.renderChat === 'function') {
+        window.SageUI.renderChat();
+      }
+    });
+    // Unawaited: the rest of the boot does not wait on the network, and every
+    // reader handles an empty cache by showing nothing rather than breaking.
+    window.dkCloudStore.load();
+  }
 
   // Hide Next Due for Mods/Updates
   document.getElementById('serviceType')?.addEventListener('change', function() {
@@ -2252,7 +2500,7 @@ window._showImagePreview = function(url) {
       `;
 
       rows.push(`
-        <tr class="service-record-row" data-record-id="${escapeAttr(entry.id)}">
+        <tr class="service-record-row" data-record-id="${escapeAttr(entry.id)}" title="Hold to edit this record">
           <td data-label="Type" class="service-type-cell"><span class="history-type-badge ${getServiceTypeClass(entry.type)}"><i class="${getServiceTypeIcon(entry.type)}" aria-hidden="true"></i>${escapeHTML(entry.type || '-')}</span></td>
           <td data-label="Date" class="service-date-cell">${formatServiceDate(entry.date)}</td>
           <td data-label="Next Due" class="service-due-cell">${entry.next_due ? formatServiceDate(entry.next_due) : '<span class="history-empty-pill">Not set</span>'}</td>
@@ -2529,7 +2777,10 @@ function createFileInfoElement() {
   console.log('🗑️ Deleting service record:', { id, billFileName });
 
   confirmDeleteWithHold(
-    "Are you sure you want to delete this service record?<br><b>This cannot be undone.</b>",
+    (billFileName && billFileName.trim()
+      ? 'The record and its bill both go.'
+      : 'The record goes from your history.')
+    + '<br><b>This cannot be undone.</b>',
     async () => {
       showPopup('loading', 'Deleting...');
 
@@ -2571,10 +2822,1091 @@ function createFileInfoElement() {
         console.error('❌ Delete failed:', err);
         updatePopup('error', err.message || 'Delete failed');
       }
-    }
+    },
+    { title: 'Delete this service record?', icon: 'fa-screwdriver-wrench' }
   );
 };
 
+
+  // ════════════════════════════════════════════════════════════════════
+  // HOLD A ROW TO EDIT IT
+  //
+  // The app could only ever insert and delete a service record, so correcting a
+  // mistyped odometer meant deleting the row — and re-uploading its bill, because
+  // the delete takes the file with it. dkApp.updateService has existed for a while
+  // for exactly this, but only Sage could reach it.
+  //
+  // Everything below lives inside this handler on purpose: it needs
+  // `serviceEntries` and `renderServiceTable`, both of which are closure-local.
+  // ════════════════════════════════════════════════════════════════════
+
+  // Long enough not to fire on a tap or the start of a scroll, short enough that
+  // you are not holding a phone still wondering whether it worked.
+  const SVC_HOLD_MS = 520;
+  const SVC_HOLD_MOVE = 10;
+
+  let svcEditing = null;
+
+  function svcEditEls() {
+    return {
+      modal: document.getElementById('serviceEditModal'),
+      form: document.getElementById('serviceEditForm'),
+      what: document.getElementById('serviceEditWhat'),
+      type: document.getElementById('serviceEditType'),
+      date: document.getElementById('serviceEditDate'),
+      due: document.getElementById('serviceEditDue'),
+      dueField: document.getElementById('serviceEditDueField'),
+      odo: document.getElementById('serviceEditOdo'),
+      cost: document.getElementById('serviceEditCost'),
+      notes: document.getElementById('serviceEditNotes'),
+      status: document.getElementById('serviceEditStatus'),
+      save: document.getElementById('serviceEditSave'),
+      cancel: document.getElementById('serviceEditCancel'),
+      close: document.getElementById('serviceEditClose'),
+    };
+  }
+
+  /** Next Due means nothing for a mod, so it is hidden rather than ignored. */
+  function svcSyncDueField() {
+    const e = svcEditEls();
+    if (!e.dueField) return;
+    e.dueField.hidden = e.type.value === 'Mods/Updates';
+  }
+
+  function openServiceEditor(record) {
+    const e = svcEditEls();
+    if (!e.modal || !record) return;
+
+    svcEditing = record;
+    e.what.textContent = `${record.type || 'Record'} · ${formatServiceDate(record.date)}`;
+    e.type.value = ['Showroom', '3rd Party', 'Mods/Updates'].includes(record.type)
+      ? record.type : 'Showroom';
+    e.date.value = record.date || '';
+    e.due.value = record.next_due || '';
+    e.odo.value = record.odo ?? '';
+    e.cost.value = record.cost ?? '';
+    e.notes.value = record.notes || '';
+    e.status.textContent = '';
+    e.status.className = 'svc-edit-status';
+    svcSyncDueField();
+
+    e.modal.setAttribute('aria-hidden', 'false');
+    e.modal.classList.add('sl-modal--open');
+    // Focused after the sheet has finished arriving, or a phone scrolls the page
+    // to the field mid-animation.
+    setTimeout(() => e.odo?.focus({ preventScroll: true }), 80);
+  }
+
+  function closeServiceEditor() {
+    const e = svcEditEls();
+    svcEditing = null;
+    e.modal?.classList.remove('sl-modal--open');
+    e.modal?.setAttribute('aria-hidden', 'true');
+  }
+
+  async function saveServiceEditor() {
+    const e = svcEditEls();
+    if (!svcEditing) return;
+
+    const fail = msg => {
+      e.status.textContent = msg;
+      e.status.className = 'svc-edit-status is-bad';
+    };
+
+    // Checked here as well as in updateService, because an emptied number field
+    // is the one case that would pass validation and do real damage: Number('')
+    // is 0, which is finite and >= 0, so a cleared ODO would save as 0 km.
+    if (!e.date.value) return fail('Pick the date this was done.');
+    if (e.odo.value === '') return fail('ODO cannot be left empty.');
+    if (e.cost.value === '') return fail('Cost cannot be left empty — use 0 if it was free.');
+
+    e.save.disabled = true;
+    const label = e.save.innerHTML;
+    e.save.innerHTML = '<span class="sl-spinner" aria-hidden="true"></span> Saving';
+    e.status.textContent = '';
+    e.status.className = 'svc-edit-status';
+
+    // updateService does not blank next_due for a mod the way logService does, so
+    // an explicit empty string is sent rather than leaving a stale date behind a
+    // hidden field.
+    const result = await window.dkApp.updateService({
+      id: svcEditing.id,
+      type: e.type.value,
+      date: e.date.value,
+      nextDue: e.type.value === 'Mods/Updates' ? '' : (e.due.value || ''),
+      odo: e.odo.value,
+      cost: e.cost.value,
+      notes: e.notes.value.trim(),
+    });
+
+    e.save.disabled = false;
+    e.save.innerHTML = label;
+
+    if (!result || !result.ok) {
+      fail(result?.error || 'That did not save.');
+      return;
+    }
+
+    closeServiceEditor();
+    if (typeof showPopup === 'function') showPopup('success', 'Record updated!');
+  }
+
+  /**
+   * Hold detection, delegated on the tbody.
+   *
+   * Delegated rather than per row because renderServiceTable() replaces the whole
+   * tbody with one innerHTML assignment on every repaint — and it repaints after
+   * every add, edit, delete and filter keystroke. A listener attached to a row in
+   * that loop would be discarded seconds later.
+   */
+  function setupServiceRowHold() {
+    const tbody = document.getElementById('serviceTableBody');
+    if (!tbody) return;
+
+    let timer = null;
+    let row = null;
+    let startX = 0;
+    let startY = 0;
+
+    const clear = () => {
+      if (timer) clearTimeout(timer);
+      timer = null;
+      row?.classList.remove('is-holding');
+      row = null;
+    };
+
+    tbody.addEventListener('pointerdown', ev => {
+      clear();
+      // The two controls inside a row own their own taps. Without this, holding
+      // the bill button or the × would open the editor behind the dialog they
+      // just opened.
+      if (ev.target.closest('button, a')) return;
+
+      const hit = ev.target.closest('.service-record-row');
+      if (!hit || !hit.dataset.recordId) return;
+
+      row = hit;
+      startX = ev.clientX;
+      startY = ev.clientY;
+      row.classList.add('is-holding');
+
+      timer = setTimeout(() => {
+        const id = row?.dataset.recordId;
+        clear();
+        const record = serviceEntries.find(r => String(r.id) === String(id));
+        if (record) openServiceEditor(record);
+      }, SVC_HOLD_MS);
+    });
+
+    // A scroll that starts on a row must not become an edit. pointercancel covers
+    // the browser taking the gesture over for scrolling; the move threshold covers
+    // a slow drag that never gets that far.
+    tbody.addEventListener('pointermove', ev => {
+      if (!timer) return;
+      if (Math.abs(ev.clientX - startX) > SVC_HOLD_MOVE
+        || Math.abs(ev.clientY - startY) > SVC_HOLD_MOVE) clear();
+    });
+    tbody.addEventListener('pointerup', clear);
+    tbody.addEventListener('pointerleave', clear);
+    tbody.addEventListener('pointercancel', clear);
+    // Holding on a phone otherwise raises the native text-selection callout on top
+    // of the sheet. The CSS kills the selection; this kills the menu.
+    tbody.addEventListener('contextmenu', ev => {
+      if (ev.target.closest('.service-record-row')) ev.preventDefault();
+    });
+
+    const e = svcEditEls();
+    e.form?.addEventListener('submit', ev => { ev.preventDefault(); saveServiceEditor(); });
+    e.type?.addEventListener('change', svcSyncDueField);
+    e.cancel?.addEventListener('click', closeServiceEditor);
+    e.close?.addEventListener('click', closeServiceEditor);
+    e.modal?.addEventListener('click', ev => { if (ev.target === e.modal) closeServiceEditor(); });
+    document.addEventListener('keydown', ev => {
+      if (ev.key !== 'Escape') return;
+      if (!e.modal?.classList.contains('sl-modal--open')) return;
+      // The slide dialog handles its own Escape in the capture phase; if it is up,
+      // it is on top of this and the key is its to consume.
+      if (window.SageConfirm?.isOpen()) return;
+      closeServiceEditor();
+    });
+  }
+
+  setupServiceRowHold();
+
+
+  // ════════════════════════════════════════════════════════════════════
+  // APP API — window.dkApp
+  //
+  // Everything Sage can actually DO, in one place.
+  //
+  // Before this she had no hands at all, only a read-only snapshot. Asked to
+  // update an insurance date she replied "got it, registered that for
+  // 24/06/2027" and nothing whatsoever happened — she had no way to act and no
+  // way to know that, so she invented the outcome. That is the worst failure
+  // mode available to an assistant, and it is fixed by giving her real controls
+  // that report real results rather than by asking her not to lie.
+  //
+  // Deliberate rules for everything below:
+  //   · Every method resolves to {ok:true, ...} or {ok:false, error}. Never
+  //     throws, never returns undefined — the tool layer forwards this verbatim
+  //     to the model, so a failure has to be legible to her.
+  //   · Nothing here is destructive without going through the app's own
+  //     slide-to-delete dialog, so a delete always passes through the user's
+  //     thumb rather than her judgement.
+  //   · Every write refreshes the UI it affects, so the screen and her claim
+  //     about the screen cannot disagree.
+  // ════════════════════════════════════════════════════════════════════
+
+  /**
+   * Ask the user to confirm, using the same slide-to-delete dialog as the UI.
+   *
+   * The dialog resolves true or false on its own now, so this is a thin pass
+   * through. It used to poll #customPopup's class list every 250ms to notice a
+   * dismissal, because the hold-to-delete popup had no cancel callback — which
+   * meant a cancel took up to a quarter of a second to register, and a delete
+   * that reused the popup for its progress message looked like a confirmation.
+   *
+   * If the dialog did not load, this answers no. Sage asking to delete something
+   * and getting silence is the safe failure; her deleting it unasked is not.
+   */
+  async function askToConfirm(message, title) {
+    const C = window.SageConfirm;
+    if (!C || typeof C.slide !== 'function') {
+      console.warn('[SpinLog] Slide-to-delete is not loaded, so her delete was refused.');
+      return false;
+    }
+    return C.slide({
+      title: title || 'Sage wants to delete this',
+      // Trusted markup: every caller below escapes the parts that come from the
+      // database and supplies the <br> and <b> itself.
+      html: message,
+      label: 'Slide to delete',
+      icon: 'fa-trash-can',
+    });
+  }
+
+  const okISO = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
+
+  /* ── The attachment desk ────────────────────────────────────────────
+     A file the user has clipped to a chat message, waiting to be used. Sage
+     sees it as an image or PDF in the conversation; these controls are how it
+     gets stored somewhere permanent. One slot only: a chat message carries one
+     file, and holding more would just create ambiguity about which one a tool
+     meant. Cleared once used or once the message is done with. */
+  // A QUEUE, not one slot. A message can carry several files, and each upload
+  // control takes the one that suits its kind and releases only that — so "file
+  // the bill and put the photo in the archive" is two calls over one message
+  // instead of two messages.
+  let heldFiles = [];
+
+  const MAX_UPLOAD_BYTES = 9 * 1024 * 1024;
+
+  const IMAGE_EXT = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'svg', 'heic', 'heif'];
+  const KIND_EXT = {
+    image: IMAGE_EXT,
+    audio: ['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg'],
+    video: ['mp4', 'mov', 'avi', 'webm', 'mpeg', 'mpg'],
+    document: [...IMAGE_EXT, 'pdf'],
+  };
+
+  function extOf(name) {
+    return String(name || '').split('.').pop().toLowerCase();
+  }
+
+  /** Validation that returns a sentence rather than throwing a popup. */
+  function checkHeldFile(kind) {
+    if (!heldFiles.length) {
+      return { ok: false, error: 'There is no file attached. Ask him to clip one to his message with the paperclip, then try again.' };
+    }
+
+    const allowed = KIND_EXT[kind];
+    // Picked BY KIND rather than always taking the first. That is what makes a
+    // mixed message work: with a PDF bill and a photo both clipped on, attach_bill
+    // finds the PDF and upload_media finds the image, and neither has to ask him
+    // which was which.
+    const match = allowed
+      ? heldFiles.find(f => allowed.includes(extOf(f.name)))
+      : heldFiles[0];
+
+    if (!match) {
+      const names = heldFiles.map(f => f.name).join(', ');
+      return {
+        ok: false,
+        error: `None of the attached files can be a ${kind}. He clipped ${names}. Allowed: ${allowed.join(', ')}.`,
+      };
+    }
+    if (match.size > MAX_UPLOAD_BYTES) {
+      return { ok: false, error: `${match.name} is ${(match.size / 1048576).toFixed(1)}MB, over the ${MAX_UPLOAD_BYTES / 1048576}MB limit.` };
+    }
+    return { ok: true, file: match };
+  }
+
+  /** Bytes for a stored file, so she can open and actually read it. */
+  function blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('could not read that file'));
+      reader.onload = () => {
+        const out = String(reader.result || '');
+        const comma = out.indexOf(',');
+        resolve(comma === -1 ? out : out.slice(comma + 1));
+      };
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  const READABLE_MIME = /^(image|audio|video)\/|^application\/pdf$/;
+  const MIME_BY_EXT = {
+    pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+    webp: 'image/webp', heic: 'image/heic', heif: 'image/heif', gif: 'image/gif',
+    mp3: 'audio/mp3', wav: 'audio/wav', m4a: 'audio/mp4', aac: 'audio/aac',
+    flac: 'audio/flac', ogg: 'audio/ogg', mp4: 'video/mp4', mov: 'video/quicktime',
+    webm: 'video/webm', avi: 'video/x-msvideo', mpeg: 'video/mpeg', mpg: 'video/mpeg',
+  };
+
+  /**
+   * Pull a stored file out of Supabase and hand it back as something she can
+   * look at. The tool layer forwards `_attachFile` into the conversation as an
+   * inline attachment, which is what turns "open my RC" into her actually
+   * reading it rather than reciting its file name.
+   */
+  async function fetchForReading(bucket, fileName, signer) {
+    const url = await signer(fileName);
+    if (!url) return { ok: false, error: 'Could not get a link to that file.' };
+    const res = await fetch(url);
+    if (!res.ok) return { ok: false, error: 'That file could not be downloaded.' };
+    const blob = await res.blob();
+    if (blob.size > MAX_UPLOAD_BYTES) {
+      return { ok: false, error: `That file is ${(blob.size / 1048576).toFixed(1)}MB — too big to open. Its details are all you have.` };
+    }
+    const mimeType = READABLE_MIME.test(blob.type) ? blob.type : MIME_BY_EXT[extOf(fileName)];
+    if (!mimeType) return { ok: false, error: `You cannot read a .${extOf(fileName)} file.` };
+    return { ok: true, mimeType, data: await blobToBase64(blob) };
+  }
+
+  window.dkApp = {
+    /* ── The attachment desk ──────────────────────────────────────── */
+
+    holdFiles(list) {
+      heldFiles = Array.from(list || []).filter(Boolean);
+      return { ok: true, holding: heldFiles.map(f => f.name) };
+    },
+    /** The single-file shape, kept so any older caller still works. */
+    holdFile(file) { return window.dkApp.holdFiles(file ? [file] : []); },
+    heldFile() { return heldFiles[0] || null; },
+    heldFiles() { return heldFiles.slice(); },
+    /**
+     * Drop one file once it has been stored somewhere, or all of them.
+     *
+     * The argument matters: called bare it empties the queue, which is right when
+     * the message is done with but wrong after a single successful upload — that
+     * would throw away the other files he clipped on before she got to them.
+     */
+    releaseFile(file) {
+      if (!file) { heldFiles = []; return; }
+      heldFiles = heldFiles.filter(f => f !== file);
+    },
+    describeHeldFile() {
+      const f = heldFiles[0];
+      if (!f) return null;
+      return { fileName: f.name, sizeBytes: f.size, type: f.type || null };
+    },
+    describeHeldFiles() {
+      return heldFiles.map(f => ({ fileName: f.name, sizeBytes: f.size, type: f.type || null }));
+    },
+
+    /* ── Reading ──────────────────────────────────────────────────── */
+
+    /**
+     * Service history, newest first.
+     *
+     * Returns cost totals over EVERY matching record, not just the page it
+     * hands back. Without them the only way to answer "what have I spent" from
+     * this tool was to add up `records` — and since the default limit is 20
+     * against 21 records, that silently dropped the oldest row and produced
+     * ₹26,604 against a real total of ₹27,103. `truncated` says so outright, so
+     * a partial list can never be mistaken for the whole set.
+     */
+    async listServices({ limit = 20, type = null, from = null, to = null } = {}) {
+      let rows = serviceEntries.slice();
+      if (type) rows = rows.filter(r => String(r.type || '').toLowerCase() === String(type).toLowerCase());
+      if (okISO(from)) rows = rows.filter(r => r.date && r.date >= from);
+      if (okISO(to)) rows = rows.filter(r => r.date && r.date <= to);
+      rows.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+
+      const shown = rows.slice(0, Math.min(50, Math.max(1, limit)));
+      const isMod = r => String(r.type || '').toLowerCase() === 'mods/updates';
+      const sum = list => Math.round(list.reduce((t, r) => {
+        const cost = Number(r.cost);
+        return t + (Number.isFinite(cost) ? cost : 0);
+      }, 0));
+      const mods = rows.filter(isMod);
+
+      return {
+        ok: true,
+        total: rows.length,
+        showing: shown.length,
+        truncated: shown.length < rows.length,
+        // Over all `total` records, including any not listed below.
+        totals: {
+          everything: sum(rows),
+          servicing: sum(rows.filter(r => !isMod(r))),
+          modsAndUpdates: sum(mods),
+          modsCounted: mods.length,
+          servicesCounted: rows.length - mods.length,
+          currency: 'INR',
+        },
+        records: shown.map(r => ({
+          id: r.id, date: r.date, type: r.type,
+          odo: r.odo, cost: r.cost, nextDue: r.next_due,
+          notes: r.notes, hasBill: !!r.bill,
+        })),
+      };
+    },
+
+    async getCover() {
+      const cards = Array.from(document.querySelectorAll('.dk-cover-card')).map(card => ({
+        label: card.querySelector('.dk-cover-label')?.textContent?.trim() || '',
+        expiry: card.querySelector('.dk-cover-status[data-due]')?.getAttribute('data-due') || null,
+      })).filter(c => c.label && c.expiry);
+      return { ok: true, cover: cards };
+    },
+
+    async listDocuments() {
+      await ensureDocsLoaded();
+      const docs = Array.from(document.querySelectorAll('.vehicle-docs-grid .doc-card[data-type]')).map(card => ({
+        document: card.dataset.type,
+        onFile: !!card.querySelector('.doc-open-pill'),
+        custom: card.classList.contains('is-custom'),
+      }));
+      return { ok: true, documents: docs };
+    },
+
+    async listMedia({ limit = 20 } = {}) {
+      await ensureDocsLoaded();
+      const rows = Array.from(window._historicMediaRows?.values() || []);
+      rows.sort((a, b) => String(b.upload_date).localeCompare(String(a.upload_date)));
+      return {
+        ok: true,
+        total: rows.length,
+        media: rows.slice(0, Math.min(50, Math.max(1, limit))).map(r => ({
+          id: r.id, kind: r.media_type, fileName: r.original_name,
+          uploadedOn: String(r.upload_date || '').slice(0, 10),
+          notes: r.notes || getHistoricLocalNote(r.id) || null,
+        })),
+      };
+    },
+
+    async listParkHistory() {
+      const history = cloudStore()?.parkHistory() || [];
+      return {
+        ok: true,
+        total: history.length,
+        parked: history.map(p => ({
+          when: new Date(p.at).toISOString(), address: p.address || null,
+          lat: p.lat, lng: p.lng, accuracyM: p.accuracy || null,
+        })),
+      };
+    },
+
+    /* ── Writing ──────────────────────────────────────────────────── */
+
+    async logService({ type, date, odo, cost, notes = null, nextDue = null }) {
+      if (!type) return { ok: false, error: 'A service type is required: Showroom, 3rd Party or Mods/Updates.' };
+      const allowed = ['Showroom', '3rd Party', 'Mods/Updates'];
+      const matched = allowed.find(t => t.toLowerCase() === String(type).toLowerCase());
+      if (!matched) return { ok: false, error: `type must be one of ${allowed.join(', ')}.` };
+      if (!okISO(date)) return { ok: false, error: 'date must be YYYY-MM-DD.' };
+      if (nextDue && !okISO(nextDue)) return { ok: false, error: 'nextDue must be YYYY-MM-DD.' };
+
+      const odoNum = Number(odo);
+      const costNum = Number(cost);
+      if (!Number.isFinite(odoNum) || odoNum < 0) return { ok: false, error: 'odo must be a number of kilometres.' };
+      if (!Number.isFinite(costNum) || costNum < 0) return { ok: false, error: 'cost must be a number of rupees.' };
+
+      const insert = {
+        type: matched, date,
+        next_due: matched === 'Mods/Updates' ? null : (nextDue || null),
+        odo: Math.round(odoNum),
+        cost: costNum,
+        notes: notes || null,
+        // No bill: the chat has no file to attach. The record is still valid and
+        // the History row will simply show "No bill".
+        bill: null,
+      };
+
+      const { data, error } = await supabase.from('maintenance_records').insert([insert]).select();
+      if (error) return { ok: false, error: `The database refused it: ${error.message}` };
+
+      serviceEntries.unshift(data[0]);
+      await renderServiceTable();
+      if (window.sageRefreshHealthCard) window.sageRefreshHealthCard();
+
+      return {
+        ok: true,
+        saved: { id: data[0].id, ...insert },
+        note: 'Saved without a bill, because chat cannot attach a file. He can add one from the Service page.',
+      };
+    },
+
+    async updateCover({ label, date }) {
+      if (!okISO(date)) return { ok: false, error: 'date must be YYYY-MM-DD.' };
+
+      const cards = Array.from(document.querySelectorAll('.dk-cover-card'));
+      const wanted = String(label || '').toLowerCase().trim();
+      const card = cards.find(c => {
+        const name = c.querySelector('.dk-cover-label')?.textContent?.trim().toLowerCase() || '';
+        return name === wanted || (wanted && name.includes(wanted));
+      });
+      if (!card) {
+        return {
+          ok: false,
+          error: `No cover called "${label}". Available: ${cards.map(c => c.querySelector('.dk-cover-label')?.textContent?.trim()).filter(Boolean).join(', ')}.`,
+        };
+      }
+
+      const statusEl = card.querySelector('.dk-cover-status[data-due]');
+      const name = card.querySelector('.dk-cover-label')?.textContent?.trim();
+      const was = statusEl.getAttribute('data-due');
+
+      statusEl.setAttribute('data-due', date);
+      window.dkCoverStore.writeLocal(name, date);
+      if (typeof window.updateCoverBadge === 'function') window.updateCoverBadge(statusEl);
+      if (window.checkInsuranceNotif) window.checkInsuranceNotif(date);
+      if (window.checkDocNotif) window.checkDocNotif(date, name);
+      if (window.dkSyncNotifData) window.dkSyncNotifData();
+
+      const storedInDb = await window.dkCoverStore.saveToDb(name, date);
+      if (window.sageRefreshHealthCard) window.sageRefreshHealthCard();
+
+      return {
+        ok: true,
+        cover: name,
+        was,
+        now: date,
+        storedInDb,
+        note: storedInDb ? undefined : 'Saved on this device only — the database did not accept it.',
+      };
+    },
+
+    async updateMediaNotes({ id, notes }) {
+      const text = String(notes || '').trim();
+      if (!text) return { ok: false, error: 'notes cannot be empty.' };
+      await ensureDocsLoaded();
+      const row = window._historicMediaRows?.get(Number(id));
+      if (!row) return { ok: false, error: `No upload with id ${id}. Use listMedia first.` };
+      const synced = await updateHistoricNotes(Number(id), text);
+      await loadHistoricUploads();
+      return { ok: true, id: Number(id), fileName: row.original_name, notes: text, storedInDb: synced };
+    },
+
+    async setAgeFrom({ date }) {
+      if (!okISO(date)) return { ok: false, error: 'date must be YYYY-MM-DD.' };
+      if (!window.dkVehicle.setAgeFrom(date)) return { ok: false, error: 'That date was refused.' };
+      if (window.dkHomeInsights) window.dkHomeInsights(window.dkGetSnapshot());
+      return { ok: true, ageCountedFrom: date, age: window.dkVehicle.age()?.long || null };
+    },
+
+    /**
+     * Edit an existing service record. The app has no edit screen at all — the
+     * form only inserts — so this is the only way to correct a typo in a logged
+     * record without deleting and re-adding it.
+     */
+    async updateService({ id, type, date, odo, cost, notes, nextDue }) {
+      const record = serviceEntries.find(r => Number(r.id) === Number(id));
+      if (!record) return { ok: false, error: `No service record with id ${id}. Use list_services first.` };
+
+      const patch = {};
+      if (type !== undefined) {
+        const allowed = ['Showroom', '3rd Party', 'Mods/Updates'];
+        const matched = allowed.find(t => t.toLowerCase() === String(type).toLowerCase());
+        if (!matched) return { ok: false, error: `type must be one of ${allowed.join(', ')}.` };
+        patch.type = matched;
+      }
+      if (date !== undefined) {
+        if (!okISO(date)) return { ok: false, error: 'date must be YYYY-MM-DD.' };
+        patch.date = date;
+      }
+      if (nextDue !== undefined) {
+        if (nextDue && !okISO(nextDue)) return { ok: false, error: 'nextDue must be YYYY-MM-DD.' };
+        patch.next_due = nextDue || null;
+      }
+      if (odo !== undefined) {
+        const n = Number(odo);
+        if (!Number.isFinite(n) || n < 0) return { ok: false, error: 'odo must be a number of kilometres.' };
+        patch.odo = Math.round(n);
+      }
+      if (cost !== undefined) {
+        const n = Number(cost);
+        if (!Number.isFinite(n) || n < 0) return { ok: false, error: 'cost must be a number of rupees.' };
+        patch.cost = n;
+      }
+      if (notes !== undefined) patch.notes = notes || null;
+
+      if (!Object.keys(patch).length) return { ok: false, error: 'Nothing to change — name at least one field.' };
+
+      const { data, error } = await supabase
+        .from('maintenance_records').update(patch).eq('id', record.id).select();
+      if (error) return { ok: false, error: `The database refused it: ${error.message}` };
+      if (!data || !data.length) {
+        return { ok: false, error: 'The database accepted nothing back. It probably has no UPDATE policy for maintenance_records.' };
+      }
+
+      Object.assign(record, data[0]);
+      await renderServiceTable();
+      if (window.sageRefreshHealthCard) window.sageRefreshHealthCard();
+      return { ok: true, id: record.id, changed: patch };
+    },
+
+    /* ── Files, in and out ────────────────────────────────────────── */
+
+    /** Put the attached file on a service record as its bill. */
+    async attachBill({ id }) {
+      const record = serviceEntries.find(r => Number(r.id) === Number(id));
+      if (!record) return { ok: false, error: `No service record with id ${id}. Use list_services first.` };
+
+      const held = checkHeldFile('document');
+      if (!held.ok) return held;
+
+      const previous = record.bill || null;
+      let stored;
+      try {
+        stored = await uploadBillFile(held.file);
+      } catch (err) {
+        return { ok: false, error: `The upload failed: ${err.message}` };
+      }
+
+      const { data, error } = await supabase
+        .from('maintenance_records').update({ bill: stored }).eq('id', record.id).select();
+      if (error || !data || !data.length) {
+        // Do not leave an orphan in storage if the row would not take it.
+        await supabase.storage.from('service-bills').remove([stored]);
+        return {
+          ok: false,
+          error: error ? `The database refused it: ${error.message}`
+            : 'The database accepted nothing back — maintenance_records probably has no UPDATE policy.',
+        };
+      }
+
+      // Only now is the old bill safe to drop.
+      if (previous) await supabase.storage.from('service-bills').remove([previous]);
+
+      record.bill = stored;
+      await renderServiceTable();
+      // Only the file that was just stored. Bare, this cleared the whole queue and
+      // the other files he clipped on were gone before she reached them.
+      window.dkApp.releaseFile(held.file);
+      return {
+        ok: true,
+        id: record.id,
+        billFileName: held.file.name,
+        replacedAnOlderBill: !!previous,
+      };
+    },
+
+    /** Store the attached file as one of his documents. */
+    async uploadDocument({ document: type, notes = null }) {
+      const name = String(type || '').trim().replace(/\s+/g, ' ');
+      if (!name) return { ok: false, error: 'Name the document, e.g. "Warranty Card".' };
+
+      const held = checkHeldFile('document');
+      if (!held.ok) return held;
+
+      await ensureDocsLoaded();
+      const existing = await getLatestVehicleDoc(name);
+      if (existing) {
+        return {
+          ok: false,
+          error: `There is already a ${name} on file. Delete that one first, or use a different name.`,
+        };
+      }
+
+      const clean = held.file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
+      const storedName = `${Date.now()}-${clean}`;
+      const contentType = held.file.type || 'application/octet-stream';
+
+      const { error: uploadErr } = await supabase.storage
+        .from('vehicle-documents')
+        .upload(storedName, held.file, { contentType, cacheControl: '3600', upsert: false });
+      if (uploadErr) return { ok: false, error: `The upload failed: ${uploadErr.message}` };
+
+      const row = {
+        file_name: storedName,
+        original_name: held.file.name,
+        document_type: name,
+        file_size: held.file.size,
+        content_type: contentType,
+        upload_date: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      // Older deployments of this table have no notes column.
+      let { error } = await supabase.from('vehicle_documents').insert([{ ...row, notes }]);
+      if (error && /notes/i.test(error.message || '')) {
+        ({ error } = await supabase.from('vehicle_documents').insert([row]));
+      }
+      if (error) {
+        await supabase.storage.from('vehicle-documents').remove([storedName]);
+        return { ok: false, error: `The database refused it: ${error.message}` };
+      }
+
+      await loadVehicleDocsFast(docsFixedCards);
+      // Only the file that was just stored. Bare, this cleared the whole queue and
+      // the other files he clipped on were gone before she reached them.
+      window.dkApp.releaseFile(held.file);
+      if (window.triggerRecordSavedNotif) window.triggerRecordSavedNotif();
+      return { ok: true, document: name, fileName: held.file.name };
+    },
+
+    /** Store the attached file in the historic archive. */
+    async uploadMedia({ kind, notes }) {
+      const allowed = ['image', 'audio', 'video'];
+      if (!allowed.includes(kind)) return { ok: false, error: `kind must be one of ${allowed.join(', ')}.` };
+      const text = String(notes || '').trim();
+      if (!text) return { ok: false, error: 'The archive requires notes. Describe what the file is first.' };
+
+      const held = checkHeldFile(kind);
+      if (!held.ok) return held;
+
+      const clean = held.file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
+      const storedName = `${Date.now()}-${clean}`;
+      const ext = extOf(held.file.name);
+      const contentType = held.file.type || MIME_BY_EXT[ext] || 'application/octet-stream';
+
+      const { error: uploadErr } = await supabase.storage
+        .from('historic-media')
+        .upload(storedName, held.file, { contentType, cacheControl: '3600', upsert: false });
+      if (uploadErr) return { ok: false, error: `The upload failed: ${uploadErr.message}` };
+
+      const row = {
+        media_type: kind,
+        file_name: storedName,
+        original_name: held.file.name,
+        file_size: held.file.size,
+        content_type: contentType,
+        upload_date: new Date().toISOString(),
+        notes: text,
+      };
+
+      let { data, error } = await supabase.from('media_files').insert([row]).select();
+      if (error && /notes/i.test(error.message || '')) {
+        const bare = { ...row };
+        delete bare.notes;
+        ({ data, error } = await supabase.from('media_files').insert([bare]).select());
+      }
+      if (error) {
+        await supabase.storage.from('historic-media').remove([storedName]);
+        return { ok: false, error: `The database refused it: ${error.message}` };
+      }
+
+      if (data?.[0]?.id) setHistoricLocalNote(data[0].id, text);
+      await loadHistoricUploads();
+      // Only the file that was just stored. Bare, this cleared the whole queue and
+      // the other files he clipped on were gone before she reached them.
+      window.dkApp.releaseFile(held.file);
+      return { ok: true, id: data?.[0]?.id ?? null, kind, fileName: held.file.name, notes: text };
+    },
+
+    /** Open a stored document so she can read what is inside it. */
+    async readDocument({ document: type }) {
+      await ensureDocsLoaded();
+      const latest = await getLatestVehicleDoc(type);
+      if (!latest) return { ok: false, error: `Nothing on file for "${type}". Use list_documents to see what is there.` };
+      const file = await fetchForReading('vehicle-documents', latest.file_name, getSignedUrl);
+      if (!file.ok) return file;
+      return {
+        ok: true,
+        document: type,
+        fileName: latest.original_name,
+        opened: true,
+        _attachFile: { mimeType: file.mimeType, data: file.data },
+      };
+    },
+
+    /** Open a stored photo, recording or video so she can describe it. */
+    async readMedia({ id }) {
+      await ensureDocsLoaded();
+      const row = window._historicMediaRows?.get(Number(id));
+      if (!row) return { ok: false, error: `No upload with id ${id}. Use list_media first.` };
+      const file = await fetchForReading('historic-media', row.file_name, getHistoricMediaUrl);
+      if (!file.ok) return file;
+      return {
+        ok: true,
+        id: row.id,
+        fileName: row.original_name,
+        kind: row.media_type,
+        opened: true,
+        _attachFile: { mimeType: file.mimeType, data: file.data },
+      };
+    },
+
+    async setMediaDate({ id, date }) {
+      if (!okISO(date)) return { ok: false, error: 'date must be YYYY-MM-DD.' };
+      await ensureDocsLoaded();
+      const row = window._historicMediaRows?.get(Number(id));
+      if (!row) return { ok: false, error: `No upload with id ${id}. Use list_media first.` };
+      const result = await persistHistoricDateToDatabase(Number(id), date);
+      setHistoricLocalDate(result.id || Number(id), result.value);
+      await loadHistoricUploads();
+      return {
+        ok: true, id: Number(id), date, storedInDb: result.ok,
+        note: result.ok ? undefined : 'Saved on this device only — media_files has no UPDATE policy.',
+      };
+    },
+
+    /* ── Looking things up ────────────────────────────────────────── */
+
+    async search({ query, limit = 10 }) {
+      const q = String(query || '').trim().toLowerCase();
+      if (!q) return { ok: false, error: 'Give me something to search for.' };
+      const cap = Math.min(25, Math.max(1, limit));
+      const hits = [];
+
+      serviceEntries.forEach(r => {
+        const hay = [r.type, r.date, r.next_due, r.odo, r.cost, r.notes].filter(Boolean).join(' ').toLowerCase();
+        if (hay.includes(q)) {
+          hits.push({ where: 'service', id: r.id, date: r.date, type: r.type, odo: r.odo, cost: r.cost, notes: r.notes });
+        }
+      });
+
+      Array.from(window._historicMediaRows?.values() || []).forEach(r => {
+        const hay = [r.original_name, r.notes, r.media_type].filter(Boolean).join(' ').toLowerCase();
+        if (hay.includes(q)) {
+          hits.push({ where: 'archive', id: r.id, kind: r.media_type, fileName: r.original_name, notes: r.notes || null });
+        }
+      });
+
+      document.querySelectorAll('.vehicle-docs-grid .doc-card[data-type]').forEach(card => {
+        const type = card.dataset.type || '';
+        if (type.toLowerCase().includes(q)) {
+          hits.push({ where: 'document', document: type, onFile: !!card.querySelector('.doc-open-pill') });
+        }
+      });
+
+      return { ok: true, query, total: hits.length, results: hits.slice(0, cap) };
+    },
+
+    /* ── Deleting — always through his thumb, never on her word ────── */
+
+    async deleteService({ id }) {
+      const record = serviceEntries.find(r => Number(r.id) === Number(id));
+      if (!record) return { ok: false, error: `No service record with id ${id}. Use listServices first.` };
+
+      // Escaped, unlike the version this replaces. The type is free text the
+      // rider typed, and it is now going into a dialog as markup.
+      const confirmed = await askToConfirm(
+        `The ${docsEscapeHtml(record.type)} on ${docsEscapeHtml(record.date)} `
+        + `at ${docsEscapeHtml(String(record.odo))} km.<br><b>This cannot be undone.</b>`,
+        'Sage wants to delete a service record'
+      );
+      if (!confirmed) return { ok: false, error: 'He did not confirm it, so nothing was deleted.' };
+
+      const { error } = await supabase.from('maintenance_records').delete().eq('id', record.id);
+      if (error) return { ok: false, error: `The database refused it: ${error.message}` };
+      if (record.bill) await supabase.storage.from('service-bills').remove([record.bill]);
+
+      serviceEntries = serviceEntries.filter(r => Number(r.id) !== Number(record.id));
+      await renderServiceTable();
+      if (window.sageRefreshHealthCard) window.sageRefreshHealthCard();
+      return { ok: true, deleted: { id: record.id, date: record.date, type: record.type } };
+    },
+
+    async deleteMedia({ id }) {
+      await ensureDocsLoaded();
+      const row = window._historicMediaRows?.get(Number(id));
+      if (!row) return { ok: false, error: `No upload with id ${id}. Use listMedia first.` };
+
+      const confirmed = await askToConfirm(
+        `“${docsEscapeHtml(row.original_name)}”<br><b>This cannot be undone.</b>`,
+        'Sage wants to delete an upload'
+      );
+      if (!confirmed) return { ok: false, error: 'He did not confirm it, so nothing was deleted.' };
+
+      const { error } = await supabase.from('media_files').delete().eq('id', row.id);
+      if (error) return { ok: false, error: `The database refused it: ${error.message}` };
+      await supabase.storage.from('historic-media').remove([row.file_name]);
+      await loadHistoricUploads();
+      return { ok: true, deleted: { id: row.id, fileName: row.original_name } };
+    },
+
+    async deleteDocument({ document: type }) {
+      await ensureDocsLoaded();
+      const latest = await getLatestVehicleDoc(type);
+      if (!latest) return { ok: false, error: `Nothing on file for "${type}".` };
+
+      const confirmed = await askToConfirm(
+        `Your ${docsEscapeHtml(type)} comes off the vault.<br><b>This cannot be undone.</b>`,
+        'Sage wants to delete a document'
+      );
+      if (!confirmed) return { ok: false, error: 'He did not confirm it, so nothing was deleted.' };
+
+      await supabase.from('vehicle_documents').delete()
+        .eq('file_name', latest.file_name).eq('document_type', type);
+      await supabase.storage.from('vehicle-documents').remove([latest.file_name]);
+      await loadVehicleDocsFast(docsFixedCards);
+      return { ok: true, deleted: { document: type, fileName: latest.original_name } };
+    },
+
+    /* ── Getting around, and settings ─────────────────────────────── */
+
+    /**
+     * OFFER a page rather than jumping to one.
+     *
+     * This used to call setActiveSection() and the screen changed underneath him
+     * mid-conversation — he asks her something, and the chat he was reading is
+     * replaced by the service form. Being moved somewhere you did not ask to go is
+     * the most annoying thing a chat assistant can do, and she reached for it
+     * readily: "add as a reminder" opened the service page.
+     *
+     * So the tool now returns an offer, the reply carries a button, and he decides.
+     * She is told in the result that nothing has happened yet, because otherwise
+     * she reports it as done.
+     */
+    async openSection({ section, highlight = null }) {
+      const known = ['home', 'service', 'docs', 'sage'];
+      if (!known.includes(section)) return { ok: false, error: `section must be one of ${known.join(', ')}.` };
+      return {
+        ok: true,
+        offered: section,
+        highlight: highlight || null,
+        note: 'Nothing has opened. He has been given a button and may or may not press it.',
+      };
+    },
+
+    /** Take the offer. Called by the button in the chat, not by her. */
+    async goToSection({ section, highlight = null }) {
+      const known = ['home', 'service', 'docs', 'sage'];
+      if (!known.includes(section)) return { ok: false, error: 'unknown section' };
+      setActiveSection(section);
+      if (highlight) {
+        const target = document.querySelector(highlight);
+        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      return { ok: true, opened: section };
+    },
+
+    async saveParkLocation() {
+      if (typeof window.dkSaveParkLocation !== 'function') {
+        return { ok: false, error: 'Parking is not available on this device.' };
+      }
+      return window.dkSaveParkLocation();
+    },
+
+    async getNotificationSettings() {
+      const S = window.SageScheduler;
+      if (!S) return { ok: false, error: 'The scheduler is not loaded.' };
+      const limits = await S.getLimits();
+      return {
+        ok: true,
+        quietFrom: limits.quietStart, quietUntil: limits.quietEnd,
+        mostPerDay: limits.dailyCap,
+        leastHoursBetween: Math.round(limits.minGapMs / 3600000),
+        urgentThroughQuietHours: limits.criticalInQuietHours !== false,
+        mutedCategories: Object.keys(limits.categories || {}).filter(k => limits.categories[k] === false),
+      };
+    },
+
+    async updateNotificationSettings(changes = {}) {
+      const S = window.SageScheduler;
+      if (!S) return { ok: false, error: 'The scheduler is not loaded.' };
+      const limits = await S.getLimits();
+      const next = { ...limits };
+
+      const hour = v => (Number.isInteger(v) && v >= 0 && v <= 23 ? v : null);
+      if (changes.quietFrom !== undefined) {
+        const h = hour(Number(changes.quietFrom));
+        if (h === null) return { ok: false, error: 'quietFrom must be an hour from 0 to 23.' };
+        next.quietStart = h;
+      }
+      if (changes.quietUntil !== undefined) {
+        const h = hour(Number(changes.quietUntil));
+        if (h === null) return { ok: false, error: 'quietUntil must be an hour from 0 to 23.' };
+        next.quietEnd = h;
+      }
+      if (changes.mostPerDay !== undefined) {
+        const n = Number(changes.mostPerDay);
+        if (!Number.isInteger(n) || n < 1 || n > 8) return { ok: false, error: 'mostPerDay must be 1 to 8.' };
+        next.dailyCap = n;
+      }
+      if (changes.leastHoursBetween !== undefined) {
+        const n = Number(changes.leastHoursBetween);
+        if (!Number.isInteger(n) || n < 1 || n > 12) return { ok: false, error: 'leastHoursBetween must be 1 to 12.' };
+        next.minGapMs = n * 3600000;
+      }
+      if (changes.urgentThroughQuietHours !== undefined) {
+        next.criticalInQuietHours = !!changes.urgentThroughQuietHours;
+      }
+
+      await S.setLimits(next);
+      return { ok: true, ...(await window.dkApp.getNotificationSettings()) };
+    },
+
+    async muteCategory({ category, muted }) {
+      const S = window.SageScheduler;
+      if (!S) return { ok: false, error: 'The scheduler is not loaded.' };
+      const known = Object.keys(S.CATEGORY_META || {});
+      if (!known.includes(category)) {
+        return { ok: false, error: `category must be one of: ${known.join(', ')}.` };
+      }
+      const limits = await S.getLimits();
+      const categories = { ...(limits.categories || {}) };
+      if (muted) categories[category] = false; else delete categories[category];
+      await S.setLimits({ ...limits, categories });
+      return { ok: true, category, muted: !!muted };
+    },
+
+    async sendTestNotification() {
+      if (typeof window.sendSageTestNotif !== 'function') {
+        return { ok: false, error: 'Notifications are not available here.' };
+      }
+      const granted = window.requestNotifPermission ? await window.requestNotifPermission() : false;
+      if (!granted) return { ok: false, error: 'He has not allowed notifications for this site.' };
+      const S = window.SageScheduler;
+      const mood = S ? S.moodAt(Date.now(), await S.getLimits()) : null;
+      const sent = await window.sendSageTestNotif(mood);
+      return sent ? { ok: true, sent: true, mood } : { ok: false, error: 'The notification would not send.' };
+    },
+
+    async deleteParkEntry({ index = 0 } = {}) {
+      const store = cloudStore();
+      if (!store) return { ok: false, error: 'The park history is not loaded yet.' };
+      const before = store.parkHistory();
+      const i = Number(index);
+      if (!before.length) return { ok: false, error: 'There are no saved parking spots.' };
+      if (!Number.isInteger(i) || i < 0 || i >= before.length) {
+        return { ok: false, error: `index must be between 0 and ${before.length - 1}.` };
+      }
+      // Deletes the row, rather than rewriting a list with one item missing.
+      const removed = await store.removePark(i);
+      if (!removed) return { ok: false, error: 'That spot could not be removed.' };
+
+      const left = store.parkHistory();
+      if (window.sageSyncParkSession) {
+        window.sageSyncParkSession(left[0] ? new Date(left[0].at).toISOString() : null);
+      }
+      if (typeof window.dkRefreshParkUI === 'function') window.dkRefreshParkUI();
+      return {
+        ok: true,
+        removed: { when: new Date(removed.at).toISOString(), address: removed.address || null },
+        left: left.length,
+      };
+    },
+
+    async refreshEverything() {
+      await loadServiceEntries();
+      if (spinlogLazyState.docsLoaded) await ensureDocsLoaded();
+      await window.dkCoverStore.hydrate();
+      // Park history, the conversation, upload notes and the purchase-date
+      // override all come from the cloud store, so "refresh everything" has to
+      // include it or it is refreshing most things.
+      await cloudStore()?.load();
+      if (window.sageRefreshHealthCard) window.sageRefreshHealthCard();
+      return {
+        ok: true,
+        reloaded: 'service records, documents, cover dates, park history and your conversation',
+      };
+    },
+  };
 
   function ensureSectionData(section) {
     if (section === 'docs') {
@@ -2604,7 +3936,7 @@ function createFileInfoElement() {
 
     // ── Sage notification system boot ──
     if (window.checkReEngagementNotif) window.checkReEngagementNotif();
-    if (window.checkAnniversaryNotif) window.checkAnniversaryNotif('2025-06-27');
+    if (window.checkAnniversaryNotif) window.checkAnniversaryNotif(window.dkVehicle.purchaseDate);
     document.querySelectorAll('.dk-cover-card .dk-cover-status[data-due]').forEach(el => {
       const label = el.closest('.dk-cover-card')?.querySelector('.dk-cover-label')?.textContent?.trim() || 'Cover';
       if (window.checkInsuranceNotif) window.checkInsuranceNotif(el.getAttribute('data-due'));
@@ -2712,25 +4044,65 @@ function createFileInfoElement() {
   window.dkSyncNotifData = syncNotifDataToSW;
 
   // ── Register periodic background sync ──
+  /**
+   * Periodic background sync — the ONLY way a notification can arrive while the
+   * app is closed. There is no push backend, so if this does not register,
+   * nothing is delivered until you next open the app.
+   *
+   * Two things were wrong here. It only called register() when
+   * permissions.query already reported 'granted' — but `periodic-background-sync`
+   * is not a promptable permission: Chrome grants it silently to installed PWAs
+   * once site engagement is high enough, so early in a install's life the query
+   * says 'prompt' and registration was skipped. And it ran once at startup with
+   * no listener, so becoming eligible later changed nothing until a cold start.
+   *
+   * Now it just tries. register() is the real authority and throws when it is
+   * not allowed, which is cheaper and more accurate than asking first.
+   */
   async function registerPeriodicSync() {
+    let reg = null;
     try {
-      const reg = await navigator.serviceWorker.ready;
-      if ('periodicSync' in reg) {
-        const status = await navigator.permissions.query({ name: 'periodic-background-sync' });
-        if (status.state === 'granted') {
-          // minInterval is a floor, not a schedule — the browser decides the real
-          // cadence from engagement. Asking for 2 hours instead of 12 gives park
-          // reminders a chance to land while the app is closed; the scheduler's
-          // own cooldowns and daily cap stop that turning into spam.
-          await reg.periodicSync.register('spinlog-sage-notifs', {
-            minInterval: 2 * 60 * 60 * 1000,
-          });
-        }
-      }
-    } catch (e) {
-      // Periodic sync not supported — fallback is SW activation check
-      console.log('[SpinLog] Periodic sync not available, using activation fallback');
+      reg = await navigator.serviceWorker.ready;
+    } catch {
+      return false;
     }
+    if (!reg || !('periodicSync' in reg)) {
+      console.log('[SpinLog] No periodic background sync here — notifications arrive when the app is open.');
+      return false;
+    }
+
+    const attempt = async () => {
+      try {
+        // minInterval is a floor, not a schedule — the browser decides the real
+        // cadence from engagement. Asking for 2 hours instead of 12 gives park
+        // reminders a chance to land while the app is closed; the scheduler's
+        // own cooldowns and daily cap stop that turning into spam.
+        await reg.periodicSync.register('spinlog-sage-notifs', {
+          minInterval: 2 * 60 * 60 * 1000,
+        });
+        const tags = await reg.periodicSync.getTags?.().catch(() => []) || [];
+        window.dkBackgroundSync = tags.includes('spinlog-sage-notifs');
+        console.log('[SpinLog] ✅ Background notification checks registered.');
+        return true;
+      } catch (err) {
+        window.dkBackgroundSync = false;
+        console.log('[SpinLog] Background sync refused — install the app and use it a few times, '
+          + 'or notifications will only arrive while it is open.', err?.name || err);
+        return false;
+      }
+    };
+
+    if (await attempt()) return true;
+
+    // Eligibility can arrive later in the same session, so watch for it instead
+    // of waiting for the next cold start.
+    try {
+      const status = await navigator.permissions.query({ name: 'periodic-background-sync' });
+      status.onchange = () => { if (status.state === 'granted') attempt(); };
+    } catch {
+      // Firefox and Safari throw on an unknown permission name. Nothing to watch.
+    }
+    return false;
   }
 
   initApp();
@@ -2740,13 +4112,40 @@ function createFileInfoElement() {
 // LAST PARKED LOCATION
 // ════════════════════════════════════════════════════════════
 (function() {
-  const PARK_KEY = 'spinlogParkHistory';
   const PARK_MAX = 5;
 
+  // In the cloud: where you left the bike is exactly the thing you want to look up
+  // on the phone after saving it on the laptop.
+  //
+  // The shape below keeps `timestamp` as an ISO string, because a dozen lines in
+  // this section compare and render it. The store works in epoch milliseconds, so
+  // this is the only place the two meet.
   function getParkHistory() {
-    try { return JSON.parse(localStorage.getItem(PARK_KEY) || '[]'); } catch { return []; }
+    const store = cloudStore();
+    if (!store) return [];
+    return store.parkHistory().map(p => ({
+      timestamp: new Date(p.at).toISOString(),
+      lat: p.lat,
+      lng: p.lng,
+      accuracy: p.accuracy,
+      address: p.address || undefined,
+    }));
   }
-  function saveParkHistory(h) { localStorage.setItem(PARK_KEY, JSON.stringify(h)); }
+
+  /** Save one spot. Adds a row rather than rewriting the list. */
+  function savePark(entry) {
+    cloudStore()?.addPark(entry);
+  }
+
+  /** Fill in the address once reverse geocoding answers. */
+  function saveParkAddress(timestamp, address) {
+    cloudStore()?.setParkAddress(timestamp, address);
+  }
+
+  /** Forget one spot, by its position in the list. */
+  function dropPark(index) {
+    cloudStore()?.removePark(index);
+  }
 
   function timeAgo(iso) {
     const diff = Date.now() - new Date(iso).getTime();
@@ -2814,18 +4213,18 @@ function createFileInfoElement() {
       async (pos) => {
         const { latitude: lat, longitude: lng, accuracy } = pos.coords;
         const entry = { lat, lng, accuracy: Math.round(accuracy), timestamp: new Date().toISOString(), address: null };
-        const history = getParkHistory();
-        history.unshift(entry);
-        if (history.length > PARK_MAX) history.pop();
-        saveParkHistory(history);
+        // One row. The store keeps the list trimmed, in the cloud as well as here.
+        savePark(entry);
         updateParkUI();
         showAppPopup('success', `Saved! ±${Math.round(accuracy)}m`);
         // The timestamp is what starts the reminder clock, so hand it over.
         if (window.triggerParkingNotif) window.triggerParkingNotif(entry.timestamp);
         const addr = await reverseGeocode(lat, lng);
-        if (addr) {
-          const h = getParkHistory();
-          if (h[0]?.timestamp === entry.timestamp) { h[0].address = addr; saveParkHistory(h); updateParkUI(); }
+        // Only if it is still the newest — he may have parked again while the
+        // geocoder was thinking.
+        if (addr && getParkHistory()[0]?.timestamp === entry.timestamp) {
+          saveParkAddress(entry.timestamp, addr);
+          updateParkUI();
         }
       },
       (err) => {
@@ -2860,10 +4259,13 @@ function createFileInfoElement() {
       </div>`;
     }).join('') : `<div class="park-history-empty"><i class="fas fa-location-dot"></i><p>No saved locations yet.<br>Tap to save your parking spot.</p></div>`;
 
-    list.querySelectorAll('.park-del-btn').forEach(btn => btn.addEventListener('click', () => {
-      const h = getParkHistory(); h.splice(parseInt(btn.dataset.idx), 1); saveParkHistory(h); updateParkUI(); renderParkHistory();
+    list.querySelectorAll('.park-del-btn').forEach(btn => btn.addEventListener('click', async () => {
+      await dropPark(parseInt(btn.dataset.idx, 10));
+      updateParkUI();
+      renderParkHistory();
       // Reminders follow the newest entry, so deleting it ends the session.
-      if (window.sageSyncParkSession) window.sageSyncParkSession(h[0]?.timestamp || null);
+      const left = getParkHistory();
+      if (window.sageSyncParkSession) window.sageSyncParkSession(left[0]?.timestamp || null);
     }));
     modal.setAttribute('aria-hidden', 'false');
     modal.classList.add('sl-modal--open');
@@ -2883,6 +4285,43 @@ function createFileInfoElement() {
     el.addEventListener('pointerleave', cancel);
     el.addEventListener('pointermove',  (e) => { if (timer && (Math.abs(e.clientX - startX) > MOVE_THRESHOLD || Math.abs(e.clientY - startY) > MOVE_THRESHOLD)) cancel(); });
   }
+
+  /**
+   * Save the current spot and resolve with what happened, so Sage can report a
+   * real outcome instead of assuming it worked. The tap-driven path above stays
+   * exactly as it was.
+   */
+  window.dkSaveParkLocation = function() {
+    return new Promise(resolve => {
+      if (!navigator.geolocation) { resolve({ ok: false, error: 'This device has no location access.' }); return; }
+      showAppPopup('loading', 'Getting accurate location…');
+      navigator.geolocation.getCurrentPosition(
+        async (pos) => {
+          const { latitude: lat, longitude: lng, accuracy } = pos.coords;
+          const entry = { lat, lng, accuracy: Math.round(accuracy), timestamp: new Date().toISOString(), address: null };
+          savePark(entry);
+          updateParkUI();
+          showAppPopup('success', `Saved! ±${Math.round(accuracy)}m`);
+          if (window.triggerParkingNotif) window.triggerParkingNotif(entry.timestamp);
+
+          const address = await reverseGeocode(lat, lng);
+          if (address && getParkHistory()[0]?.timestamp === entry.timestamp) {
+            saveParkAddress(entry.timestamp, address);
+            updateParkUI();
+          }
+          resolve({ ok: true, saved: { ...entry, address: address || null } });
+        },
+        (err) => {
+          const msgs = { 1: 'He has not allowed location access.', 2: 'Location is unavailable right now.', 3: 'The location request timed out.' };
+          resolve({ ok: false, error: msgs[err.code] || 'Could not get a location.' });
+        },
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+      );
+    });
+  };
+
+  // So a park entry removed through the chat repaints the home card too.
+  window.dkRefreshParkUI = updateParkUI;
 
   window.setupParkFeature = function() {
     updateParkUI();
@@ -3039,6 +4478,9 @@ window.dkCoverStore = (function() {
 
     // The worker's stored insuranceExpiry was based on the pre-hydrate dates.
     if (changed && window.dkSyncNotifData) window.dkSyncNotifData();
+    // A date that arrived from the database rather than from an edit still moves
+    // what her summary should say.
+    if (changed && window.sageRefreshHealthCard) window.sageRefreshHealthCard();
     return changed;
   }
 
@@ -3075,7 +4517,9 @@ window.setupCoverDateEditing = function() {
     const label    = card.querySelector('.dk-cover-label')?.textContent?.trim();
     if (!statusEl || !label) return;
     editTarget = { statusEl, label };
-    if (titleEl) titleEl.innerHTML = `<i class="fas fa-calendar-pen"></i> ${label}`;
+    // calendar-days, not calendar-pen: the pen variant is Font Awesome Pro, so
+    // it was rendering as an empty box every time this modal opened.
+    if (titleEl) titleEl.innerHTML = `<i class="fas fa-calendar-days"></i> ${label}`;
     if (input) input.value = statusEl.getAttribute('data-due') || '';
     openModal();
     setTimeout(() => input?.focus({ preventScroll: true }), 60);
@@ -3108,6 +4552,9 @@ window.setupCoverDateEditing = function() {
     if (window.checkInsuranceNotif) window.checkInsuranceNotif(date);
     if (window.checkDocNotif) window.checkDocNotif(date, label);
     if (window.dkSyncNotifData) window.dkSyncNotifData();
+    // "How Sage is doing" reads cover dates, so a lapsed policy fixed here has
+    // to reach her summary too — otherwise she keeps saying it lapsed.
+    if (window.sageRefreshHealthCard) window.sageRefreshHealthCard();
 
     const stored = await window.dkCoverStore.saveToDb(label, date);
     if (typeof showPopup === 'function') {
@@ -3215,7 +4662,9 @@ window.setupCoverDateEditing = function() {
           const dateText = dateEl?.textContent?.trim() || '';
           const parsed = new Date(dateText);
           if (!isNaN(parsed.getTime())) {
-            const rowDate = parsed.toISOString().slice(0, 10);
+            // Local, not toISOString(): the text was parsed as a local date, and
+            // converting it to UTC here shifted rows a day out of the filter.
+            const rowDate = `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}`;
             if (from && rowDate < from) show = false;
             if (to && rowDate > to) show = false;
           }
@@ -3364,16 +4813,6 @@ window.setupCoverDateEditing = function() {
       lastFoot.textContent = d
         ? `${latest.type || 'Service'} · ${relDays(dayDiff(new Date(), d))}`
         : 'No records yet';
-    }
-
-    // Completes the Vehicle Overview grid with something derived rather than a
-    // fact already shown elsewhere on the page.
-    const services = $('dkFactServices');
-    if (services) {
-      const mods = (snapshot.all || []).length - asc.length;
-      services.textContent = asc.length
-        ? `${asc.length}${mods > 0 ? ` (+${mods} mods)` : ''}`
-        : 'None yet';
     }
 
     // The "Next Service" stat card was removed as a duplicate of the Next
@@ -3568,12 +5007,49 @@ window.setupCoverDateEditing = function() {
     }
   }
 
+  /**
+   * How old she is, in the Vehicle Overview grid. Owned by window.dkVehicle
+   * rather than by service data, so this renders correctly on the very first
+   * paint — before any Supabase query has come back.
+   */
+  function renderVehicleAge() {
+    const cell = $('dkFactAge');
+    if (!cell) return;
+    const age = window.dkVehicle?.age?.();
+    if (!age) { cell.textContent = '—'; return; }
+    cell.textContent = age.label;
+    cell.setAttribute('title', `Registered ${age.since} · ${nf(age.totalDays)} days old`);
+  }
+
+  /**
+   * Age is the one figure on this page that changes without any data changing,
+   * so it is refreshed when the app returns to the foreground and again at
+   * midnight. Without this an installed PWA left open for a week keeps showing
+   * the age it had on the day it was opened.
+   */
+  function watchVehicleAge() {
+    let timer = null;
+    const schedule = () => {
+      clearTimeout(timer);
+      const next = new Date();
+      // A few seconds past midnight, so it never fires a moment early and
+      // recomputes the same day it just showed.
+      next.setHours(24, 0, 30, 0);
+      timer = setTimeout(() => { renderVehicleAge(); schedule(); }, Math.max(1000, next - Date.now()));
+    };
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) renderVehicleAge();
+    });
+    schedule();
+  }
+
   /** Re-render every derived home widget from the current snapshot. */
   function render() {
     const services = snapshot.services || [];
     const asc = services.slice().sort((a, b) => parseDate(a.date) - parseDate(b.date));
     const latest = asc.length ? asc[asc.length - 1] : null;
 
+    renderVehicleAge();
     renderStatFeet(asc, latest);
     renderTimeline(asc);
     renderNextService(latest);
@@ -3830,6 +5306,7 @@ window.setupCoverDateEditing = function() {
     initSearch();
     initNavHighlights();
     render(); // paint empty states now; real data arrives via dkHomeInsights
+    watchVehicleAge();
   }
 
   if (document.readyState === 'loading') {

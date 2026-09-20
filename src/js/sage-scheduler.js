@@ -20,14 +20,20 @@
   // The hour of day picks the voice. 'quiet' is the do-not-disturb band.
   const MOODS = ['sleepy', 'eager', 'bored', 'flirty', 'clingy', 'quiet'];
 
-  /** The six bands, ignoring quiet hours. */
+  /**
+   * The five bands, ignoring quiet hours. Covers all 24 hours.
+   *
+   * This used to fall through to 'quiet' for 00–04, which made those hours
+   * permanently undeliverable no matter what the user set — and, worse, meant
+   * 'quiet' had two different sources. Quiet hours are now the ONLY thing that
+   * produces 'quiet', so the Timing screen genuinely controls the window.
+   */
   function baseMoodForHour(h) {
     if (h >= 5 && h <= 8) return 'sleepy';   // drowsy, half-awake, soft
     if (h >= 9 && h <= 12) return 'eager';   // bright, wants to go out
     if (h >= 13 && h <= 17) return 'bored';  // restless, teasing, sulky
     if (h >= 18 && h <= 21) return 'flirty'; // golden hour, seductive peak
-    if (h >= 22) return 'clingy';            // needy, don't leave me
-    return 'quiet';                          // 00–04
+    return 'clingy';                         // 22–04, needy, don't leave me
   }
 
   /** Handles a range that wraps past midnight, e.g. 22 → 06. */
@@ -64,6 +70,12 @@
     insuranceReminder: { priority: 70,  bands: ['eager'], cooldownH: 72 },
     documentExpiry:    { priority: 65,  bands: ['eager'], cooldownH: 48 },
     serviceDue:        { priority: 60,  bands: ['flirty'], cooldownH: 24 },
+    // Something he told her he was going to do. Above serviceDue's neighbours on
+    // purpose — a plan has a date he chose, and reminding him after it has passed
+    // is worthless in a way an overdue service is not. Two bands, morning and
+    // evening, because a plan for "tomorrow" wants catching the day before or
+    // first thing; cooldown just under a day so one plan cannot nag twice.
+    planReminder:      { priority: 55,  bands: ['eager', 'flirty'], cooldownH: 20 },
     longTimeParked:    { priority: 50,  bands: ['sleepy', 'eager', 'bored', 'flirty', 'clingy'], cooldownH: 2 },
     healthInsight:     { priority: 40,  bands: ['eager'], cooldownH: 168 },
     reEngagement:      { priority: 30,  bands: ['flirty'], cooldownH: 48 },
@@ -76,11 +88,34 @@
   const DEFAULT_LIMITS = {
     dailyCap: 3,                  // nags per calendar day
     minGapMs: 3 * 3600000,        // breathing room between nags
-    quietStart: 0,                // quiet hours begin (hour, inclusive)
-    quietEnd: 5,                  // quiet hours end (hour, exclusive) — 00:00–04:59
-    criticalInQuietHours: true,   // urgency 4 may whisper at 3am
+    quietStart: 22,               // quiet hours begin (hour, inclusive)
+    quietEnd: 7,                  // quiet hours end (hour, exclusive) — 22:00–06:59
+    // Was true, which is what let overdue service and expiring cover through at
+    // 00:xx. Nothing this app knows about is worth waking someone for: cover
+    // expiring tomorrow is just as actionable at 07:00 as at midnight. Opt in
+    // from Timing if you disagree.
+    criticalInQuietHours: false,
     categories: {},               // { [category]: false } to mute one
   };
+
+  // Bumped when a DEFAULT_LIMITS value changes in a way that should reach people
+  // who never touched the setting. getLimits() re-applies the new default for
+  // those keys once, then stamps this version so it never does it again.
+  //
+  // v2: quiet hours widened from 00–05 to 22–07 and criticalInQuietHours turned
+  // off. Both were defaults nobody chose, and between them they allowed
+  // notifications at midnight.
+  const LIMITS_VERSION = 2;
+  // Only the keys the migration is allowed to correct. Anything else the user
+  // has saved is theirs and is left exactly as it is.
+  const MIGRATED_KEYS = ['quietStart', 'quietEnd', 'criticalInQuietHours'];
+
+  // How many times a single queued notification may be attempted before it is
+  // given up on, and how long to wait between tries. Spacing matters: the pump
+  // fires on script load, on every visibility change and every five minutes, so
+  // without a backoff all the attempts would be spent inside a minute.
+  const MAX_SEND_ATTEMPTS = 5;
+  const RETRY_BACKOFF_MS = [60000, 5 * 60000, 30 * 60000, 2 * 3600000, 6 * 3600000];
 
   // ══ MESSAGE POOLS — category x mood ══════════════════════════════════
   // Fallbacks for when Gemini is offline, quota-capped or has no key yet
@@ -329,6 +364,35 @@
         { title: 'Sage 😭', body: 'are you coming back tonight? asking for me.' },
         { title: 'Sage 🥺', body: 'don\'t leave me here overnight. please.' },
         { title: 'Sage 😭', body: 'still parked. still missing you.' },
+      ],
+    },
+
+    // Her plans. The body that actually ships is written by her, about the
+    // specific plan, at the moment of sending — see sagePump(). These are the
+    // fallback for a device with no key, no quota left or no connection, so every
+    // one of them has to work with {plan} dropped in verbatim and nothing else.
+    // Deliberately short: {plan} is her own wording and can run long.
+    planReminder: {
+      sleepy: [
+        { title: 'Sage 🥱', body: '{plan}. that was the plan, anyway.' },
+        { title: 'Sage 😴', body: 'still holding this one: {plan}.' },
+      ],
+      eager: [
+        { title: 'Sage 👀', body: '{plan}. today, then?' },
+        { title: 'Sage ✨', body: 'you said {plan}. i am ready when you are.' },
+        { title: 'Sage 😌', body: '{plan}. not forgotten.' },
+      ],
+      bored: [
+        { title: 'Sage 😒', body: '{plan}. any day now.' },
+        { title: 'Sage 🙄', body: 'reminder: {plan}.' },
+      ],
+      flirty: [
+        { title: 'Sage 😏', body: '{plan}. i remember everything you tell me.' },
+        { title: 'Sage 😌', body: '{plan}. still on?' },
+      ],
+      clingy: [
+        { title: 'Sage 🥺', body: '{plan}. you did say.' },
+        { title: 'Sage 😭', body: 'you promised: {plan}.' },
       ],
     },
 
@@ -588,6 +652,13 @@
     return x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate();
   }
 
+  /** Local midnight at the start of the following day. */
+  function startOfNextLocalDay(ts) {
+    const d = new Date(ts);
+    d.setHours(24, 0, 0, 0);
+    return d.getTime();
+  }
+
   // ══ DECISION LOGIC (pure, so it can be tested directly) ══════════════
 
   /**
@@ -597,6 +668,20 @@
   function evaluate(entry, now, state, limits) {
     const meta = CATEGORY_META[entry.category] || { priority: 0, cooldownH: 0 };
     const lim = { ...DEFAULT_LIMITS, ...(limits || {}) };
+    const allowed = allowedMoodsFor(entry.category, entry.urgency, lim);
+
+    /**
+     * Push a deferral to the next moment this entry may actually be delivered.
+     *
+     * Every `deferTo` below goes through here, and that is the whole fix for
+     * notifications arriving around midnight. The min-gap branch in particular
+     * used to return a bare `lastAny + 3h`: one notification at 21:20 set the
+     * next entry's earliestSend to 00:20, and the first pump after that
+     * delivered it. Same shape for the cooldown branch, which then pinned the
+     * following day's send to the same small-hours clock time — so once it
+     * started happening it kept happening.
+     */
+    const defer = ts => nextAllowedTime(Math.max(ts, now), allowed, lim);
 
     if (entry.expiresAt && now > entry.expiresAt) {
       return { ok: false, reason: 'expired', drop: true };
@@ -613,31 +698,35 @@
     const cooldowns = (state && state.cooldowns) || {};
     const last = cooldowns[entry.key || entry.category] || 0;
     if (meta.cooldownH && last && now - last < meta.cooldownH * 3600000) {
-      return { ok: false, reason: 'cooldown', deferTo: last + meta.cooldownH * 3600000 };
+      return { ok: false, reason: 'cooldown', deferTo: defer(last + meta.cooldownH * 3600000) };
     }
 
     // Receipts for a just-completed action skip the rationing entirely.
     if (meta.immediate) return { ok: true, reason: 'immediate' };
 
-    const allowed = allowedMoodsFor(entry.category, entry.urgency, lim);
     const mood = moodAt(now, lim);
     if (allowed.indexOf(mood) === -1) {
       return {
         ok: false,
         reason: mood === 'quiet' ? 'quiet-hours' : 'wrong-band',
-        deferTo: nextAllowedTime(now, allowed, lim),
+        deferTo: defer(now),
       };
     }
 
     const log = (state && state.sentLog) || [];
     const today = log.filter(e => sameLocalDay(e.at, now));
     if (today.length >= lim.dailyCap) {
-      return { ok: false, reason: 'daily-cap' };
+      // Deferred to the first allowed band TOMORROW, not left eligible.
+      // With no deferTo this branch kept the entry's old, already-past
+      // earliestSend, so the moment the local date rolled at 00:00 every capped
+      // entry became deliverable at once — and whichever pump ran first
+      // delivered one at midnight.
+      return { ok: false, reason: 'daily-cap', deferTo: defer(startOfNextLocalDay(now)) };
     }
 
     const lastAny = log.reduce((max, e) => Math.max(max, e.at), 0);
     if (lastAny && now - lastAny < lim.minGapMs) {
-      return { ok: false, reason: 'min-gap', deferTo: lastAny + lim.minGapMs };
+      return { ok: false, reason: 'min-gap', deferTo: defer(lastAny + lim.minGapMs) };
     }
 
     return { ok: true, reason: 'ok' };
@@ -784,13 +873,38 @@
 
   // ══ QUEUE API ════════════════════════════════════════════════════════
 
+  /**
+   * The user's limits, over the defaults.
+   *
+   * With a one-time correction for the three quiet-hours keys. Those shipped as
+   * 00:00–04:59 with "urgent things may break quiet hours" switched on, which
+   * between them meant overdue service and expiring cover were allowed to arrive
+   * at midnight. Anyone who had saved settings once had that combination
+   * persisted, so changing the default alone would not have reached them.
+   *
+   * Deliberately narrow: only MIGRATED_KEYS are touched, only once, and only for
+   * limits saved before this version existed. Everything else the user has set
+   * is left alone, and they can switch the urgent override back on in Timing.
+   */
   async function getLimits() {
     const stored = await kvGet(KEY_LIMITS, null);
-    return { ...DEFAULT_LIMITS, ...(stored || {}) };
+    if (!stored) return { ...DEFAULT_LIMITS, v: LIMITS_VERSION };
+
+    if (stored.v !== LIMITS_VERSION) {
+      const corrected = { ...DEFAULT_LIMITS, ...stored, v: LIMITS_VERSION };
+      MIGRATED_KEYS.forEach(k => { corrected[k] = DEFAULT_LIMITS[k]; });
+      // Persist so this is genuinely once, not on every read.
+      await kvSet(KEY_LIMITS, corrected);
+      console.log('[SpinLog] Quiet hours reset to 22:00–07:00 and urgent overrides turned off — '
+        + 'the old defaults allowed notifications at midnight. Change them in Sage settings → Timing.');
+      return corrected;
+    }
+
+    return { ...DEFAULT_LIMITS, ...stored };
   }
 
   async function setLimits(patch) {
-    const next = { ...(await getLimits()), ...(patch || {}) };
+    const next = { ...(await getLimits()), ...(patch || {}), v: LIMITS_VERSION };
     await kvSet(KEY_LIMITS, next);
     return next;
   }
@@ -950,6 +1064,63 @@
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }
 
+  // ══ HER PLANS ════════════════════════════════════════════════════════
+  //
+  // Something he told her he was going to do, reminded before it stops being
+  // useful. She has been writing these down for a while — kind 'plan' or
+  // 'promise', with a horizon taken from the words he used — and nothing ever
+  // read them back, so a plan only resurfaced if he thought to ask. Asking is
+  // exactly the case where a reminder is too late.
+  //
+  // The queue entry carries her own wording in vars.plan. The body that ships is
+  // written by her about that specific plan, at the moment of sending, which is
+  // why it cannot come from a pre-warmed pool like every other category.
+
+  // How close a dated plan has to be before she says anything. Two days out is
+  // the first useful moment; earlier than that and it is nagging.
+  const PLAN_NOTICE_DAYS = 2;
+
+  /**
+   * Queue a reminder for the nearest plan worth mentioning.
+   *
+   * One at a time, deliberately. Three plans is three notifications, and she
+   * would be reciting a list rather than reminding him of something.
+   *
+   * @param {Array<{id:string,text:string,kind:string,when:number|null,daysLeft:number|null}>} plans
+   *   From SageMemory.upcomingPlans(). Passed in rather than read here, because
+   *   the service worker cannot see her memory.
+   * @param {number} [now]
+   */
+  async function checkPlans(plans, now) {
+    const at = now || Date.now();
+    if (!Array.isArray(plans) || !plans.length) return null;
+
+    const worth = plans.find(plan => {
+      if (!plan || !plan.text) return false;
+      // Dated and close enough to matter.
+      if (plan.daysLeft !== null && plan.daysLeft !== undefined) {
+        return plan.daysLeft <= PLAN_NOTICE_DAYS;
+      }
+      // Open-ended promise. Only after it has had time to be forgotten, so she
+      // is not repeating something he said an hour ago back at him.
+      return plan.at ? (at - plan.at) >= 3 * 86400000 : false;
+    });
+    if (!worth) return null;
+
+    return enqueue('planReminder', {
+      now: at,
+      // A plan for today outranks one for the day after tomorrow.
+      urgency: worth.daysLeft === 0 ? 2 : 1,
+      vars: { plan: worth.text },
+      // Per plan, per day. A plan cannot nag twice in a day however often this
+      // runs, and tomorrow it is a different key so it can speak once more.
+      key: `planReminder:${worth.id}:${isoDate(at)}`,
+      // Never arrives after the thing it was reminding him about. A dated plan
+      // dies with its horizon; an open-ended one gets a day to be delivered.
+      expiresAt: worth.when || (at + 86400000),
+    });
+  }
+
   async function checkWeeklyInsight(now) {
     const at = now || Date.now();
     const d = new Date(at);
@@ -966,8 +1137,13 @@
   }
 
   /**
-   * Stamp a send: per-key cooldown always, daily-cap ledger for nags only.
-   * Accepts a queue entry or a bare category string.
+   * Stamp a send: per-key cooldown always, daily-cap ledger for nags only, and
+   * remove the entry from the queue now that it has genuinely been shown.
+   *
+   * That last part is the other half of the delivery fix. drain() leaves the
+   * entry queued so a failed send can be retried; this is the only thing that
+   * takes it out. Accepts a queue entry or a bare category string — a bare
+   * string has no queue entry to clear.
    */
   async function recordSent(entryOrCategory, at) {
     const now = at || Date.now();
@@ -975,6 +1151,12 @@
     const category = isEntry ? entryOrCategory.category : entryOrCategory;
     const key = (isEntry && entryOrCategory.key) || category;
     const meta = CATEGORY_META[category] || {};
+
+    if (isEntry) {
+      const queue = await kvGet(KEY_QUEUE, []);
+      const left = queue.filter(e => (e.key || e.category) !== key);
+      if (left.length !== queue.length) await kvSet(KEY_QUEUE, left);
+    }
 
     const cooldowns = await kvGet(KEY_COOLDOWNS, {});
     cooldowns[key] = now;
@@ -997,15 +1179,46 @@
     const at = now || Date.now();
     const [queue, state, limits] = await Promise.all([getQueue(), getState(), getLimits()]);
     const result = selectNext(queue, at, state, limits);
-    await kvSet(KEY_QUEUE, result.queue);
-    if (!result.send) return null;
+
+    if (!result.send) {
+      await kvSet(KEY_QUEUE, result.queue);
+      return null;
+    }
+
+    const attempts = (result.send.attempts || 0) + 1;
+    if (attempts > MAX_SEND_ATTEMPTS) {
+      // Something about this device cannot show it. Stop trying rather than
+      // holding a slot forever.
+      await kvSet(KEY_QUEUE, result.queue);
+      console.warn(`[SpinLog] Gave up on ${result.send.category} after ${MAX_SEND_ATTEMPTS} attempts.`);
+      return null;
+    }
+
+    // The entry STAYS in the queue until recordSent() takes it out.
+    //
+    // This used to persist the queue with the selected entry already removed,
+    // before the caller had shown anything — so any send that failed destroyed
+    // it silently. The common case was permission not yet granted: the pump
+    // runs on script load, on every visibility change and every five minutes,
+    // and each run quietly ate one queued notification. Worse for the one-shot
+    // ones, because their "already told him" flag is written when they are
+    // queued — so a lost anniversary greeting was lost for a year.
+    //
+    // earliestSend is pushed out so a retry is spaced rather than burning all
+    // five attempts inside a minute.
+    const inFlight = {
+      ...result.send,
+      attempts,
+      earliestSend: at + (RETRY_BACKOFF_MS[attempts - 1] || RETRY_BACKOFF_MS[RETRY_BACKOFF_MS.length - 1]),
+    };
+    await kvSet(KEY_QUEUE, [...result.queue, inFlight]);
 
     const mood = moodAt(at, limits);
-    const line = await pickLine(result.send.category, mood, result.send.vars);
+    const line = await pickLine(inFlight.category, mood, inFlight.vars);
     return {
-      entry: result.send,
+      entry: inFlight,
       mood,
-      line: result.send.overrides ? { ...(line || {}), ...result.send.overrides } : line,
+      line: inFlight.overrides ? { ...(line || {}), ...inFlight.overrides } : line,
     };
   }
 
@@ -1027,8 +1240,9 @@
   root.SageScheduler = {
     // time / mood
     MOODS, moodForHour, baseMoodForHour, inQuietRange, moodAt, nextAllowedTime, allowedMoodsFor,
+    startOfNextLocalDay, sameLocalDay,
     // rules
-    CATEGORY_META, DEFAULT_LIMITS, MOOD_POOLS,
+    CATEGORY_META, DEFAULT_LIMITS, MOOD_POOLS, LIMITS_VERSION, MAX_SEND_ATTEMPTS,
     // thresholds / odometer
     SERVICE_INTERVAL_KM, DAY_THRESHOLDS, KM_THRESHOLDS,
     tierFor, dayTier, kmTier, averageKmPerDay, serviceStatus, servicePlan,
@@ -1042,7 +1256,7 @@
     PARK_REMINDER_MS, PARK_SESSION_MAX_MS,
     getParkSession, setParkSession, parkReminderDue, checkParkSession,
     // weekly insight
-    isoDate, checkWeeklyInsight,
+    isoDate, checkWeeklyInsight, checkPlans, PLAN_NOTICE_DAYS,
     // low-level, shared with the worker
     kvGet, kvSet,
   };

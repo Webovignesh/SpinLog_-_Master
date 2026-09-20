@@ -349,7 +349,7 @@ const SAGE_MESSAGES = {
 
 // ════════════════════════════════════════════════════════════════════════
 // SELECTION ENGINE
-// ════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════ ══════════════════════════════
 
 const RECENT_KEY = 'sage_notif_recent';
 
@@ -453,20 +453,47 @@ async function sendSageNotif(category, overrides = {}, context = {}) {
     ],
   };
 
-  const reg = await navigator.serviceWorker?.ready;
-  if (reg?.showNotification) {
-    reg.showNotification(title, options);
-  } else {
-    // The plain Notification constructor ignores actions, but tag and data
-    // still matter for stacking and click handling.
+  // Awaited, and the result is honest.
+  //
+  // showNotification() was previously fired and forgotten, so a rejection became
+  // an unhandled promise rejection while this function still returned true — the
+  // caller then stamped it as sent and removed it from the queue. And on Android
+  // Chrome the bare `new Notification()` constructor throws synchronously
+  // ("Illegal constructor"), which propagated out of here into callers that do
+  // not catch.
+  try {
+    const reg = await withTimeout(navigator.serviceWorker?.ready, SW_READY_TIMEOUT_MS);
+    if (reg?.showNotification) {
+      await reg.showNotification(title, options);
+      return true;
+    }
+    // The plain constructor ignores actions, but tag and data still matter for
+    // stacking and click handling. Unavailable in a worker and on Android Chrome.
     new Notification(title, {
       body,
       icon: './assets/img/sage.webp',
       tag: options.tag,
       data: options.data,
     });
+    return true;
+  } catch (err) {
+    console.warn('[SpinLog] Could not show a notification:', err);
+    return false;
   }
-  return true;
+}
+
+// `navigator.serviceWorker.ready` never settles when the worker fails to reach
+// `activated` — a broken importScripts, a scope problem, or private browsing.
+// Awaiting it unguarded left the settings Test button stuck on "Asking her to
+// say something…" forever with no error.
+const SW_READY_TIMEOUT_MS = 5000;
+
+function withTimeout(promise, ms) {
+  if (!promise) return Promise.resolve(null);
+  return Promise.race([
+    promise,
+    new Promise(resolve => setTimeout(() => resolve(null), ms)),
+  ]);
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -475,14 +502,61 @@ async function sendSageNotif(category, overrides = {}, context = {}) {
 // whether now is a good moment, and the pump does the sending.
 // ════════════════════════════════════════════════════════════════════════
 
+/**
+ * Look at the plans she is holding and queue a reminder for the nearest one.
+ *
+ * Page-side only, because the scheduler runs in the service worker too and the
+ * worker cannot see her memory. Cheap to call often: the scheduler keys each
+ * reminder by plan and day, so a second call inside the same day collapses onto
+ * the same queue entry instead of adding another.
+ */
+async function checkSagePlans() {
+  const S = self.SageScheduler;
+  const M = self.SageMemory;
+  if (!S || !M || !S.checkPlans || !M.upcomingPlans) return null;
+  try {
+    return await S.checkPlans(M.upcomingPlans());
+  } catch {
+    return null;
+  }
+}
+window.checkSagePlans = checkSagePlans;
+
 /** Ask the scheduler for the next thing worth saying and say it. */
 async function sagePump() {
   const S = self.SageScheduler;
   if (!S) return false;
+  // Do not even look at the queue when nothing can be shown. drain() now leaves
+  // the entry queued for a retry, but not draining at all is better still: it
+  // costs no attempts, so a week of use without permission granted leaves the
+  // backlog completely intact for the moment it is.
+  if (!notifGranted()) return false;
   try {
+    // Her own plans go in the queue here rather than being checked by the worker,
+    // which has no access to her memory.
+    await checkSagePlans();
+
     const decision = await S.drain();
     if (!decision) return false;
-    const sent = await sendSageNotif(decision.entry.category, decision.entry.overrides || {}, {
+
+    let overrides = decision.entry.overrides || {};
+
+    // A plan reminder is the one category whose line cannot be pre-written: the
+    // point of it is that it names the thing he said he would do. So she writes it
+    // here, about this plan, at the moment it is actually going out — queueing
+    // time would mean paying for lines that quiet hours then threw away.
+    //
+    // Any failure falls through to the scheduler's {plan} pool. A reminder in a
+    // plainer voice beats no reminder.
+    if (decision.entry.category === 'planReminder' && !overrides.body) {
+      const plan = decision.entry.vars && decision.entry.vars.plan;
+      const written = self.SageAI && self.SageAI.writePlanLine
+        ? await self.SageAI.writePlanLine(plan, decision.mood).catch(() => null)
+        : null;
+      if (written) overrides = { ...overrides, ...written };
+    }
+
+    const sent = await sendSageNotif(decision.entry.category, overrides, {
       mood: decision.mood,
       line: decision.line,
       vars: decision.entry.vars,

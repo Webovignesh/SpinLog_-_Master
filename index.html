@@ -161,7 +161,25 @@
               </button>
             </div>
 
-            <p class="sage-health-word" id="sageHealthWord"></p>
+            <!-- Her read on herself, as a quote from her rather than a coloured
+                 paragraph. The verdict beside her face is the one-word summary
+                 that has always been in the facts and was only ever used to pick
+                 a text colour. -->
+            <div class="sage-health-says">
+              <span class="sage-health-face" aria-hidden="true">
+                <img src="./assets/img/sage.webp" alt="" decoding="async" />
+              </span>
+              <div class="sage-health-bubble" id="sageHealthBubble">
+                <span class="sage-health-meta">
+                  <span class="sage-health-verdict" id="sageHealthVerdict"></span>
+                  <span class="sage-health-writing" id="sageHealthWriting" hidden>
+                    <span class="sl-spinner" aria-hidden="true"></span>writing
+                  </span>
+                </span>
+                <p class="sage-health-word" id="sageHealthWord"></p>
+              </div>
+            </div>
+
             <div class="sage-health-flags" id="sageHealthFlags"></div>
             <dl class="sage-health-stats" id="sageHealthStats"></dl>
             <p class="sage-health-foot" id="sageHealthFoot"></p>
@@ -192,11 +210,13 @@
                   <dt><i class="fas fa-fingerprint" aria-hidden="true"></i> VIN / Chassis</dt>
                   <dd>MD2JPEXC0SN078159</dd>
                 </div>
-                <!-- Derived from the service records, so it completes the grid
-                     without repeating anything already on the page. -->
+                <!-- Derived from the purchase date, so it completes the grid
+                     without repeating anything already on the page. The count
+                     of services still lives in the health card and the
+                     Record History summary. -->
                 <div class="dk-fact">
-                  <dt><i class="fas fa-clipboard-check" aria-hidden="true"></i> Services Logged</dt>
-                  <dd id="dkFactServices">&mdash;</dd>
+                  <dt><i class="fas fa-cake-candles" aria-hidden="true"></i> Vehicle Age</dt>
+                  <dd id="dkFactAge">&mdash;</dd>
                 </div>
               </dl>
             </article>
@@ -411,9 +431,23 @@
               <span>Notes</span>
               <div class="field-shell textarea-shell">
                 <i class="fas fa-pen field-leading" aria-hidden="true"></i>
-                <textarea name="notes" rows="3" placeholder="Add any extra notes..." required></textarea>
+                <textarea name="notes" rows="3" placeholder="Describe the work — Sage can fill in the rest from it..." required></textarea>
               </div>
             </label>
+            <!-- Autofill sits in its own row rather than beside Add Entry: the
+                 mobile rules stretch .drawer-submit to the full width, so a
+                 sibling in that flex row would fight it. Nothing here submits —
+                 she drafts, you check, you press Add Entry. -->
+            <div class="sage-fill-row">
+              <button type="button" class="sage-fill-btn" id="serviceAutofill"
+                      aria-describedby="serviceAutofillHint">
+                <span class="sage-fill-face" aria-hidden="true">
+                  <img src="./assets/img/sage.webp" alt="" decoding="async" />
+                </span>
+                <span class="sage-fill-label">Let Sage fill it in</span>
+              </button>
+              <p class="sage-fill-hint" id="serviceAutofillHint" role="status" aria-live="polite"></p>
+            </div>
             <div class="form-in-card-actions">
               <button type="submit" class="drawer-submit">Add Entry</button>
             </div>
@@ -424,6 +458,13 @@
               <div>
                 <h4 class="record-history-title" id="serviceHistoryTitle">Record History</h4>
                 <p class="service-history-subtitle is-hidden" id="serviceHistorySummary"></p>
+                <!-- Stated, because a long-press nobody is told about is a feature
+                     nobody has. The cover cards learned this the hard way and gave
+                     up their hidden hold for a plain tap. -->
+                <p class="service-history-hint">
+                  <i class="fas fa-hand-pointer" aria-hidden="true"></i>
+                  Hold a row to edit it
+                </p>
               </div>
               <div class="history-header-actions">
                 <button type="button" class="history-filter-toggle" id="serviceHistoryFilterToggle" aria-expanded="false" aria-controls="serviceHistoryFilters">
@@ -719,6 +760,11 @@
     </div>
   </div>
 
+  </div>
+  <!-- ^ closes .docs-panel.docs-historic-panel, opened well above. It was missing,
+       so the browser's error recovery put the five modals below INSIDE the panel
+       and only closed it when it hit </section>. -->
+
   <!-- Historic notes modal -->
   <div id="historicNotesModal" class="docs-modal" aria-hidden="true">
     <div class="docs-modal-card" role="dialog" aria-modal="true" aria-labelledby="historicNotesTitle">
@@ -727,6 +773,17 @@
       <h3 id="historicNotesTitle">Add upload notes</h3>
       <p id="historicNotesHelp">Write what this file is about. Notes are required.</p>
       <textarea id="historicNotesInput" rows="5" maxlength="600" placeholder="Example: Cold start after 5,999 km service, new exhaust tone, highway ride photo..."></textarea>
+      <!-- Hidden until the upload flow tells autofill which file this is, so it
+           never appears when there is nothing for her to write about. -->
+      <div class="sage-fill-row sage-fill-row--modal">
+        <button type="button" class="sage-fill-btn" id="historicNotesAutofill"
+                aria-describedby="historicNotesHelp" hidden>
+          <span class="sage-fill-face" aria-hidden="true">
+            <img src="./assets/img/sage.webp" alt="" decoding="async" />
+          </span>
+          <span class="sage-fill-label">Let Sage draft it</span>
+        </button>
+      </div>
       <div class="docs-modal-actions">
         <button type="button" class="docs-secondary-btn" id="historicNotesSkip">Cancel</button>
         <button type="button" class="docs-primary-btn" id="historicNotesSave"><i class="fas fa-check"></i> Save</button>
@@ -793,13 +850,25 @@
                 <strong>Sage</strong>
                 <small id="sageChatMood">Duke 250 Gen 3</small>
               </span>
+              <!-- A gear, not fa-sliders. Sliders is a legitimate "preferences"
+                   glyph but at this size it reads as an audio equaliser, and the
+                   one thing a settings button must not be is a guess. -->
               <button type="button" class="sage-icon-btn" id="sageChatSettings"
                       aria-label="Sage settings" title="Sage settings">
-                <i class="fas fa-sliders" aria-hidden="true"></i>
+                <i class="fas fa-gear" aria-hidden="true"></i>
               </button>
+              <!-- Clears the visible log only, which rules out most of the obvious
+                   glyphs. Not fa-trash-can: a bin is this app's mark for "destroy
+                   this data", and her memory survives this. Not fa-eraser either —
+                   that is "Forget everything" in settings, and the two must not look
+                   like the same button. fa-comment-slash was the first attempt and is
+                   unreadable at 13px; it came out looking like a crossed-out eye.
+                   A counter-clockwise arrow is two strokes at any size and says what
+                   this actually does: start the conversation over. -->
               <button type="button" class="sage-icon-btn" id="sageChatClear"
-                      aria-label="Clear conversation" title="Clear conversation">
-                <i class="fas fa-broom" aria-hidden="true"></i>
+                      aria-label="Clear this conversation — she still remembers you"
+                      title="Clear this conversation (she still remembers you)">
+                <i class="fas fa-rotate-left" aria-hidden="true"></i>
               </button>
             </div>
 
@@ -808,17 +877,47 @@
 
             <div class="sage-chat-suggest" id="sageChatSuggest"></div>
 
-            <form class="sage-chat-form" id="sageChatForm" autocomplete="off">
-              <label class="sr-only" for="sageChatInput">Message Sage</label>
-              <textarea id="sageChatInput" class="sage-chat-input" rows="1"
-                        maxlength="500" placeholder="Say something to her…"
-                        spellcheck="true"></textarea>
-              <button type="submit" class="sage-chat-send" id="sageChatSend"
-                      aria-label="Send message">
-                <i class="fas fa-paper-plane" aria-hidden="true"></i>
-              </button>
-            </form>
-            <p class="sage-set-status" id="sageChatStatus" role="status" aria-live="polite"></p>
+            <!-- One composer group: the clipped file, the input row and the status
+                 line. They used to be three siblings of the log with three
+                 different paddings and margins of their own, which is why the
+                 attachment read as a loose bar floating between the two and the
+                 status line sat squashed against the bottom of the card. The
+                 group owns the spacing now; the children set none. -->
+            <div class="sage-chat-composer">
+              <!-- The files clipped to the next message. She reads all of them, and
+                   her upload controls take them one at a time PICKING BY KIND — so
+                   clipping a PDF bill and a photo together works: attach_bill gets
+                   the PDF, upload_media gets the image, and neither has to be told
+                   which. The chips are built by sage-ui.js. -->
+              <div class="sage-attach" id="sageAttachBar" hidden>
+                <div class="sage-attach-top">
+                  <span class="sage-attach-count" id="sageAttachCount"></span>
+                  <button type="button" class="sage-attach-clear" id="sageAttachClear">
+                    <i class="fas fa-xmark" aria-hidden="true"></i> Clear all
+                  </button>
+                </div>
+                <ul class="sage-attach-list" id="sageAttachList"></ul>
+              </div>
+
+              <form class="sage-chat-form" id="sageChatForm" autocomplete="off">
+                <label class="sr-only" for="sageChatInput">Message Sage</label>
+                <input type="file" id="sageChatFile" hidden multiple
+                       accept="image/*,application/pdf,.pdf,.mp3,.wav,.m4a,.mp4,.mov,.webm" />
+                <button type="button" class="sage-chat-clip" id="sageChatAttach"
+                        aria-label="Attach a file" title="Attach a bill, document or photo">
+                  <i class="fas fa-paperclip" aria-hidden="true"></i>
+                </button>
+                <textarea id="sageChatInput" class="sage-chat-input" rows="1"
+                          maxlength="500" placeholder="Say something to her…"
+                          spellcheck="true"></textarea>
+                <button type="submit" class="sage-chat-send" id="sageChatSend"
+                        aria-label="Send message">
+                  <i class="fas fa-paper-plane" aria-hidden="true"></i>
+                </button>
+              </form>
+
+              <p class="sage-set-status" id="sageChatStatus" role="status" aria-live="polite"></p>
+            </div>
           </div>
         </div>
       </section>
@@ -849,10 +948,90 @@
       </div>
 
       <!-- Cover Date Edit Modal -->
+      <!-- ═══════════════════════════════════════════════════════════════
+           EDIT A SERVICE RECORD
+           Reached by holding a row in Record History. Until now the app could
+           only insert and delete, so fixing a mistyped odometer meant deleting
+           the record and re-uploading its bill.
+
+           A bottom sheet on a phone for free: .sl-modal-overlay is
+           align-items:flex-end below 520px and .sl-modal-card rounds only its top
+           corners there. Native <select> and <input type="date"> on purpose —
+           they raise the OS pickers, which beats the custom listbox the entry
+           form uses when you are editing one field with one thumb.
+           ═══════════════════════════════════════════════════════════════ -->
+      <div id="serviceEditModal" class="sl-modal-overlay" aria-hidden="true" role="dialog"
+           aria-modal="true" aria-labelledby="serviceEditTitle">
+        <div class="sl-modal-card svc-edit-card">
+          <div class="sl-modal-header">
+            <span id="serviceEditTitle"><i class="fas fa-pen-to-square" aria-hidden="true"></i> Edit record</span>
+            <button type="button" class="sl-modal-close" id="serviceEditClose" aria-label="Close">×</button>
+          </div>
+
+          <form class="svc-edit-body" id="serviceEditForm" autocomplete="off" novalidate>
+            <p class="svc-edit-what" id="serviceEditWhat"></p>
+
+            <div class="svc-edit-grid">
+              <label class="svc-edit-field">
+                <span>Type</span>
+                <select class="sage-set-input" id="serviceEditType">
+                  <option value="Showroom">Showroom</option>
+                  <option value="3rd Party">3rd Party</option>
+                  <option value="Mods/Updates">Mods/Updates</option>
+                </select>
+              </label>
+              <label class="svc-edit-field">
+                <span>Date</span>
+                <input type="date" class="sage-set-input" id="serviceEditDate" />
+              </label>
+              <!-- Hidden for Mods/Updates, matching the entry form's own rule. -->
+              <label class="svc-edit-field" id="serviceEditDueField">
+                <span>Next due</span>
+                <input type="date" class="sage-set-input" id="serviceEditDue" />
+              </label>
+              <label class="svc-edit-field">
+                <span>ODO (km)</span>
+                <input type="number" class="sage-set-input" id="serviceEditOdo"
+                       min="0" step="1" inputmode="numeric" />
+              </label>
+              <label class="svc-edit-field">
+                <span>Cost (₹)</span>
+                <input type="number" class="sage-set-input" id="serviceEditCost"
+                       min="0" step="0.01" inputmode="decimal" />
+              </label>
+            </div>
+
+            <label class="svc-edit-field svc-edit-field--wide">
+              <span>Notes</span>
+              <textarea class="sage-set-input svc-edit-notes" id="serviceEditNotes"
+                        rows="3" maxlength="400"
+                        placeholder="What was actually done"></textarea>
+            </label>
+
+            <p class="svc-edit-status" id="serviceEditStatus" role="status" aria-live="polite"></p>
+
+            <!-- The bill is not editable here. It is a file in storage with its own
+                 upload, replace and rollback path (attachBill), and quietly
+                 orphaning one from an edit dialog is how storage fills up. -->
+            <p class="svc-edit-note">The attached bill is not changed by this.</p>
+
+            <div class="svc-edit-actions">
+              <button type="button" class="sage-btn" id="serviceEditCancel">Cancel</button>
+              <button type="submit" class="sage-btn sage-btn--primary" id="serviceEditSave">
+                <i class="fas fa-check" aria-hidden="true"></i> Save changes
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+
       <div id="coverEditModal" class="sl-modal-overlay" aria-hidden="true" role="dialog" aria-modal="true">
         <div class="sl-modal-card cover-edit-card">
           <div class="sl-modal-header">
-            <span id="coverEditTitle"><i class="fas fa-calendar-pen"></i> Edit Date</span>
+            <!-- The calendar-with-pen variant would be apter, but it is Font
+                 Awesome Pro and was rendering as an empty box on this kit.
+                 script.js rewrites this header on open; keep the two in step. -->
+            <span id="coverEditTitle"><i class="fas fa-calendar-days"></i> Edit Date</span>
             <button type="button" class="sl-modal-close" id="coverEditClose" aria-label="Close">×</button>
           </div>
           <div class="cover-edit-body">
@@ -888,6 +1067,17 @@
             </button>
             <input type="file" id="docAddFile" accept="image/*,.pdf" hidden />
 
+            <!-- Names the document from the file you picked, so the common case
+                 is one tap instead of typing. Writes into the fields above. -->
+            <div class="sage-fill-row sage-fill-row--modal">
+              <button type="button" class="sage-fill-btn" id="docAddAutofill" aria-describedby="docAddHint">
+                <span class="sage-fill-face" aria-hidden="true">
+                  <img src="./assets/img/sage.webp" alt="" decoding="async" />
+                </span>
+                <span class="sage-fill-label">Let Sage name it</span>
+              </button>
+            </div>
+
             <p class="dk-add-hint" id="docAddHint">Give it a short name so you can find it later.</p>
             <button type="button" id="docAddSave" class="dk-btn dk-btn--primary dk-btn--block">
               <span>Add document</span>
@@ -896,128 +1086,507 @@
         </div>
       </div>
 
-      <!-- Sage settings: Gemini key + notification controls.
-           Built by sage-ui.js; the category list is generated from the
-           scheduler's CATEGORY_META so the two can never drift apart. -->
+      <!-- ═══════════════════════════════════════════════════════════════
+           SAGE SETTINGS
+           Four tabs rather than one long scroll: her memory is now the
+           largest thing in here by far, and stacking it above the key ring
+           meant the controls people actually came for were three screens
+           down. Built by sage-ui.js; the category list is generated from the
+           scheduler's CATEGORY_META so the two can never drift apart.
+           ═══════════════════════════════════════════════════════════════ -->
       <div id="sageSettingsModal" class="sl-modal-overlay" aria-hidden="true" role="dialog"
            aria-modal="true" aria-labelledby="sageSettingsTitle">
         <div class="sl-modal-card sage-settings-card">
-          <div class="sl-modal-header">
-            <span id="sageSettingsTitle"><i class="fas fa-sliders" aria-hidden="true"></i> Sage settings</span>
+
+          <!-- Her face and her live state, instead of a title bar. The sync
+               pill is here rather than inside the memory tab because "is her
+               memory safe" is the one answer worth having on screen always. -->
+          <div class="sage-set-hero">
+            <span class="sage-set-hero-face" aria-hidden="true">
+              <img src="./assets/img/sage.webp" alt="" decoding="async" />
+            </span>
+            <span class="sage-set-hero-who">
+              <strong id="sageSettingsTitle">Sage</strong>
+              <small id="sageSetHeroNote">Duke 250 Gen 3</small>
+            </span>
+            <span class="sage-sync-pill" id="sageSyncPill" role="status" aria-live="polite">
+              <i class="fas fa-circle-notch" aria-hidden="true"></i>
+              <span id="sageSyncPillText">Checking…</span>
+            </span>
             <button type="button" class="sl-modal-close" id="sageSettingsClose" aria-label="Close settings">×</button>
           </div>
 
+          <div class="sage-set-tabs" id="sageSetTabs" role="tablist" aria-label="Sage settings sections">
+            <button type="button" class="sage-set-tab is-on" id="sageTabMemory" role="tab"
+                    data-sage-tab="memory" aria-selected="true" aria-controls="sagePanelMemory">
+              <i class="fas fa-brain" aria-hidden="true"></i>
+              <span>Memory</span>
+              <span class="sage-tab-badge" id="sageMemBadge" hidden></span>
+            </button>
+            <button type="button" class="sage-set-tab" id="sageTabVoice" role="tab"
+                    data-sage-tab="voice" aria-selected="false" aria-controls="sagePanelVoice" tabindex="-1">
+              <i class="fas fa-comment-dots" aria-hidden="true"></i>
+              <span>Voice</span>
+            </button>
+            <button type="button" class="sage-set-tab" id="sageTabTiming" role="tab"
+                    data-sage-tab="timing" aria-selected="false" aria-controls="sagePanelTiming" tabindex="-1">
+              <i class="fas fa-clock" aria-hidden="true"></i>
+              <span>Timing</span>
+            </button>
+            <button type="button" class="sage-set-tab" id="sageTabAlerts" role="tab"
+                    data-sage-tab="alerts" aria-selected="false" aria-controls="sagePanelAlerts" tabindex="-1">
+              <i class="fas fa-bell" aria-hidden="true"></i>
+              <span>Alerts</span>
+            </button>
+          </div>
+
           <div class="sage-settings-body">
-            <!-- ── Gemini key ──
-                 These groups are divs, not <section>. A global
+            <!-- ══ MEMORY ══
+                 Everything she has learned about Viky. First tab because it is
+                 the only part of this dialog that is *his* data rather than a
+                 setting, and because it is now the largest.
+
+                 These panels and groups are divs, not <section>. A global
                  `section { display: none }` rule drives the app's page routing,
                  so a <section> anywhere outside main is invisible. -->
-            <div class="sage-set-group" role="group" aria-labelledby="sageKeyHeading">
-              <h3 class="sage-set-heading" id="sageKeyHeading">
-                <i class="fas fa-key" aria-hidden="true"></i> Gemini API key
-              </h3>
-              <p class="sage-set-note">
-                Lets Sage write her own messages and chat with you. Stored on this
-                device only. Without it she falls back to her built-in lines.
-                <br>Add more than one key and she moves to the next when one runs
-                out of quota.
-              </p>
+            <div class="sage-set-panel is-on" id="sagePanelMemory" role="tabpanel"
+                 aria-labelledby="sageTabMemory" tabindex="0">
 
-              <div id="sageKeyList" class="sage-key-list"></div>
-
-              <label class="sage-set-label" for="sageKeyInput">Add a key</label>
-              <div class="sage-key-row">
-                <input type="password" id="sageKeyInput" class="sage-set-input"
-                       autocomplete="off" spellcheck="false"
-                       placeholder="Paste your key" aria-describedby="sageKeyStatus" />
-                <button type="button" id="sageKeyReveal" class="sage-icon-btn"
-                        aria-label="Show key" aria-pressed="false">
-                  <i class="fas fa-eye" aria-hidden="true"></i>
-                </button>
-              </div>
-
-              <label class="sage-set-label" for="sageModelSelect">Preferred model</label>
-              <!-- Placeholder only. sage-ui.js replaces these with the models
-                   your key can actually see, once it has been checked. -->
-              <select id="sageModelSelect" class="sage-set-input"
-                      aria-describedby="sageModelNote">
-                <option value="gemini-3.6-flash">gemini-3.6-flash</option>
-              </select>
-              <p class="sage-set-note sage-set-note--tight" id="sageModelNote">
-                Tried first. If it hits its rate limit she falls back through the
-                other models automatically, so one busy model never silences her.
-              </p>
-
-              <div class="sage-set-row">
-                <button type="button" id="sageKeyCheck" class="sage-btn sage-btn--primary">
-                  <i class="fas fa-circle-plus" aria-hidden="true"></i> Check &amp; add
-                </button>
-                <button type="button" id="sageKeyForget" class="sage-btn">
-                  <i class="fas fa-trash-can" aria-hidden="true"></i> Remove all
-                </button>
-              </div>
-              <p class="sage-set-status" id="sageKeyStatus" role="status" aria-live="polite"></p>
-            </div>
-
-            <!-- ── Timing ── -->
-            <div class="sage-set-group" role="group" aria-labelledby="sageTimingHeading">
-              <h3 class="sage-set-heading" id="sageTimingHeading">
-                <i class="fas fa-clock" aria-hidden="true"></i> When she can talk
-              </h3>
-
-              <div class="sage-set-duo">
-                <div>
-                  <label class="sage-set-label" for="sageQuietStart">Quiet from</label>
-                  <select id="sageQuietStart" class="sage-set-input"></select>
+              <!-- Where her memory actually lives. Stated plainly because the
+                   honest answer changed: it used to be this device only. -->
+              <div class="sage-glass sage-sync-card" id="sageSyncCard">
+                <div class="sage-sync-head">
+                  <span class="sage-sync-icon" id="sageSyncIcon" aria-hidden="true">
+                    <i class="fas fa-cloud"></i>
+                  </span>
+                  <div class="sage-sync-copy">
+                    <strong id="sageSyncTitle">Memory bank</strong>
+                    <small id="sageSyncState">Checking where her memory is saved…</small>
+                  </div>
                 </div>
-                <div>
-                  <label class="sage-set-label" for="sageQuietEnd">Quiet until</label>
-                  <select id="sageQuietEnd" class="sage-set-input"></select>
+                <!-- Two segmented pills instead of five separate buttons.
+                     One rounded control per job, divided into its actions, with
+                     nothing behind a chevron. Five free-standing ghost buttons
+                     read as five unrelated choices of equal weight; this reads as
+                     "cloud" and "file", which is what they are — and every action
+                     is still one tap, visible, with no menu to discover. -->
+                <div class="sage-sync-actions">
+                  <div class="sage-seg" role="group" aria-label="Cloud">
+                    <button type="button" id="sageSyncNow" class="sage-seg-btn"
+                            title="Save anything new and take anything new down">
+                      <i class="fas fa-rotate" aria-hidden="true"></i><span>Sync</span>
+                    </button>
+                    <!-- Restore opens the chooser. It used to be "take everything
+                         from the cloud", which on a device that is already in step
+                         answers "nothing new" and is therefore a button that does
+                         nothing — and the real work, picking what comes back and
+                         what gets destroyed, was hidden behind a second segment
+                         nobody would think to press. One button, and it shows you
+                         what is there. -->
+                    <button type="button" id="sageMemRestore" class="sage-seg-btn"
+                            title="See what is saved, bring it back or delete it">
+                      <i class="fas fa-cloud-arrow-down" aria-hidden="true"></i><span>Restore</span>
+                    </button>
+                  </div>
+
+                  <div class="sage-seg" role="group" aria-label="File">
+                    <button type="button" id="sageMemExport" class="sage-seg-btn"
+                            title="Save everything she knows to a file">
+                      <i class="fas fa-download" aria-hidden="true"></i><span>Export</span>
+                    </button>
+                    <button type="button" id="sageMemImport" class="sage-seg-btn"
+                            title="Merge a file back in. Never overwrites.">
+                      <i class="fas fa-upload" aria-hidden="true"></i><span>Import</span>
+                    </button>
+                  </div>
+                  <input type="file" id="sageMemImportFile" accept="application/json,.json" hidden />
+                </div>
+
+                <!-- Answers land here rather than under the list at the bottom of
+                     the panel: a cloud action taken from this card was reporting
+                     its result three scrolls away from the button that caused it. -->
+                <p class="sage-set-status" id="sageSyncStatus" role="status" aria-live="polite"></p>
+
+
+
+                <!-- The chooser. Folded away until asked for: it is a list of
+                     things she knows, and the panel below is already that.
+
+                     It owns both things you can do to a memory the cloud is
+                     holding — bring it back, or destroy it. They belong together:
+                     the reason to look at a forgotten memory is to decide which
+                     of the two you want, and having them in one place is why
+                     there is no separate "recover forgotten" button any more. -->
+                <div class="sage-pick" id="sageMemPick" hidden>
+                  <div class="sage-pick-top">
+                    <strong id="sageMemPickTitle">What she has saved</strong>
+                    <button type="button" class="sage-icon-btn" id="sageMemPickClose"
+                            aria-label="Close the chooser">
+                      <i class="fas fa-xmark" aria-hidden="true"></i>
+                    </button>
+                  </div>
+                  <div class="sage-pick-tools">
+                    <button type="button" class="sage-pick-chip" id="sageMemPickAll">Select all</button>
+                    <button type="button" class="sage-pick-chip" id="sageMemPickNone">Clear</button>
+                    <span class="sage-pick-count" id="sageMemPickCount"></span>
+                  </div>
+                  <div class="sage-pick-list" id="sageMemPickList"></div>
+                  <div class="sage-pick-foot">
+                    <button type="button" class="sage-btn sage-btn--primary sage-btn--sm"
+                            id="sageMemPickGo" disabled>
+                      <i class="fas fa-cloud-arrow-down" aria-hidden="true"></i> Bring back
+                    </button>
+                    <!-- The permanent one. Forgetting is a soft delete so it
+                         reaches his other devices; this is the other half, and
+                         without it "forgotten" was a state that only ever grew. -->
+                    <button type="button" class="sage-btn sage-btn--danger sage-btn--sm"
+                            id="sageMemPickKill" disabled>
+                      <i class="fas fa-trash-can" aria-hidden="true"></i> Delete for good
+                    </button>
+                  </div>
                 </div>
               </div>
-              <p class="sage-set-note" id="sageQuietNote"></p>
 
-              <label class="sage-set-label" for="sageDailyCap">
-                Most messages per day: <output id="sageDailyCapOut" for="sageDailyCap">3</output>
-              </label>
-              <input type="range" id="sageDailyCap" class="sage-set-range"
-                     min="1" max="8" step="1" value="3" />
+              <!-- Filled by renderMemoryStats(). Four figures, not a dashboard. -->
+              <div class="sage-stat-grid" id="sageMemStats"></div>
 
-              <label class="sage-set-label" for="sageMinGap">
-                Least time between them: <output id="sageMinGapOut" for="sageMinGap">3h</output>
-              </label>
-              <input type="range" id="sageMinGap" class="sage-set-range"
-                     min="1" max="12" step="1" value="3" />
+              <!-- Her own rolling note. Shown because nothing she keeps about
+                   him should be hidden from him. -->
+              <div class="sage-glass sage-recap-card" id="sageMemRecap" hidden>
+                <h4 class="sage-recap-head">
+                  <i class="fas fa-feather" aria-hidden="true"></i> Her note to herself
+                </h4>
+                <p class="sage-recap-text" id="sageMemRecapText"></p>
+                <small class="sage-recap-foot" id="sageMemRecapFoot"></small>
+              </div>
 
-              <label class="sage-toggle">
-                <input type="checkbox" id="sageCritQuiet" checked />
-                <span class="sage-toggle-mark" aria-hidden="true"></span>
-                <span class="sage-toggle-text">
-                  Let urgent things through quiet hours
-                  <small>Overdue service or cover expiring tomorrow, delivered silently.</small>
-                </span>
-              </label>
+              <div class="sage-mem-toolbar">
+                <div class="sage-mem-find">
+                  <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                  <label class="sr-only" for="sageMemSearch">Search what she remembers</label>
+                  <input type="search" id="sageMemSearch" class="sage-mem-find-input"
+                         placeholder="Search what she remembers…"
+                         autocomplete="off" spellcheck="false" />
+                  <button type="button" class="sage-mem-find-clear" id="sageMemSearchClear"
+                          aria-label="Clear search" hidden>
+                    <i class="fas fa-xmark" aria-hidden="true"></i>
+                  </button>
+                </div>
+                <!-- Generated from what is actually in the bank, so a filter is
+                     never offered for a kind she has nothing of. -->
+                <div class="sage-chip-row" id="sageMemFilters" role="group"
+                     aria-label="Filter memories by kind"></div>
+              </div>
+
+              <div id="sageMemList" class="sage-mem-list"></div>
+              <p class="sage-set-status" id="sageMemStatus" role="status" aria-live="polite"></p>
+
+              <!-- Conversation timeline. Costs nothing to keep: it is counted
+                   locally rather than written by the model. -->
+              <div class="sage-set-sub" id="sageMemEpisodesWrap" hidden>
+                <h4 class="sage-set-subhead">
+                  <i class="fas fa-timeline" aria-hidden="true"></i> When you talked
+                </h4>
+                <ol class="sage-timeline" id="sageMemEpisodes"></ol>
+              </div>
+
+              <div class="sage-danger">
+                <div class="sage-danger-copy">
+                  <strong>Make her forget everything</strong>
+                  <small>Her notes and your whole conversation, here and in the cloud.
+                    It cannot be undone. Your parked spots and your records stay.</small>
+                </div>
+                <button type="button" id="sageMemForget" class="sage-btn sage-btn--danger">
+                  <i class="fas fa-eraser" aria-hidden="true"></i> Forget everything
+                </button>
+              </div>
             </div>
 
-            <!-- ── Categories ── -->
-            <div class="sage-set-group" role="group" aria-labelledby="sageCatHeading">
-              <h3 class="sage-set-heading" id="sageCatHeading">
-                <i class="fas fa-bell" aria-hidden="true"></i> What she talks about
-              </h3>
-              <div id="sageCategoryList" class="sage-cat-list"></div>
+            <!-- ══ VOICE ══ -->
+            <div class="sage-set-panel" id="sagePanelVoice" role="tabpanel"
+                 aria-labelledby="sageTabVoice" tabindex="0" hidden>
+              <!-- Today's usage first. On the free tier the reason she has gone
+                   quiet is almost always the day's allowance, so that answer
+                   belongs above the key list rather than in a sentence under it. -->
+              <div class="sage-glass sage-usage-card" id="sageUsageCard">
+                <div class="sage-usage-head">
+                  <strong>Her voice today</strong>
+                  <span class="sage-usage-state" id="sageUsageState">No key yet</span>
+                </div>
+                <div class="sage-meter-set" id="sageUsageMeters"></div>
+                <small class="sage-usage-foot" id="sageUsageFoot"></small>
+              </div>
+
+              <!-- ── API keys ──
+                   Five keys as five tall cards overflowed the panel and pushed
+                   everything else off screen, so the rows are now one dense line
+                   each with the list scroll-capped, the count lives in the
+                   heading, and the add-key form is folded away until wanted. -->
+              <div class="sage-set-group" role="group" aria-labelledby="sageKeyHeading">
+                <div class="sage-group-top">
+                  <h3 class="sage-set-heading" id="sageKeyHeading">
+                    <i class="fas fa-key" aria-hidden="true"></i> API keys
+                    <span class="sage-count-chip" id="sageKeyCount" hidden></span>
+                  </h3>
+                  <button type="button" class="sage-btn sage-btn--ghost sage-btn--sm"
+                          id="sageKeyAddToggle" aria-expanded="false" aria-controls="sageAddKey">
+                    <i class="fas fa-plus" aria-hidden="true"></i> Add
+                  </button>
+                </div>
+                <p class="sage-set-note sage-set-note--tight">
+                  Lets her write her own lines and chat with you. She moves to the
+                  next key when one runs out of quota, and each one adds to her
+                  daily background allowance.
+                </p>
+
+                <!-- A grid, not a list: two columns on a phone, three from the
+                     modal's own breakpoint up. Five keys stacked vertically
+                     overflowed the panel however short each row was made. -->
+                <div id="sageKeyList" class="sage-key-grid"></div>
+
+                <!-- Collapsed by default. Pasting a secret is a rare action and
+                     it was taking up a third of the panel permanently. -->
+                <div class="sage-addkey" id="sageAddKey" hidden>
+                  <label class="sage-set-label" for="sageKeyInput">
+                    Paste a new key
+                    <a class="sage-addkey-link" href="https://aistudio.google.com/apikey"
+                       target="_blank" rel="noopener noreferrer">
+                      Get one <i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i>
+                    </a>
+                  </label>
+                  <div class="sage-key-row">
+                    <input type="password" id="sageKeyInput" class="sage-set-input"
+                           autocomplete="off" spellcheck="false"
+                           placeholder="AIza…" aria-describedby="sageKeyStatus" />
+                    <button type="button" id="sageKeyReveal" class="sage-icon-btn"
+                            aria-label="Show key" aria-pressed="false">
+                      <i class="fas fa-eye" aria-hidden="true"></i>
+                    </button>
+                  </div>
+                  <button type="button" id="sageKeyCheck" class="sage-btn sage-btn--primary sage-btn--block">
+                    <i class="fas fa-circle-plus" aria-hidden="true"></i> Check &amp; add
+                  </button>
+                  <p class="sage-set-note sage-set-note--tight">
+                    Checked against Google before it is stored, so a typo cannot
+                    silently take her voice away.
+                  </p>
+                </div>
+
+                <p class="sage-set-status" id="sageKeyStatus" role="status" aria-live="polite"></p>
+              </div>
+
+              <!-- ── Encrypted backup ──
+                   The keys are encrypted in the browser before they go up. The
+                   anon key this app uses is in the served JavaScript, so the
+                   table is effectively public — the passphrase is the only thing
+                   keeping the contents private, and it never leaves the device. -->
+              <div class="sage-set-group" role="group" aria-labelledby="sageVaultHeading">
+                <h3 class="sage-set-heading" id="sageVaultHeading">
+                  <i class="fas fa-lock" aria-hidden="true"></i> Encrypted backup
+                </h3>
+
+                <div class="sage-glass sage-vault-card">
+                  <div class="sage-vault-head">
+                    <span class="sage-vault-icon" id="sageVaultIcon" aria-hidden="true">
+                      <i class="fas fa-lock"></i>
+                    </span>
+                    <div class="sage-vault-copy">
+                      <strong id="sageVaultTitle">Backup</strong>
+                      <small id="sageVaultState">Checking…</small>
+                    </div>
+                  </div>
+
+                  <div class="sage-vault-pass" id="sageVaultPassRow" hidden>
+                    <label class="sr-only" for="sageVaultPass">Backup passphrase</label>
+                    <input type="password" id="sageVaultPass" class="sage-set-input"
+                           autocomplete="off" spellcheck="false"
+                           placeholder="Passphrase, 8 characters or more" />
+                    <button type="button" id="sageVaultUnlock" class="sage-btn sage-btn--primary sage-btn--sm">
+                      <i class="fas fa-unlock" aria-hidden="true"></i> Unlock
+                    </button>
+                  </div>
+
+                  <!-- One segmented pill for the three actions that move keys
+                       about, and the two that are neither of those kept out of it.
+                       Five free-standing buttons put "Restore" and "Match device"
+                       side by side at the same weight, which is how a control that
+                       brings keys back ended up looking like the one that drops
+                       them. -->
+                  <div class="sage-vault-actions" id="sageVaultActions" hidden>
+                    <div class="sage-seg" role="group" aria-label="Backup">
+                      <button type="button" id="sageVaultBackup" class="sage-seg-btn"
+                              title="Encrypt anything new and send it up">
+                        <i class="fas fa-cloud-arrow-up" aria-hidden="true"></i><span>Back up</span>
+                      </button>
+                      <button type="button" id="sageVaultRestore" class="sage-seg-btn"
+                              title="Decrypt the backup onto this device">
+                        <i class="fas fa-cloud-arrow-down" aria-hidden="true"></i><span>Restore</span>
+                      </button>
+                      <!-- The only action that removes anything from the backup
+                           short of deleting it. Nothing else does it as a side
+                           effect, which is what made restores come up empty. It
+                           carries is-warn so it does not read as a twin of
+                           Restore, which is the mistake that cost real keys. -->
+                      <button type="button" id="sageVaultReplace" class="sage-seg-btn is-warn"
+                              title="Make the backup match this device, dropping any spares">
+                        <i class="fas fa-arrows-rotate" aria-hidden="true"></i><span>Match</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- The two that are not key movements. Both deliberately out of
+                       the pill: renderVault() disables every segment while the
+                       vault is locked, and a locked or broken vault is exactly when
+                       Check is needed — it would be the one unreachable control at
+                       the only moment it matters. Check reads and reports; Lock
+                       forgets a passphrase. Neither touches a key. -->
+                  <div class="sage-vault-extras">
+                    <button type="button" id="sageVaultCheck" class="sage-vault-diag">
+                      <i class="fas fa-stethoscope" aria-hidden="true"></i> Check backup
+                    </button>
+                    <button type="button" id="sageVaultLock" class="sage-vault-diag">
+                      <i class="fas fa-lock" aria-hidden="true"></i> Lock
+                    </button>
+                    <!-- Deleting the backup is its own action. Removing the keys
+                         from the device deliberately does NOT do this, or Restore
+                         would be useless in the one case people reach for it. -->
+                    <button type="button" id="sageVaultDelete" class="sage-vault-diag is-danger">
+                      <i class="fas fa-trash-can" aria-hidden="true"></i> Delete backup
+                    </button>
+                  </div>
+
+                  <small class="sage-vault-foot" id="sageVaultFoot"></small>
+                </div>
+
+                <p class="sage-set-status" id="sageVaultStatus" role="status" aria-live="polite"></p>
+              </div>
+
+              <div class="sage-danger" id="sageKeyDanger" hidden>
+                <div class="sage-danger-copy">
+                  <strong>Remove every key from this device</strong>
+                  <small>She goes back to her built-in lines. Her memory and the
+                    encrypted backup are both untouched, so Restore brings them back.</small>
+                </div>
+                <button type="button" id="sageKeyForget" class="sage-btn sage-btn--danger">
+                  <i class="fas fa-eraser" aria-hidden="true"></i> Remove all
+                </button>
+              </div>
+
+              <!-- No model picker. Choosing one by hand only ever pinned her to
+                   a name that could be retired or rate limited; the fallback
+                   chain already walks every model your key can see, newest
+                   first. This block just reports what it is doing. -->
+              <div class="sage-set-group" role="group" aria-labelledby="sageModelHeading">
+                <h3 class="sage-set-heading" id="sageModelHeading">
+                  <i class="fas fa-layer-group" aria-hidden="true"></i> Her models
+                </h3>
+                <p class="sage-set-note sage-set-note--tight" id="sageModelNote">
+                  She picks her own model and falls back automatically when one is
+                  busy or retired.
+                </p>
+                <div class="sage-model-chain" id="sageModelChain"></div>
+              </div>
             </div>
 
-            <!-- ── Test + save ── -->
-            <div class="sage-set-footer">
-              <button type="button" id="sageTestNotif" class="sage-btn">
-                <i class="fas fa-paper-plane" aria-hidden="true"></i> Send a test
-              </button>
-              <button type="button" id="sageSettingsSave" class="sage-btn sage-btn--primary">
-                <i class="fas fa-floppy-disk" aria-hidden="true"></i> Save settings
-              </button>
+            <!-- ══ TIMING ══ -->
+            <div class="sage-set-panel" id="sagePanelTiming" role="tabpanel"
+                 aria-labelledby="sageTabTiming" tabindex="0" hidden>
+              <div class="sage-set-group" role="group" aria-labelledby="sageTimingHeading">
+                <h3 class="sage-set-heading" id="sageTimingHeading">
+                  <i class="fas fa-moon" aria-hidden="true"></i> Quiet hours
+                </h3>
+
+                <div class="sage-set-duo">
+                  <div>
+                    <label class="sage-set-label" for="sageQuietStart">Quiet from</label>
+                    <select id="sageQuietStart" class="sage-set-input"></select>
+                  </div>
+                  <div>
+                    <label class="sage-set-label" for="sageQuietEnd">Quiet until</label>
+                    <select id="sageQuietEnd" class="sage-set-input"></select>
+                  </div>
+                </div>
+                <p class="sage-set-note" id="sageQuietNote"></p>
+
+                <label class="sage-toggle">
+                  <input type="checkbox" id="sageCritQuiet" checked />
+                  <span class="sage-toggle-mark" aria-hidden="true"></span>
+                  <span class="sage-toggle-text">
+                    Let urgent things through quiet hours
+                    <small>Overdue service or cover expiring tomorrow, delivered silently.</small>
+                  </span>
+                </label>
+              </div>
+
+              <div class="sage-set-group" role="group" aria-labelledby="sageRateHeading">
+                <h3 class="sage-set-heading" id="sageRateHeading">
+                  <i class="fas fa-gauge-high" aria-hidden="true"></i> How often
+                </h3>
+
+                <label class="sage-set-label" for="sageDailyCap">
+                  Most messages per day: <output id="sageDailyCapOut" for="sageDailyCap">3</output>
+                </label>
+                <input type="range" id="sageDailyCap" class="sage-set-range"
+                       min="1" max="8" step="1" value="3" />
+
+                <label class="sage-set-label" for="sageMinGap">
+                  Least time between them: <output id="sageMinGapOut" for="sageMinGap">3h</output>
+                </label>
+                <input type="range" id="sageMinGap" class="sage-set-range"
+                       min="1" max="12" step="1" value="3" />
+              </div>
             </div>
-            <p class="sage-set-status" id="sageSettingsStatus" role="status" aria-live="polite"></p>
+
+            <!-- ══ ALERTS ══ -->
+            <div class="sage-set-panel" id="sagePanelAlerts" role="tabpanel"
+                 aria-labelledby="sageTabAlerts" tabindex="0" hidden>
+
+              <!-- Whether she is allowed to notify at all, and whether she can do
+                   it while the app is closed. Neither was visible anywhere before:
+                   the only route to granting permission was pressing Send a test
+                   and reading a failure message. -->
+              <div class="sage-glass sage-perm-card" id="sagePermCard">
+                <div class="sage-perm-head">
+                  <span class="sage-perm-icon" id="sagePermIcon" aria-hidden="true">
+                    <i class="fas fa-bell"></i>
+                  </span>
+                  <div class="sage-perm-copy">
+                    <strong id="sagePermTitle">Notifications</strong>
+                    <small id="sagePermState">Checking…</small>
+                  </div>
+                  <button type="button" id="sagePermAllow" class="sage-btn sage-btn--primary sage-btn--sm" hidden>
+                    Allow
+                  </button>
+                </div>
+                <small class="sage-perm-foot" id="sagePermFoot"></small>
+              </div>
+
+              <div class="sage-set-group" role="group" aria-labelledby="sageCatHeading">
+                <h3 class="sage-set-heading" id="sageCatHeading">
+                  <i class="fas fa-bell" aria-hidden="true"></i> What she talks about
+                </h3>
+                <p class="sage-set-note">
+                  Turn off anything you would rather not hear about. She obeys these
+                  in the background too, not just while the app is open.
+                </p>
+                <div id="sageCategoryList" class="sage-cat-list"></div>
+              </div>
+            </div>
           </div>
+
+          <!-- ── Test + save ──
+               Outside the scrolling body so the save button is reachable
+               without scrolling to the bottom of whichever tab is open. -->
+          <div class="sage-set-footer">
+            <button type="button" id="sageTestNotif" class="sage-btn">
+              <i class="fas fa-paper-plane" aria-hidden="true"></i> Send a test
+            </button>
+            <button type="button" id="sageSettingsSave" class="sage-btn sage-btn--primary">
+              <i class="fas fa-floppy-disk" aria-hidden="true"></i> Save settings
+            </button>
+          </div>
+          <p class="sage-set-status sage-set-status--footer" id="sageSettingsStatus"
+             role="status" aria-live="polite"></p>
         </div>
       </div>
 
@@ -1031,15 +1600,40 @@
 
       <!-- Supabase client -->
       <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+      <!-- The app data that used to live only on one machine. Before script.js and
+           sage-ui.js, both of which write through it. It waits for
+           window.supabaseClient itself, so it does not care that script.js builds
+           that later. -->
+      <script src="src/js/cloud-store.js"></script>
+
+      <!-- The app's one destructive-action dialog. First of ours, and before
+           script.js in particular: it defines confirmDeleteWithHold(), which the
+           delete paths in script.js call, and it must win over nothing else —
+           there is no second definition left to race with. -->
+      <script src="src/js/sage-confirm.js"></script>
+
       <!-- Shared with the service worker via importScripts, so the page and the
            background checks agree on one queue, cap and cooldown set. Must load
            before notifications.js, which pumps it. -->
       <script src="src/js/sage-scheduler.js"></script>
+      <!-- What she remembers about Viky. Before sage-ai.js, which reads it when
+           building her system instruction. -->
+      <script src="src/js/sage-memory.js"></script>
+      <!-- Her hands: the controls she can actually operate. Declarations only,
+           so load order against script.js does not matter — window.dkApp is
+           looked up when a control is used, not when this file runs. -->
+      <script src="src/js/sage-tools.js"></script>
       <!-- Gemini key + model. Loaded before notifications.js so her voice is
            available to the first notification of the session. -->
       <script src="src/js/sage-ai.js"></script>
+      <!-- Encrypted cloud backup of the key ring. After sage-ai.js, which owns
+           the ring it reads and writes. -->
+      <script src="src/js/sage-keyvault.js"></script>
       <script src="src/js/notifications.js"></script>
       <script src="src/js/script.js"></script>
+      <!-- Sage filling in the service form and the document fields. After
+           script.js so the forms and the data snapshot exist first. -->
+      <script src="src/js/sage-autofill.js"></script>
       <!-- Settings modal. After script.js so the app shell exists first. -->
       <script src="src/js/sage-ui.js"></script>
       <script type="module" src="src/js/home3d.js"></script>
@@ -1051,14 +1645,20 @@
         const BANNER_DISMISSED_KEY = 'sage_notif_banner_done';
 
         window._sageAllowNotif = async function() {
-          // Hide + permanently flag FIRST, before we even know the permission result.
-          // This guarantees the banner never reappears, regardless of allow/deny.
+          // Hide it, but do NOT flag it dismissed yet.
+          //
+          // This used to write the flag before asking, "so the banner never
+          // reappears regardless of allow/deny". The cost was that dismissing
+          // the browser's own prompt — which leaves permission at 'default' —
+          // permanently destroyed the only automatic path to granting it, and
+          // this app has no other prompt. The flag is now only written once the
+          // question has actually been answered.
           document.getElementById('sageNotifBanner').style.display = 'none';
-          localStorage.setItem(BANNER_DISMISSED_KEY, '1');
 
-          if (window.requestNotifPermission) {
-            await window.requestNotifPermission();
-            // Permission granted or denied — no first-connect notification needed.
+          if (window.requestNotifPermission) await window.requestNotifPermission();
+
+          if (!('Notification' in window) || Notification.permission !== 'default') {
+            localStorage.setItem(BANNER_DISMISSED_KEY, '1');
           }
         };
 

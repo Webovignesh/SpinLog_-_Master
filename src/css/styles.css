@@ -18,8 +18,53 @@ h1, h2, h3, h4, h5, h6 {
   font-family: 'Blender Pro', 'Oswald', Arial, sans-serif;
   letter-spacing: 0.5px;
 }
+
+/* ══ THE hidden ATTRIBUTE ACTUALLY HIDES THINGS ═══════════════════════
+   `[hidden] { display: none }` lives in the BROWSER's stylesheet, and any author
+   rule that sets `display` outranks it. So every `el.hidden = true` in this app was
+   silently doing nothing wherever the element also had a class setting display —
+   nine of them, all toggled from JS:
+
+     #sageVaultPassRow  .sage-vault-pass     { display: flex }
+     #sageVaultActions  .sage-vault-actions  { display: flex }
+     #sageVaultLock     .sage-vault-diag     { display: inline-flex }
+     #sageVaultDelete   .sage-vault-diag     { display: inline-flex }
+     #sageAttachChip    .sage-attach-chip    { display: flex }   (now #sageAttachBar)
+     #sagePermAllow     .sage-btn            { display: inline-flex }
+     #sageMemSearchClear .sage-mem-find-clear { display: grid }
+     #sageKeyDanger     .sage-danger         { display: flex }
+     #serviceHistoryFilterCount .history-filter-count { display: inline-flex }
+
+   The visible one was the backup card: the passphrase field and its Unlock button
+   stayed on screen after the vault was unlocked, so the card read "Backed up —
+   6 keys encrypted in the cloud" with a box asking for the passphrase underneath
+   it. Also an empty attachment chip in the chat composer, an Allow button after
+   notifications were already allowed, and a clear-search cross over an empty box.
+
+   !important is required, not lazy: the rules above are classes, so they tie or
+   beat `[hidden]` on specificity and ordering cannot settle it. Checked first that
+   nothing uses `hidden` alongside a state class that reveals it — the modals toggle
+   `aria-hidden` plus `.sl-modal--open`, and are unaffected.
+
+   ONE CONSTRAINT this creates: never write `display: <anything but none>
+   !important` on an element whose `hidden` is toggled. That ties with this rule on
+   importance, and since this selector is only [hidden] (0,1,0) sitting at the top
+   of the file, a single class would win on source order and an id-scoped one would
+   win on specificity. There are ~110 `display: … !important` rules further down
+   this file and none of them currently land on such an element. */
+[hidden] { display: none !important; }
 :root {
   --orange: #fb6900;
+  /* A READING FACE.
+     The only webfont this app loads is Oswald, which is a condensed display
+     type — narrow, tall, tight apertures, drawn for headlines. `body` sets it
+     globally, so every sentence in the app was being set in a poster font. At
+     0.87rem in a chat bubble that is hard work, and it is worse for words the eye
+     cannot pattern-match, which is every transliterated Tamil word in there.
+     Headings and figures keep Oswald and Blender Pro, where condensed is the
+     point. Anything that is a SENTENCE uses this: the platform's own interface
+     face, which costs no download and is drawn for exactly this size. */
+  --sl-read: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --black: #000;
   --white: #fff;
   --gray-dark: #222;
@@ -6282,6 +6327,7 @@ body {
   #service #nextDueLabel,
   #service .service-upload-field,
   #service .service-notes-field,
+  #service .sage-fill-row,
   #service .form-in-card-actions {
     grid-column: 1 / -1 !important;
   }
@@ -7891,6 +7937,8 @@ body {
   outline: none;
 }
 #docs #historicNotesInput:focus { border-color: var(--orange); box-shadow: 0 0 0 4px rgba(251,105,0,0.12); }
+/* The notes modal's help line doubles as autofill's status line. */
+#docs #historicNotesHelp.is-bad { color: #ff8a8a; }
 #docs .docs-modal-actions { display:flex; justify-content:flex-end; gap: 12px; margin-top: 16px; }
 #docs .docs-primary-btn,
 #docs .docs-secondary-btn {
@@ -12102,11 +12150,37 @@ section {
   position: fixed;
   inset: 0;
   background: rgba(0,0,0,0.75);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
   z-index: 2000;
   align-items: flex-end;
   justify-content: center;
+}
+
+/* The frosting is on a pseudo-element rather than on the overlay itself, and the
+   reason is the scroll artefact in the Sage settings dialog.
+ 
+   backdrop-filter makes the element carrying it a BACKDROP ROOT for everything
+   inside it. This overlay is the ancestor of two scroll containers
+   (.sage-settings-body and .park-history-list), so putting the blur here meant the
+   whole dialog scrolled inside a composited backdrop root — and descendants of one
+   get repainted at stale offsets while the container scrolls, which is why a button
+   appeared to drift against the card it sits in. Unfrosting .sage-glass removed two
+   such layers from inside the scroller and helped, but this one wrapped the lot.
+ 
+   A pseudo-element is a SIBLING of the dialog card, not an ancestor, so the blur
+   stays and nothing that scrolls sits inside it any more.
+ 
+   position:absolute matters twice over: it keeps the pseudo out of the overlay's
+   flex flow (a ::before on a flex container would otherwise become a flex item),
+   and it lets z-index:-1 paint it behind the card. The overlay's own 75% black
+   still paints first, so the page is blurred and then darkened, in that order. */
+.sl-modal-overlay::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  pointer-events: none;
 }
 .sl-modal-overlay.sl-modal--open { display: flex; }
 @media (min-width: 520px) {
@@ -12903,24 +12977,247 @@ section {
 
 /* ══════════════════════════════════════════════════════════════════════
    SAGE SETTINGS
-   Gemini key, quiet hours, per-category toggles. Rides on the shared
-   .sl-modal-overlay / .sl-modal-card shell above.
+   Her memory, her key ring, quiet hours and per-category toggles, across
+   four tabs. Rides on the shared .sl-modal-overlay / .sl-modal-card shell
+   above.
+
+   The card is a flex column: hero and tab rail hold still, only the active
+   panel scrolls, and the footer is pinned. Before this it was one long
+   scroll with the save button at the bottom of it, which meant saving quiet
+   hours involved scrolling past every memory she had.
    ══════════════════════════════════════════════════════════════════════ */
 
-.sage-settings-card { max-width: 520px; }
+.sage-settings-card {
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  max-height: min(92vh, 780px);
+  /* One very soft orange wash so the card is not a flat grey rectangle. It used to
+     be here to give the frosted panels something to blur; they are no longer
+     frosted (see .sage-glass) and it is still worth keeping on its own merits. */
+  background:
+    radial-gradient(120% 90% at 84% -10%, rgba(251,105,0,0.16), transparent 62%),
+    #151515;
+}
 
+/* ── Hero ── */
+.sage-set-hero {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  flex: 0 0 auto;
+  padding: 16px 16px 14px 18px;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+
+.sage-set-hero-face {
+  flex: 0 0 auto;
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 1px solid rgba(251,105,0,0.45);
+  box-shadow: 0 0 0 3px rgba(251,105,0,0.08);
+}
+.sage-set-hero-face img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.sage-set-hero-who {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.sage-set-hero-who strong {
+  font-family: 'Blender Pro', 'Oswald', sans-serif;
+  font-size: 1.02rem;
+  letter-spacing: 0.05em;
+  color: #fff;
+}
+.sage-set-hero-who small {
+  font-size: 0.71rem;
+  letter-spacing: 0.02em;
+  color: rgba(255,255,255,0.42);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sage-set-hero .sl-modal-close { flex: 0 0 auto; }
+
+/* ── Sync pill ──
+   "Is her memory safe" is the one question worth answering without a tap, so
+   it sits in the hero on every tab rather than inside the memory panel. */
+.sage-sync-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  max-width: 44%;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.12);
+  font-size: 0.67rem;
+  letter-spacing: 0.04em;
+  color: rgba(255,255,255,0.55);
+  white-space: nowrap;
+}
+.sage-sync-pill i { font-size: 0.62rem; }
+.sage-sync-pill span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sage-sync-pill.is-ok {
+  background: rgba(95,211,141,0.1);
+  border-color: rgba(95,211,141,0.32);
+  color: #7fe0a6;
+}
+.sage-sync-pill.is-warn {
+  background: rgba(251,166,0,0.1);
+  border-color: rgba(251,166,0,0.34);
+  color: var(--warn, #fba600);
+}
+.sage-sync-pill.is-bad {
+  background: rgba(255,107,107,0.1);
+  border-color: rgba(255,107,107,0.32);
+  color: #ff8a8a;
+}
+@keyframes sageSpin { to { transform: rotate(360deg); } }
+
+/* ── Spinner ──
+   Drawn in CSS rather than spun as a Font Awesome glyph, because a glyph does not
+   rotate cleanly.
+
+   FA lays its ink out from roughly -0.125em to 0.875em, so the visual centre of
+   the circle sits about 0.075em ABOVE the centre of the inline box — and
+   transform-origin: 50% 50% uses the box, not the ink. At the 10–11px these are
+   used at that is well under a pixel, which is exactly the size of error the eye
+   reads as an orbit around a point rather than a spin in place. Setting a
+   transform-origin to correct it would be guessing at font metrics.
+
+   A bordered square box has no such gap: its ink IS its box, so the centre of
+   rotation is the centre of the ring by construction. The transparent top edge is
+   what makes the rotation legible at all — a complete ring looks static.
+
+   Sized in em so the existing font-size on each host still controls it. Every use
+   is inside a flex container with align-items:center, so there is no baseline
+   alignment to fix. */
+.sl-spinner {
+  display: inline-block;
+  box-sizing: border-box;
+  width: 1em; height: 1em;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: sageSpin 0.9s linear infinite;
+}
+
+/* ── Tab rail ── */
+.sage-set-tabs {
+  display: flex;
+  gap: 4px;
+  flex: 0 0 auto;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.sage-set-tabs::-webkit-scrollbar { display: none; }
+
+.sage-set-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1 1 auto;
+  justify-content: center;
+  padding: 9px 12px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  color: rgba(255,255,255,0.5);
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.16s, background 0.16s, border-color 0.16s;
+}
+.sage-set-tab i { font-size: 0.82rem; }
+.sage-set-tab:hover { color: rgba(255,255,255,0.8); background: rgba(255,255,255,0.04); }
+.sage-set-tab:focus-visible { outline: 2px solid rgba(251,105,0,0.65); outline-offset: 2px; }
+.sage-set-tab.is-on {
+  background: rgba(251,105,0,0.14);
+  border-color: rgba(251,105,0,0.38);
+  color: #fff;
+}
+.sage-set-tab.is-on i { color: var(--orange, #fb6900); }
+
+.sage-tab-badge {
+  min-width: 18px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.1);
+  font-size: 0.6rem;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255,255,255,0.65);
+}
+.sage-set-tab.is-on .sage-tab-badge {
+  background: rgba(251,105,0,0.28);
+  color: #fff;
+}
+
+/* ── Body + panels ── */
 .sage-settings-body {
-  padding: 4px 20px 20px;
-  max-height: min(74vh, 640px);
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 4px 18px 8px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
 }
 
-/* Each group draws its own bottom rule, so the last one doubles as the divider
-   above the footer. The footer therefore carries no border of its own. */
+.sage-set-panel { padding-bottom: 4px; }
+.sage-set-panel[hidden] { display: none; }
+.sage-set-panel:focus { outline: none; }
+.sage-set-panel.is-on { animation: sagePanelIn 0.2s ease-out; }
+@keyframes sagePanelIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Each group draws its own bottom rule. The last one in a panel does not, since
+   there is nothing below it to divide from. */
 .sage-set-group {
   padding: 16px 0;
   border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.sage-set-group:last-child { border-bottom: none; }
+
+/* ── Frosted panel ──
+   Used for the things that are readouts rather than controls.
+
+   NOT frosted, and that is a bug fix rather than a change of taste. Every one of
+   these cards sits inside .sage-settings-body, which is an overflow-y:auto
+   container, and a backdrop-filter inside a scroller is composited as its own
+   layer that updates independently of the content around it. On the Voice tab two
+   of them bracket the "API keys" and "Encrypted backup" headings, and those
+   headings visibly slid against the cards while the panel scrolled. The Memory tab
+   shows it far less for one reason only: its second glass card (.sage-recap-card)
+   is usually hidden, so there is one such layer instead of two.
+
+   Nothing is lost. The only thing behind these cards is .sage-settings-card's flat
+   #151515 and one very soft orange wash, so the blur spent a full-viewport
+   backdrop resample on every scroll frame and handed back almost exactly the
+   colour underneath it. The value below is the one the no-backdrop-filter fallback
+   already used, so Firefox and Chrome now agree instead of differing. */
+.sage-glass {
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 16px;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.06),
+    0 8px 24px rgba(0,0,0,0.26);
 }
 
 .sage-set-heading {
@@ -12978,9 +13275,21 @@ select.sage-set-input option { background: #181818; color: #fff; }
 .sage-key-row { display: flex; gap: 8px; align-items: stretch; }
 .sage-key-row .sage-set-input { flex: 1; min-width: 0; letter-spacing: 0.06em; }
 
+/* 42px square, matching .sage-chat-send.
+   It used to declare a width and no height, no display and no alignment, so the
+   box collapsed to the glyph's line box: a 42px-wide, ~19px-tall pill sitting
+   beside a 36px avatar, with the icon wherever the inherited line-height happened
+   to put it. inline-grid + place-items centres the glyph in both axes without
+   depending on line-height, and padding:0 keeps the UA button padding from
+   nudging it off centre. */
 .sage-icon-btn {
   flex: 0 0 auto;
   width: 42px;
+  height: 42px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  line-height: 1;
   background: rgba(255,255,255,0.05);
   border: 1px solid rgba(255,255,255,0.12);
   border-radius: 12px;
@@ -13108,12 +13417,377 @@ select.sage-set-input option { background: #181818; color: #fff; }
 }
 .sage-btn--primary:hover { background: #ff7d1a; border-color: #ff7d1a; color: #0d0d0d; }
 
+.sage-btn--ghost {
+  background: rgba(255,255,255,0.04);
+  border-color: rgba(255,255,255,0.14);
+}
+.sage-btn--sm { padding: 6px 11px; font-size: 0.74rem; }
+
+/* Destructive, and it says so without shouting — a red fill on a button this
+   size reads as an error state rather than a choice. */
+.sage-btn--danger {
+  background: rgba(255,107,107,0.1);
+  border-color: rgba(255,107,107,0.35);
+  color: #ff9d9d;
+}
+.sage-btn--danger:hover {
+  background: rgba(255,107,107,0.2);
+  border-color: rgba(255,107,107,0.6);
+  color: #fff;
+}
+
+/* Pinned outside the scrolling body, so saving never means scrolling to the
+   bottom of whichever tab happens to be open. */
 .sage-set-footer {
   display: flex;
   gap: 8px;
-  padding-top: 16px;
+  flex: 0 0 auto;
+  padding: 13px 18px;
+  border-top: 1px solid rgba(255,255,255,0.07);
 }
 .sage-set-footer .sage-btn { flex: 1; }
+
+.sage-set-status--footer {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0 18px 13px;
+}
+.sage-set-status--footer:empty { display: none; }
+
+/* ══ MEMORY PANEL ══════════════════════════════════════════════════════ */
+
+/* ── Where her memory lives ── */
+.sage-sync-card { padding: 13px 14px; margin-top: 14px; }
+
+.sage-sync-head { display: flex; align-items: center; gap: 11px; }
+
+.sage-sync-icon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 36px; height: 36px;
+  border-radius: 11px;
+  background: rgba(251,105,0,0.12);
+  border: 1px solid rgba(251,105,0,0.3);
+  color: var(--orange, #fb6900);
+  font-size: 0.92rem;
+}
+.sage-sync-icon.is-ok {
+  background: rgba(95,211,141,0.12);
+  border-color: rgba(95,211,141,0.32);
+  color: #7fe0a6;
+}
+.sage-sync-icon.is-warn {
+  background: rgba(251,166,0,0.12);
+  border-color: rgba(251,166,0,0.34);
+  color: var(--warn, #fba600);
+}
+.sage-sync-icon.is-bad {
+  background: rgba(255,107,107,0.12);
+  border-color: rgba(255,107,107,0.32);
+  color: #ff8a8a;
+}
+
+.sage-sync-copy { flex: 1; min-width: 0; }
+.sage-sync-copy strong {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: rgba(255,255,255,0.9);
+}
+.sage-sync-copy small {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.74rem;
+  line-height: 1.4;
+  color: rgba(255,255,255,0.5);
+}
+
+/* .sage-sync-actions is laid out in the SEGMENTED PILLS block near the end of
+   this file, next to .sage-vault-actions — the two rows are the same thing and
+   were drifting apart while they lived 1,300 lines from each other. It held
+   .sage-btn children here; it holds .sage-seg pills now. */
+
+/* ── Stats ──
+   Four figures. A fifth was tried and none of them got read: at this size a
+   grid stops being glanceable somewhere around four. */
+.sage-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-top: 12px;
+}
+.sage-stat-grid:empty { display: none; }
+
+.sage-stat {
+  padding: 10px 6px;
+  background: rgba(255,255,255,0.035);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 12px;
+  text-align: center;
+}
+.sage-stat dt {
+  font-size: 0.6rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.4);
+}
+.sage-stat dd {
+  margin: 3px 0 0;
+  font-family: 'Blender Pro', 'Oswald', sans-serif;
+  font-size: 1.12rem;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+}
+.sage-stat.is-accent dd { color: var(--orange, #fb6900); }
+
+@media (max-width: 420px) {
+  .sage-stat-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── Her rolling note ── */
+.sage-recap-card { padding: 12px 14px; margin-top: 12px; }
+
+.sage-recap-head {
+  display: flex; align-items: center; gap: 7px;
+  margin: 0 0 7px;
+  font-family: 'Blender Pro', 'Oswald', sans-serif;
+  font-size: 0.74rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--orange, #fb6900);
+}
+
+.sage-recap-text {
+  margin: 0;
+  font-size: 0.79rem;
+  line-height: 1.5;
+  color: rgba(255,255,255,0.72);
+}
+/* Her own words, so they are not styled as UI copy. */
+.sage-recap-text::before,
+.sage-recap-text::after { content: '"'; opacity: 0.35; }
+
+.sage-recap-foot {
+  display: block;
+  margin-top: 7px;
+  font-size: 0.68rem;
+  color: rgba(255,255,255,0.35);
+}
+
+/* ── Search + filters ── */
+.sage-mem-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 14px 0 9px;
+}
+
+.sage-mem-find {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.sage-mem-find > i {
+  position: absolute;
+  left: 11px;
+  font-size: 0.75rem;
+  color: rgba(255,255,255,0.32);
+  pointer-events: none;
+}
+
+.sage-mem-find-input {
+  width: 100%;
+  padding: 9px 34px 9px 31px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 999px;
+  color: #fff;
+  font-family: inherit;
+  font-size: 0.81rem;
+  transition: border-color 0.15s, background 0.15s;
+}
+.sage-mem-find-input:focus-visible {
+  outline: none;
+  border-color: rgba(251,105,0,0.6);
+  background: rgba(255,255,255,0.08);
+}
+.sage-mem-find-input::placeholder { color: rgba(255,255,255,0.3); }
+/* The browser's own clear affordance would sit beside ours. */
+.sage-mem-find-input::-webkit-search-cancel-button { display: none; }
+
+.sage-mem-find-clear {
+  position: absolute;
+  right: 5px;
+  display: grid;
+  place-items: center;
+  width: 26px; height: 26px;
+  background: none;
+  border: none;
+  border-radius: 50%;
+  color: rgba(255,255,255,0.45);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.sage-mem-find-clear:hover { color: #fff; background: rgba(255,255,255,0.08); }
+.sage-mem-find-clear:focus-visible { outline: 2px solid rgba(251,105,0,0.6); outline-offset: 1px; }
+
+.sage-chip-row {
+  display: flex;
+  gap: 5px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+}
+.sage-chip-row::-webkit-scrollbar { display: none; }
+.sage-chip-row:empty { display: none; }
+
+.sage-filter-chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 999px;
+  color: rgba(255,255,255,0.55);
+  font-family: inherit;
+  font-size: 0.7rem;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+.sage-filter-chip:hover { color: #fff; border-color: rgba(255,255,255,0.22); }
+.sage-filter-chip:focus-visible { outline: 2px solid rgba(251,105,0,0.6); outline-offset: 2px; }
+.sage-filter-chip.is-on {
+  background: rgba(251,105,0,0.16);
+  border-color: rgba(251,105,0,0.45);
+  color: #fff;
+}
+.sage-filter-chip b {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.6;
+}
+
+/* ── Conversation timeline ── */
+.sage-set-sub { margin-top: 16px; }
+
+.sage-set-subhead {
+  display: flex; align-items: center; gap: 7px;
+  margin: 0 0 9px;
+  font-family: 'Blender Pro', 'Oswald', sans-serif;
+  font-size: 0.74rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.45);
+}
+
+.sage-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 15px;
+  /* One continuous rule down the left, rather than a border per row: the gaps
+     between rows were reading as gaps in the conversation. */
+  border-left: 1px solid rgba(255,255,255,0.1);
+}
+
+.sage-timeline li {
+  position: relative;
+  padding: 0 0 12px 13px;
+  font-size: 0.77rem;
+  line-height: 1.45;
+  color: rgba(255,255,255,0.68);
+}
+.sage-timeline li:last-child { padding-bottom: 0; }
+.sage-timeline li::before {
+  content: '';
+  position: absolute;
+  left: -19px;
+  top: 5px;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: rgba(251,105,0,0.75);
+  box-shadow: 0 0 0 3px #151515;
+}
+.sage-timeline time {
+  display: block;
+  font-size: 0.67rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.38);
+}
+.sage-timeline em {
+  font-style: normal;
+  color: rgba(255,255,255,0.45);
+}
+
+/* ── The irreversible one ── */
+.sage-danger {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+  padding: 12px 14px;
+  background: rgba(255,107,107,0.05);
+  border: 1px solid rgba(255,107,107,0.2);
+  border-radius: 14px;
+}
+.sage-danger-copy { flex: 1 1 180px; min-width: 0; }
+.sage-danger-copy strong {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: rgba(255,255,255,0.88);
+}
+.sage-danger-copy small {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: rgba(255,255,255,0.45);
+}
+.sage-danger .sage-btn { flex: 0 0 auto; }
+
+/* ── Model chain ── */
+.sage-model-chain {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.sage-model-chain:empty { display: none; }
+
+.sage-model-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 999px;
+  font-size: 0.68rem;
+  letter-spacing: 0.02em;
+  color: rgba(255,255,255,0.6);
+}
+.sage-model-pill::before {
+  content: '';
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: #5fd38d;
+}
+.sage-model-pill.is-resting { opacity: 0.6; }
+.sage-model-pill.is-resting::before { background: var(--warn, #fba600); }
+.sage-model-pill.is-live {
+  background: rgba(251,105,0,0.12);
+  border-color: rgba(251,105,0,0.34);
+  color: #fff;
+}
 
 /* ── Status line ── */
 .sage-set-status {
@@ -13136,12 +13810,20 @@ select.sage-set-input option { background: #181818; color: #fff; }
   .sage-toggle-mark,
   .sage-toggle-mark::after,
   .sage-btn,
+  .sage-set-tab,
+  .sage-filter-chip,
+  .sage-mem-item,
+  .sage-mem-find-input,
   .sage-set-input { transition: none; }
+  .sage-set-panel.is-on { animation: none; }
+  /* A spinner still has to read as "working", so it dims instead of moving. One
+     rule for all of them now they share .sl-spinner. */
+  .sl-spinner { animation: none; opacity: 0.55; }
 }
 
 /* The hero settings button was removed — it made the chrome grid a third child
-   and pushed the Sage button onto its own row. Settings are reached from the
-   sliders button in the Sage panel header instead. */
+   and pushed the Sage button onto its own row. Settings are reached from the gear
+   in the Sage panel header instead. */
 
 /* ══════════════════════════════════════════════════════════════════════
    SAGE CHAT
@@ -13309,6 +13991,25 @@ select.sage-set-input option { background: #181818; color: #fff; }
   line-height: 1.45;
 }
 .sage-msg p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Marks a message that carried files, so the log still explains itself later.
+   The divider is on the wrapper, so four clips get one rule between them and her
+   words rather than four. */
+.sage-msg-files {
+  display: block;
+  margin-bottom: 5px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+.sage-msg-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  opacity: 0.7;
+  overflow-wrap: anywhere;
+}
+.sage-msg-file + .sage-msg-file { margin-top: 3px; }
+.sage-msg-file i { font-size: 0.68rem; flex: 0 0 auto; }
 .sage-msg time {
   display: block;
   margin-top: 4px;
@@ -13332,27 +14033,163 @@ select.sage-set-input option { background: #181818; color: #fff; }
   color: #fff;
 }
 
-/* Typing indicator */
-.sage-msg.is-thinking p { display: flex; gap: 4px; align-items: center; height: 1.2em; }
-.sage-msg.is-thinking span {
+/* Typing indicator — shown only while she is composing with no control in hand. */
+.sage-dots { display: flex; gap: 4px; align-items: center; height: 1.2em; margin: 0; }
+.sage-dots span {
   width: 6px; height: 6px;
   border-radius: 50%;
   background: rgba(255,255,255,0.55);
   animation: sageDot 1.2s ease-in-out infinite;
 }
-.sage-msg.is-thinking span:nth-child(2) { animation-delay: 0.15s; }
-.sage-msg.is-thinking span:nth-child(3) { animation-delay: 0.3s; }
+.sage-dots span:nth-child(2) { animation-delay: 0.15s; }
+.sage-dots span:nth-child(3) { animation-delay: 0.3s; }
 @keyframes sageDot {
   0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
   30% { opacity: 1; transform: translateY(-3px); }
 }
 
-/* ── Suggestion chips ── */
+/* ── What she is doing ──
+   Replaces three anonymous dots with the actual steps. This lives in the
+   conversation rather than in the status line under the composer, because an
+   action she took is part of the exchange — and a silent two-second pause with
+   no explanation reads as a hang. */
+.sage-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.sage-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  line-height: 1.3;
+  color: rgba(255,255,255,0.55);
+  animation: sageStepIn 0.22s ease-out;
+}
+/* A finished step steps back so the current one reads as the live edge. */
+.sage-step.is-done { color: rgba(255,255,255,0.34); }
+.sage-step.is-doing { color: rgba(255,255,255,0.88); }
+
+@keyframes sageStepIn {
+  from { opacity: 0; transform: translateX(-4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.sage-step-ico {
+  flex: 0 0 auto;
+  width: 22px; height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  background: rgba(255,255,255,0.06);
+  font-size: 0.7rem;
+  color: rgba(255,255,255,0.5);
+}
+.sage-step.is-doing .sage-step-ico {
+  background: rgba(251,105,0,0.16);
+  color: var(--orange, #fb6900);
+}
+
+.sage-step-text { flex: 1; min-width: 0; }
+
+/* Rides on .sl-spinner, which owns the ring and the rotation. A touch larger than
+   the glyph it replaces, because a 2px ring needs the room to read as a circle. */
+.sage-step-spin {
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+  color: var(--orange, #fb6900);
+}
+.sage-step-tick {
+  flex: 0 0 auto;
+  font-size: 0.62rem;
+  color: #5fd38d;
+  opacity: 0.7;
+}
+
+/* ── The trail on a finished reply ──
+   Kept rather than cleared, because "she says she read the history" and "you can
+   see that she read the history" are different things, and only the second one
+   is worth anything the next day. */
+.sage-trace {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 7px;
+}
+
+.sage-trace-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.09);
+  font-size: 0.66rem;
+  letter-spacing: 0.02em;
+  color: rgba(255,255,255,0.45);
+}
+.sage-trace-chip i { font-size: 0.6rem; opacity: 0.8; }
+/* Something she changed, as against something she merely looked at. */
+.sage-trace-chip.is-write {
+  background: rgba(251,105,0,0.1);
+  border-color: rgba(251,105,0,0.28);
+  color: rgba(255,255,255,0.72);
+}
+.sage-trace-chip.is-write i { color: var(--orange, #fb6900); opacity: 1; }
+.sage-trace-chip.is-bad {
+  background: rgba(255,107,107,0.09);
+  border-color: rgba(255,107,107,0.26);
+  color: #ff9d9d;
+}
+
+/* ── Memory changes ──
+   Shown plainly as well as in her own wording, which is easy to miss and
+   impossible to check. */
+.sage-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.sage-note-badge {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 4px 9px;
+  border-radius: 9px;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.sage-note-badge i { flex: 0 0 auto; margin-top: 2px; font-size: 0.62rem; }
+.sage-note-badge.is-learned {
+  background: rgba(251,105,0,0.08);
+  border: 1px solid rgba(251,105,0,0.22);
+  color: rgba(255,255,255,0.62);
+}
+.sage-note-badge.is-learned i { color: var(--orange, #fb6900); }
+.sage-note-badge.is-forgot {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: rgba(255,255,255,0.45);
+}
+
+/* ── Suggestion chips ──
+   Only ever shown on an empty conversation, so it needs the gap BELOW it as well
+   as the sides; without it the chips sat flush against the composer's hairline. */
 .sage-chat-suggest {
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
-  padding: 0 14px;
+  padding: 0 14px 11px;
 }
 .sage-chat-suggest:empty { display: none; }
 
@@ -13374,12 +14211,177 @@ select.sage-set-input option { background: #181818; color: #fff; }
 }
 .sage-chip:focus-visible { outline: 2px solid rgba(251,105,0,0.6); outline-offset: 2px; }
 
-/* ── Composer ── */
+/* ── Attachment ── */
+/* A message can carry up to four files, so this is a list with a header rather
+   than a single chip. It sits directly on top of the input row inside
+   .sage-chat-composer, so the only margin it needs is the gap to that row.
+
+   The chips sit side by side. Four stacked rows plus a header was taller than the
+   composer itself, which is a lot of a phone screen spent on files you have already
+   picked. */
+.sage-attach {
+  margin: 0 0 9px;
+  padding: 8px 9px 9px;
+  background: rgba(251,105,0,0.08);
+  border: 1px solid rgba(251,105,0,0.26);
+  border-radius: 12px;
+}
+
+.sage-attach-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 2px 7px;
+}
+
+.sage-attach-count {
+  font-family: 'Blender Pro', 'Oswald', sans-serif;
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--orange, #fb6900);
+  font-variant-numeric: tabular-nums;
+}
+
+.sage-attach-clear {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  background: none;
+  border: none;
+  border-radius: 8px;
+  color: rgba(255,255,255,0.45);
+  font-family: inherit;
+  font-size: 0.7rem;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.sage-attach-clear:hover { color: #fff; background: rgba(255,255,255,0.08); }
+.sage-attach-clear:focus-visible { outline: 2px solid rgba(251,105,0,0.6); outline-offset: 1px; }
+.sage-attach-clear > i { font-size: 0.64rem; }
+
+/* A grid rather than a wrapping flex row, and auto-fit rather than a fixed column
+   count. Two or more chips where there is room, one per row on a narrow phone, and
+   no stretched orphan on the last line the way flex-grow would give — a third chip
+   sits at one column's width instead of spanning the whole thing. */
+.sage-attach-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 5px;
+}
+
+.sage-attach-chip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  /* Grid items default to min-width:auto, which refuses to shrink below the
+     content — so without this a long file name widens the column instead of
+     ellipsising, and two chips stop fitting side by side. */
+  min-width: 0;
+  padding: 6px 6px 6px 9px;
+  background: rgba(0,0,0,0.26);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 9px;
+  font-size: 0.75rem;
+  color: rgba(255,255,255,0.82);
+}
+.sage-attach-chip > i { color: var(--orange, #fb6900); font-size: 0.8rem; flex: 0 0 auto; }
+
+/* Truncated at the end, with the full name on the chip's title. `direction: rtl`
+   would keep the more distinctive tail visible, but it hands the string to the
+   bidi algorithm — and that moves trailing punctuation, so ".pdf" and the
+   underscores in a scanner's filename end up somewhere they were never typed. */
+.sage-attach-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sage-attach-size {
+  flex: 0 0 auto;
+  opacity: 0.45;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+}
+/* Below this the size and the name are fighting over about 90px, and the name is
+   the one that identifies the file. */
+@media (max-width: 380px) {
+  .sage-attach-size { display: none; }
+}
+
+/* 26px so it clears the 24px minimum for a thumb on a row this tight, without
+   making the row itself taller than the text needs. */
+.sage-attach-drop {
+  flex: 0 0 auto;
+  width: 26px; height: 26px;
+  display: grid;
+  place-items: center;
+  background: none;
+  border: 0;
+  border-radius: 50%;
+  color: rgba(255,255,255,0.5);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.sage-attach-drop:hover { color: #fff; background: rgba(255,255,255,0.1); }
+.sage-attach-drop:focus-visible { outline: 2px solid rgba(251,105,0,0.6); outline-offset: 1px; }
+
+/* Dragging a file anywhere over the conversation. */
+.sage-chat-log.is-dropping {
+  outline: 2px dashed rgba(251,105,0,0.55);
+  outline-offset: -8px;
+  background: rgba(251,105,0,0.04);
+}
+
+/* ── Composer ──
+   One group with a hairline above it, and it owns ALL the spacing for the three
+   things inside. They were siblings of the log before, each carrying its own
+   margin or padding: the attachment chip had `margin: 8px 14px 0` and so read as
+   a loose bar floating in the gap, the form had `12px 14px 6px`, and the status
+   line had `0 14px 12px` which pinned it against the bottom edge of the card. */
+.sage-chat-composer {
+  flex: 0 0 auto;
+  padding: 11px 14px 12px;
+  border-top: 1px solid rgba(255,255,255,0.07);
+  background: rgba(255,255,255,0.018);
+}
+
 .sage-chat-form {
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  padding: 12px 14px 6px;
+  padding: 0;
+}
+
+.sage-chat-clip {
+  flex: 0 0 auto;
+  width: 40px; height: 40px;
+  display: grid;
+  place-items: center;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 50%;
+  color: rgba(255,255,255,0.6);
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.sage-chat-clip:hover {
+  color: #fff;
+  border-color: rgba(251,105,0,0.45);
+  background: rgba(251,105,0,0.12);
+}
+.sage-chat-clip:focus-visible { outline: 2px solid rgba(251,105,0,0.6); outline-offset: 2px; }
+.sage-chat-clip.has-file {
+  color: var(--orange, #fb6900);
+  border-color: rgba(251,105,0,0.6);
+  background: rgba(251,105,0,0.16);
 }
 
 .sage-chat-input {
@@ -13404,17 +14406,21 @@ select.sage-set-input option { background: #181818; color: #fff; }
 }
 .sage-chat-input::placeholder { color: rgba(255,255,255,0.3); }
 
+/* A circle, matching .sage-chat-clip on the other side of the input. The row had
+   three different shapes in it — a 40px circle, a 16px-radius pill and a
+   14px-radius square — which is what made a three-control row look unsettled.
+   Still the only filled control here, so it is still obviously the primary one. */
 .sage-chat-send {
   flex: 0 0 auto;
-  width: 42px; height: 42px;
+  width: 40px; height: 40px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   background: var(--orange, #fb6900);
   border: none;
-  border-radius: 14px;
+  border-radius: 50%;
   color: #0d0d0d;
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   cursor: pointer;
   transition: background 0.15s, opacity 0.15s;
 }
@@ -13422,14 +14428,22 @@ select.sage-set-input option { background: #181818; color: #fff; }
 .sage-chat-send:disabled { opacity: 0.45; cursor: default; }
 .sage-chat-send:focus-visible { outline: 2px solid rgba(251,105,0,0.8); outline-offset: 2px; }
 
-#sageChatStatus { padding: 0 14px 12px; margin: 0; }
+/* Inside the composer group now, so it needs separation from the input row and
+   nothing else — the group supplies the side and bottom padding. */
+#sageChatStatus { margin: 0; padding: 9px 2px 0; line-height: 1.4; }
+#sageChatStatus:empty { display: none; }
 
 @media (max-width: 640px) {
   /* On a phone the input and the send button were competing for one row, which
      left the box short. The button now floats inside the input's right edge, so
      the box spans the full width of the card — roughly 50px more room to type.
-     Anchored to the bottom so it stays put as the input grows. */
-  .sage-chat-form { position: relative; gap: 0; padding: 10px 12px 6px; }
+     Anchored to the bottom so it stays put as the input grows.
+
+     The offsets are measured against the FORM's padding box, and the form's own
+     padding is 0 now that .sage-chat-composer owns it — so these moved in from
+     18/11 to sit inside the input's 56px right gutter rather than beyond it. */
+  .sage-chat-composer { padding: 10px 12px 11px; }
+  .sage-chat-form { position: relative; gap: 0; padding: 0; }
   .sage-chat-input {
     width: 100%;
     min-height: 50px;
@@ -13438,15 +14452,13 @@ select.sage-set-input option { background: #181818; color: #fff; }
   }
   .sage-chat-send {
     position: absolute;
-    right: 18px;
-    bottom: 11px;
+    right: 8px;
+    bottom: 5px;
     width: 40px;
     height: 40px;
-    border-radius: 12px;
     font-size: 0.85rem;
   }
-  .sage-chat-suggest { padding: 0 12px; }
-  #sageChatStatus { padding: 0 12px 10px; }
+  .sage-chat-suggest { padding: 0 12px 10px; }
   /* Taller on a phone: there is nothing else competing for the screen here, and
      a short log with a long empty page below it looked broken. */
   .sage-chat-log { padding: 14px 11px; min-height: 56vh; max-height: 62vh; }
@@ -13465,7 +14477,10 @@ select.sage-set-input option { background: #181818; color: #fff; }
 
 @media (prefers-reduced-motion: reduce) {
   .sage-nav-avatar::after,
-  .sage-msg.is-thinking span { animation: none; }
+  .sage-step,
+  .sage-dots span { animation: none; }
+  /* .sl-spinner is stilled by the rule in the settings block above, which covers
+     this one too. It keeps its colour, so it still reads as "still working". */
   .sage-chip,
   .sage-chat-send,
   .sage-chat-input { transition: none; }
@@ -13479,15 +14494,89 @@ select.sage-set-input option { background: #181818; color: #fff; }
 
 .sage-health { margin-bottom: 14px; }
 
-.sage-health-word {
-  margin: 0 0 12px;
-  font-size: 0.92rem;
-  line-height: 1.5;
-  color: rgba(255,255,255,0.82);
+/* ── Her read on herself ──
+   This was a bare full-width paragraph tinted by the verdict, which made the most
+   important sentence on the card the hardest thing on it to read: 0.92rem of
+   amber running the full width of a desktop panel, with nothing on screen saying
+   whose words they were.
+
+   It is a quote now — her face, the verdict as a label, and the sentence itself in
+   a readable dim white. The colour moved off the text and onto the label and the
+   bubble's left edge, which is where a status belongs: a tone tells you how to
+   feel about a sentence, it should not decide whether you can read it. */
+.sage-health-says {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  margin-bottom: 13px;
 }
-.sage-health-word.is-ok { color: #7fe0a6; }
-.sage-health-word.is-warn { color: var(--warn, #fba600); }
-.sage-health-word.is-bad { color: #ff8a8a; }
+
+.sage-health-face {
+  flex: 0 0 auto;
+  width: 34px; height: 34px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 1px solid rgba(251,105,0,0.32);
+}
+.sage-health-face img { display: block; width: 100%; height: 100%; object-fit: cover; }
+
+/* Square on the side the face is on, rounded away from it — a speech bubble
+   without the cost of drawing a tail. */
+.sage-health-bubble {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 9px 13px 10px;
+  background: rgba(255,255,255,0.045);
+  border: 1px solid rgba(255,255,255,0.09);
+  border-left: 2px solid rgba(251,105,0,0.5);
+  border-radius: 4px 14px 14px 4px;
+  transition: opacity 0.2s;
+}
+.sage-health-bubble.is-ok { border-left-color: #1ad1a5; }
+.sage-health-bubble.is-warn { border-left-color: #fba600; }
+.sage-health-bubble.is-bad { border-left-color: #ff4d4d; }
+
+.sage-health-meta {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 5px;
+}
+.sage-health-meta:empty { display: none; }
+
+.sage-health-verdict {
+  font-family: 'Blender Pro', 'Oswald', sans-serif;
+  font-size: 0.63rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.4);
+}
+.sage-health-verdict:empty { display: none; }
+.sage-health-verdict.is-ok { color: #1ad1a5; }
+.sage-health-verdict.is-warn { color: #fba600; }
+.sage-health-verdict.is-bad { color: #ff4d4d; }
+
+/* Shown only while she is actually composing. The card used to sit there with
+   stale words and a dimmed Refresh button as the only clue anything was
+   happening, and an AI call here takes seconds. */
+.sage-health-writing {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.66rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.34);
+}
+.sage-health.is-writing .sage-health-word { opacity: 0.5; }
+
+.sage-health-word {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  color: rgba(255,255,255,0.78);
+}
 
 /* ── Flags ── */
 .sage-health-flags {
@@ -13567,45 +14656,1706 @@ select.sage-set-input option { background: #181818; color: #fff; }
   .sage-health-stats { grid-template-columns: 1fr 1fr; }
 }
 
-/* ── Key ring ── */
-.sage-key-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 4px; }
+/* ══ VOICE PANEL ═══════════════════════════════════════════════════════ */
 
-.sage-key-item {
+/* ── Today's usage ──
+   Free-tier flash is metered per day, so "how much is left" answers almost
+   every "why has she gone quiet". It used to be the tail of a sentence. */
+.sage-usage-card { padding: 13px 14px; margin-top: 14px; }
+
+.sage-usage-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 11px;
+}
+.sage-usage-head strong {
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: rgba(255,255,255,0.9);
+}
+
+.sage-usage-state {
+  flex: 0 0 auto;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  font-size: 0.65rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.55);
+}
+.sage-usage-state.is-ok {
+  background: rgba(95,211,141,0.1);
+  border-color: rgba(95,211,141,0.3);
+  color: #7fe0a6;
+}
+.sage-usage-state.is-warn {
+  background: rgba(251,166,0,0.1);
+  border-color: rgba(251,166,0,0.32);
+  color: var(--warn, #fba600);
+}
+.sage-usage-state.is-bad {
+  background: rgba(255,107,107,0.1);
+  border-color: rgba(255,107,107,0.3);
+  color: #ff8a8a;
+}
+
+.sage-usage-foot {
+  display: block;
+  margin-top: 10px;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: rgba(255,255,255,0.45);
+}
+
+/* ── Meters ── */
+.sage-meter-set { display: flex; flex-direction: column; gap: 9px; }
+.sage-meter-set:empty { display: none; }
+
+.sage-meter-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 0.73rem;
+  color: rgba(255,255,255,0.55);
+}
+.sage-meter-top b {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255,255,255,0.8);
+}
+
+.sage-meter-track {
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.08);
+  overflow: hidden;
+}
+.sage-meter-track span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--orange, #fb6900);
+  transition: width 0.3s ease-out;
+}
+.sage-meter.is-warn .sage-meter-track span { background: var(--warn, #fba600); }
+.sage-meter.is-bad .sage-meter-track span { background: #ff6b6b; }
+/* A meter with no ceiling shows the bar as a quiet baseline rather than a fill
+   that would imply a limit that does not exist. */
+.sage-meter:not(.is-warn):not(.is-bad) .sage-meter-track span:not([style*='%']) { background: rgba(255,255,255,0.2); }
+
+/* ── Add a key ── */
+.sage-addkey {
+  margin-top: 12px;
+  padding: 12px;
+  background: rgba(255,255,255,0.025);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 14px;
+}
+.sage-addkey .sage-set-label { margin-top: 0; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.sage-addkey .sage-key-row { margin-bottom: 9px; }
+
+.sage-addkey-link {
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-decoration: none;
+  color: var(--orange, #fb6900);
+}
+.sage-addkey-link:hover { text-decoration: underline; }
+.sage-addkey-link i { font-size: 0.6rem; }
+.sage-addkey-link:focus-visible { outline: 2px solid rgba(251,105,0,0.6); outline-offset: 2px; }
+
+.sage-btn--block { width: 100%; justify-content: center; }
+
+/* ── Group header with an action ── */
+.sage-group-top {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 8px 10px;
+  justify-content: space-between;
+  gap: 10px;
+}
+.sage-group-top .sage-set-heading { margin-bottom: 0; }
+
+.sage-count-chip {
+  min-width: 19px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(251,105,0,0.16);
+  border: 1px solid rgba(251,105,0,0.3);
+  font-family: 'Oswald', sans-serif;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+}
+
+/* ── Key ring ──
+   A grid of small tiles rather than a stack of rows. Five keys stacked
+   vertically overflowed the panel however short each row was made; two columns
+   turns the same five into three rows, and three columns into two.
+   520px is the modal's own breakpoint, so the column count changes at the same
+   moment the dialog stops being full-width. */
+.sage-key-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin: 10px 0 4px;
+}
+@media (min-width: 520px) {
+  .sage-key-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+/* Only bites past eight keys — four rows of two. */
+.sage-key-grid.is-long {
+  max-height: 232px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+}
+/* The empty state is a sentence, so it spans the whole grid. */
+.sage-key-grid .sage-mem-empty { grid-column: 1 / -1; }
+
+.sage-key-tile {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas:
+    'num state remove'
+    'mask mask mask';
+  align-items: center;
+  gap: 2px 6px;
+  padding: 7px 5px 8px 9px;
   background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.09);
+  border-radius: 11px;
+  min-width: 0;
 }
-.sage-key-item.is-resting { opacity: 0.55; }
-
-.sage-key-dot {
-  flex: 0 0 auto;
-  width: 8px; height: 8px;
-  border-radius: 50%;
-  background: #5fd38d;
+/* Resting keys are dimmed but still readable — the countdown is the thing you
+   came to read. */
+.sage-key-tile.is-resting { opacity: 0.72; }
+/* The one actually in use. Not necessarily the first on the ring. */
+.sage-key-tile.is-live {
+  background: rgba(251,105,0,0.08);
+  border-color: rgba(251,105,0,0.28);
 }
-.sage-key-item.is-resting .sage-key-dot { background: var(--warn, #fba600); }
 
+/* Position on the ring, which is the order she tries them in. Replaces the
+   status dot: the dot and the state pill were saying the same thing twice. */
+.sage-key-num {
+  grid-area: num;
+  font-size: 0.62rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255,255,255,0.28);
+}
+.sage-key-tile.is-live .sage-key-num { color: var(--orange, #fb6900); }
+
+/* The masked key gets the tile's full width on its own line, so it never has to
+   compete with the state pill for space and never ellipses. */
 .sage-key-mask {
-  flex: 1;
+  grid-area: mask;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.8rem;
-  letter-spacing: 0.04em;
-  color: rgba(255,255,255,0.75);
+  font-size: 0.76rem;
+  letter-spacing: 0.02em;
+  color: rgba(255,255,255,0.78);
 }
+.sage-key-tile.is-live .sage-key-mask { color: #fff; }
 
 .sage-key-state {
-  flex: 0 0 auto;
-  font-size: 0.64rem;
+  grid-area: state;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.58rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: rgba(255,255,255,0.4);
+  color: rgba(255,255,255,0.38);
+}
+.sage-key-tile.is-live .sage-key-state { color: var(--orange, #fb6900); }
+.sage-key-tile.is-resting .sage-key-state { color: var(--warn, #fba600); }
+
+.sage-key-remove {
+  grid-area: remove;
+  width: 22px; height: 22px;
+  font-size: 0.66rem;
+  /* Quiet until the tile is hovered: five remove buttons all shouting was most
+     of what made the ring look busy. */
+  border-color: transparent;
+  background: none;
+  color: rgba(255,255,255,0.28);
+}
+.sage-key-tile:hover .sage-key-remove { color: rgba(255,255,255,0.6); }
+.sage-key-remove:hover {
+  color: #ff9d9d;
+  background: rgba(255,107,107,0.1);
+  border-color: rgba(255,107,107,0.4);
+}
+/* Never hidden from the keyboard. */
+.sage-key-remove:focus-visible { color: #fff; border-color: rgba(251,105,0,0.6); }
+
+/* Touch devices have no hover, so the button has to be visible from the start. */
+@media (pointer: coarse) {
+  .sage-key-remove { color: rgba(255,255,255,0.5); }
 }
 
-.sage-key-remove { width: 30px; height: 30px; font-size: 0.8rem; }
+/* ── Encrypted backup ── */
+.sage-vault-card { padding: 12px 13px; margin-top: 10px; }
+
+.sage-vault-head { display: flex; align-items: center; gap: 11px; }
+
+.sage-vault-icon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 34px; height: 34px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  color: rgba(255,255,255,0.6);
+  font-size: 0.85rem;
+}
+.sage-vault-icon.is-ok {
+  background: rgba(95,211,141,0.12);
+  border-color: rgba(95,211,141,0.32);
+  color: #7fe0a6;
+}
+.sage-vault-icon.is-warn {
+  background: rgba(251,166,0,0.12);
+  border-color: rgba(251,166,0,0.34);
+  color: var(--warn, #fba600);
+}
+.sage-vault-icon.is-bad {
+  background: rgba(255,107,107,0.12);
+  border-color: rgba(255,107,107,0.32);
+  color: #ff8a8a;
+}
+
+.sage-vault-copy { flex: 1; min-width: 0; }
+.sage-vault-copy strong {
+  display: block;
+  font-size: 0.84rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: rgba(255,255,255,0.9);
+}
+.sage-vault-copy small {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.73rem;
+  line-height: 1.4;
+  color: rgba(255,255,255,0.5);
+}
+
+.sage-vault-pass {
+  display: flex;
+  gap: 7px;
+  align-items: stretch;
+  margin-top: 11px;
+}
+.sage-vault-pass .sage-set-input { flex: 1; min-width: 0; }
+.sage-vault-pass .sage-btn { flex: 0 0 auto; }
+
+/* .sage-vault-actions is laid out in the SEGMENTED PILLS block near the end of
+   this file, alongside .sage-sync-actions. It held five .sage-btn children here;
+   it holds one .sage-seg pill now, and Check, Lock and Delete backup moved out to
+   .sage-vault-extras because none of them move a key.
+
+   #sageVaultCheck also used to set its own margin-top here. It is
+   .sage-vault-diag now, and an id rule outranks a class rule — so that had to be
+   removed rather than merely superseded, or the diagnostic would sit 4px out of
+   place with nothing in .sage-vault-diag to explain why. */
+
+/* .sage-vault-facts was a four-cell readout under the backup card, and the same
+   grid was reused for the memory card's counts. Both are gone: the state line
+   carries what they said, and four raw figures under a settings card is
+   instrumentation rather than interface.
+
+   Deleted rather than left unused. Dead CSS in this file has twice ended up
+   attached to a new element that happened to reuse the class name, which is how
+   layouts acquire rules nobody chose. */
+
+.sage-vault-foot {
+  display: block;
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid rgba(255,255,255,0.07);
+  font-size: 0.71rem;
+  line-height: 1.45;
+  color: rgba(255,255,255,0.4);
+}
+.sage-vault-foot:empty { display: none; }
+
+/* ══ ALERTS PANEL ══════════════════════════════════════════════════════ */
+
+/* Whether she may notify at all, and whether she can while the app is closed.
+   Neither was visible anywhere before. */
+.sage-perm-card { padding: 13px 14px; margin-top: 14px; }
+
+.sage-perm-head { display: flex; align-items: center; gap: 11px; }
+
+.sage-perm-icon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 36px; height: 36px;
+  border-radius: 11px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  color: rgba(255,255,255,0.6);
+  font-size: 0.9rem;
+}
+.sage-perm-icon.is-ok {
+  background: rgba(95,211,141,0.12);
+  border-color: rgba(95,211,141,0.32);
+  color: #7fe0a6;
+}
+.sage-perm-icon.is-warn {
+  background: rgba(251,166,0,0.12);
+  border-color: rgba(251,166,0,0.34);
+  color: var(--warn, #fba600);
+}
+.sage-perm-icon.is-bad {
+  background: rgba(255,107,107,0.12);
+  border-color: rgba(255,107,107,0.32);
+  color: #ff8a8a;
+}
+
+.sage-perm-copy { flex: 1; min-width: 0; }
+.sage-perm-copy strong {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: rgba(255,255,255,0.9);
+}
+.sage-perm-copy small {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.74rem;
+  line-height: 1.4;
+  color: rgba(255,255,255,0.5);
+}
+
+.sage-perm-head .sage-btn { flex: 0 0 auto; }
+
+.sage-perm-foot {
+  display: block;
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid rgba(255,255,255,0.07);
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: rgba(255,255,255,0.42);
+}
+.sage-perm-foot:empty { display: none; }
+
+/* ── What she remembers ──
+   A list of sentences, not of tokens, so the text wraps rather than ellipsing.
+   No longer capped in height: the memory panel is its own tab now, so the list
+   is the point of the screen rather than something that could push the rest of
+   settings out of reach. */
+.sage-mem-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.sage-mem-item {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  grid-template-areas:
+    'text pin forget'
+    'meta pin forget';
+  align-items: start;
+  gap: 2px 8px;
+  padding: 9px 10px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+  transition: border-color 0.15s, background 0.15s;
+}
+.sage-mem-item:hover { background: rgba(255,255,255,0.055); }
+
+/* Pinned notes are the ones he has said outright must survive, so they are the
+   only rows that get any colour of their own. */
+.sage-mem-item.is-pinned {
+  background: rgba(251,105,0,0.07);
+  border-color: rgba(251,105,0,0.3);
+}
+
+.sage-mem-text {
+  grid-area: text;
+  min-width: 0;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  color: rgba(255,255,255,0.82);
+}
+
+/* Kind, subject and age, under the sentence rather than beside it. Beside it,
+   the pill pushed every sentence in the list to a different left edge. */
+.sage-mem-meta {
+  grid-area: meta;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 3px;
+  font-size: 0.64rem;
+  letter-spacing: 0.04em;
+  color: rgba(255,255,255,0.36);
+}
+
+.sage-mem-kind {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(251,105,0,0.14);
+  border: 1px solid rgba(251,105,0,0.28);
+  font-size: 0.58rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.62);
+}
+
+.sage-mem-dot { opacity: 0.4; }
+
+/* She is not certain of this one. Worth showing, because an uncertain memory
+   she acts on confidently is the thing he would want to correct. */
+.sage-mem-unsure { color: var(--warn, #fba600); }
+
+/* Still ahead of him — a plan that has not happened yet. */
+.sage-mem-ahead { color: #7fe0a6; }
+
+.sage-mem-pin {
+  grid-area: pin;
+  align-self: start;
+  width: 28px; height: 28px;
+  font-size: 0.72rem;
+}
+.sage-mem-item.is-pinned .sage-mem-pin { color: var(--orange, #fb6900); }
+
+.sage-mem-remove {
+  grid-area: forget;
+  align-self: start;
+  width: 28px; height: 28px;
+  font-size: 0.75rem;
+}
+.sage-mem-remove:hover { color: #ff9d9d; border-color: rgba(255,107,107,0.45); }
+
+/* Nothing to show, either because she is new or because a filter excluded
+   everything. Distinguished in the copy, not in the styling. */
+.sage-mem-empty {
+  margin: 0;
+  padding: 18px 12px;
+  text-align: center;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: rgba(255,255,255,0.4);
+}
+.sage-mem-empty i {
+  display: block;
+  margin-bottom: 7px;
+  font-size: 1.25rem;
+  color: rgba(255,255,255,0.18);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   SAGE AUTOFILL
+   Her face on a button, wherever she can fill something in for you. Deliberately
+   quieter than the primary action beside it: this drafts, it never submits.
+   ══════════════════════════════════════════════════════════════════════ */
+
+.sage-fill-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+.sage-fill-row--modal { margin-top: 12px; }
+
+.sage-fill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  flex: 0 0 auto;
+  padding: 7px 14px 7px 7px;
+  background: rgba(251,105,0,0.09);
+  border: 1px solid rgba(251,105,0,0.32);
+  border-radius: 999px;
+  color: rgba(255,255,255,0.86);
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.18s, border-color 0.18s, color 0.18s, transform 0.18s;
+}
+.sage-fill-btn:hover:not(:disabled) {
+  background: rgba(251,105,0,0.16);
+  border-color: rgba(251,105,0,0.55);
+  color: #fff;
+}
+.sage-fill-btn:active:not(:disabled) { transform: scale(0.98); }
+.sage-fill-btn:focus-visible { outline: 2px solid rgba(251,105,0,0.65); outline-offset: 2px; }
+.sage-fill-btn:disabled { opacity: 0.6; cursor: progress; }
+
+.sage-fill-face {
+  flex: 0 0 auto;
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 1px solid rgba(251,105,0,0.4);
+}
+.sage-fill-face img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* Slow spin while she is thinking — the only motion on the button. */
+.sage-fill-btn.is-busy .sage-fill-face { animation: sageFillSpin 1.4s linear infinite; }
+@keyframes sageFillSpin { to { transform: rotate(360deg); } }
+
+.sage-fill-hint {
+  flex: 1 1 220px;
+  min-width: 0;
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.4;
+  color: rgba(255,255,255,0.5);
+}
+.sage-fill-hint:empty { display: none; }
+.sage-fill-hint.is-ok { color: #7fe0a6; }
+.sage-fill-hint.is-warn { color: var(--warn, #fba600); }
+.sage-fill-hint.is-bad { color: #ff8a8a; }
+
+/* Filled fields are deliberately NOT highlighted. An orange glow on them read as
+   the same dk-flash "look here" cue the Log Service shortcut uses to point at
+   this form, so it said "navigate" when it meant "she wrote this". The hint line
+   under the button names every field instead. */
+
+/* The percentage sits in the button label, so it must not reflow the row as it
+   counts up past single digits. */
+.sage-fill-label {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sage-fill-btn.is-busy .sage-fill-face { animation: none; opacity: 0.6; }
+  .sage-fill-btn { transition: none; }
+}
+
+/* .sage-mem-recap was an inline paragraph at the top of the memory list. Her
+   rolling note now has its own frosted card in the memory tab
+   (.sage-recap-card), where it reads as something she wrote rather than as the
+   first item in a list of facts. */
+
+/* ══════════════════════════════════════════════════════════════════════
+   SLIDE TO CONFIRM
+   The app's one destructive-action dialog, built by src/js/sage-confirm.js.
+
+   It replaced a press-and-hold button inside the generic loading popup. Two
+   things about that are worth keeping in mind while reading this, because they
+   are why the markup is shaped the way it is:
+
+     · It has its own overlay. Sharing #customPopup meant the confirm and the
+       "saving…" spinner were the same element, and a delete that showed
+       progress had to fight the thing asking permission for it.
+     · The thumb's position IS the progress indicator. Nothing here shows a
+       countdown, because a countdown is what you need when the control itself
+       cannot show how far along you are.
+
+   Sits above every other layer in the app (#docs .docs-modal is the current
+   ceiling at 100000): it is asked for from inside the settings dialog, from the
+   docs modal, and from flows that already have the loading popup up.
+   ══════════════════════════════════════════════════════════════════════ */
+
+.sl-slide-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(6,6,8,0.72);
+  -webkit-backdrop-filter: blur(10px) saturate(120%);
+  backdrop-filter: blur(10px) saturate(120%);
+  opacity: 0;
+  transition: opacity 0.18s ease-out;
+}
+.sl-slide-overlay.is-open { opacity: 1; }
+.sl-slide-overlay.is-leaving { opacity: 0; }
+
+/* The card, the mark, the fill and the thumb are all on the app's orange now,
+   where they used to be red.
+ 
+   This file already argues the case in two places — .sage-btn--danger says a red
+   fill "reads as an error state rather than a choice", and .sage-seg-btn.is-warn
+   says red among neutral siblings "reads as an error state rather than as a
+   caution". Both are right, and this dialog was breaking its own rule at the
+   largest scale in the app: a warm red card wash, a full-width red track fill and
+   a red-tinted thumb. Elsewhere red is confined to a hairline, a 10% tint or a
+   single small glyph.
+ 
+   What carries the danger instead is the copy — the title names the thing being
+   destroyed and the detail line says it cannot be undone — and the gesture
+   itself, which is the whole point of a slide rather than an OK button. The
+   confirmed state stays green, and now reads as a change rather than as one red
+   turning into another. */
+.sl-slide-card {
+  width: min(400px, 100%);
+  padding: 24px 22px 18px;
+  text-align: center;
+  background: linear-gradient(168deg, rgba(32,25,18,0.93), rgba(17,17,19,0.95));
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  backdrop-filter: blur(16px) saturate(140%);
+  border: 1px solid rgba(251,105,0,0.24);
+  border-radius: 22px;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.07),
+    0 24px 60px rgba(0,0,0,0.6),
+    0 0 0 1px rgba(0,0,0,0.4);
+  /* Rises and settles. The overshoot is small on purpose: this is a dialog
+     asking whether to destroy something, not a toast. */
+  transform: translateY(14px) scale(0.96);
+  opacity: 0;
+  transition:
+    transform 0.32s cubic-bezier(0.18,0.9,0.28,1.08),
+    opacity 0.2s ease-out;
+}
+.sl-slide-overlay.is-open .sl-slide-card { transform: none; opacity: 1; }
+.sl-slide-overlay.is-leaving .sl-slide-card {
+  transform: translateY(6px) scale(0.97);
+  opacity: 0;
+  transition-duration: 0.14s;
+}
+
+/* ── The mark ──
+   A haloed glyph rather than a bare icon. The halo breathes so the card has one
+   moving thing on it before the slider is touched — without it the dialog reads
+   as a static warning and people look for an OK button. */
+.sl-slide-mark {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 54px;
+  height: 54px;
+  margin: 0 auto 14px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 35%, rgba(251,105,0,0.3), rgba(251,105,0,0.08));
+  border: 1px solid rgba(251,105,0,0.34);
+  color: #ffa863;
+  font-size: 1.32rem;
+}
+.sl-slide-mark::before {
+  content: '';
+  position: absolute;
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  border: 1px solid rgba(251,105,0,0.42);
+  animation: slSlideHalo 2.4s ease-out infinite;
+}
+@keyframes slSlideHalo {
+  0%   { transform: scale(1);    opacity: 0.7; }
+  70%  { transform: scale(1.55); opacity: 0; }
+  100% { transform: scale(1.55); opacity: 0; }
+}
+.sl-slide-overlay.is-confirmed .sl-slide-mark {
+  background: radial-gradient(circle at 50% 35%, rgba(251,105,0,0.42), rgba(251,105,0,0.12));
+  color: #ffd0a8;
+}
+.sl-slide-overlay.is-confirmed .sl-slide-mark::before { animation: none; opacity: 0; }
+
+/* display and text-align are both set on purpose, and neither is redundant.
+   This is an <h3>, and the app has a global `h3 { display: flex; align-items:
+   center; gap: 10px }` for the section headings that pair an icon with a label.
+   A flex container does not apply text-align to its contents the way a block
+   does — the text becomes an anonymous flex item and sits at justify-content's
+   default, flex-start. So the title left-aligned itself inside a card whose every
+   other line was centred, and no amount of text-align on the CARD could fix it,
+   because inheritance never reaches the text. */
+.sl-slide-title {
+  display: block;
+  text-align: center;
+  margin: 0 0 6px;
+  font-family: 'Blender Pro', 'Oswald', sans-serif;
+  font-size: 1.06rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.3;
+  color: #fff;
+}
+
+/* Stated rather than inherited, for the same reason: this card's alignment should
+   not depend on what a global element rule happens to do. */
+.sl-slide-copy {
+  text-align: center;
+  margin: 0 0 18px;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: rgba(255,255,255,0.56);
+}
+.sl-slide-copy b, .sl-slide-copy strong { color: rgba(255,255,255,0.8); font-weight: 700; }
+.sl-slide-copy:last-of-type { margin-bottom: 18px; }
+
+/* ── The track ──
+   Tall enough to be a thumb target on a phone (56px) and no taller, because the
+   card has to stay above the fold with a two-line message on a short screen. */
+.sl-slide-track {
+  position: relative;
+  height: 56px;
+  margin: 0 0 10px;
+  border-radius: 999px;
+  background: rgba(0,0,0,0.42);
+  border: 1px solid rgba(255,255,255,0.1);
+  box-shadow:
+    inset 0 2px 8px rgba(0,0,0,0.5),
+    inset 0 -1px 0 rgba(255,255,255,0.05);
+  overflow: hidden;
+  /* The thumb is dragged inside it; a text selection started mid-drag turns the
+     whole card blue and eats the pointermove events. */
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: none;
+}
+
+/* Grows under the thumb. Width is set from JS, so nothing here animates it —
+   the transition is added inline only for the spring back. */
+.sl-slide-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(176,66,0,0.8), rgba(251,105,0,0.95));
+  box-shadow: 0 0 20px rgba(251,105,0,0.3);
+}
+
+.sl-slide-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Centred on the track, with no padding to keep it clear of the thumb.
+     padding-left: 46px did that and pushed the text 23px right of centre, which
+     put it visibly out of line with the title and the Cancel button above and
+     below it. The thumb sits at the left end and the label fades out as the
+     thumb covers it, so they never actually fight for the same pixels. */
+  font-family: 'Blender Pro', 'Oswald', sans-serif;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  /* A sweep across the text rather than a glow on the track: it points right,
+     which is the one thing the control needs to communicate. */
+  background: linear-gradient(100deg,
+    rgba(255,255,255,0.34) 24%,
+    rgba(255,255,255,0.92) 42%,
+    rgba(255,255,255,0.92) 50%,
+    rgba(255,255,255,0.34) 66%);
+  background-size: 280% 100%;
+  background-position: 120% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: slSlideSweep 2.8s linear infinite;
+}
+@keyframes slSlideSweep {
+  to { background-position: -160% 0; }
+}
+.sl-slide-overlay.is-confirmed .sl-slide-label {
+  background: none;
+  color: #fff;
+  -webkit-text-fill-color: #fff;
+  animation: none;
+}
+
+/* ── The thumb ──
+   A real <button role="slider">, so it takes focus and the arrow keys work. The
+   transform comes from JS; the transition is scoped to :not(.is-dragging) so a
+   drag tracks the finger exactly while a keyboard step still glides. */
+.sl-slide-thumb {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: linear-gradient(160deg, #fff, #ffe4cc);
+  color: #b54c07;
+  font-size: 0.98rem;
+  cursor: grab;
+  box-shadow:
+    0 4px 14px rgba(0,0,0,0.45),
+    inset 0 -2px 0 rgba(0,0,0,0.08);
+  touch-action: none;
+  will-change: transform;
+}
+.sl-slide-overlay:not(.is-dragging) .sl-slide-thumb {
+  transition: transform 0.22s cubic-bezier(0.22,1.2,0.36,1), box-shadow 0.2s ease;
+}
+.sl-slide-thumb:focus-visible {
+  outline: 2px solid rgba(255,255,255,0.85);
+  outline-offset: 3px;
+}
+.sl-slide-thumb:disabled { cursor: default; }
+.sl-slide-overlay.is-dragging .sl-slide-thumb { cursor: grabbing; }
+
+/* The chevrons lean right on their own, which is the hint that a static arrow
+   cannot give. Stops the moment the thumb is picked up — it has done its job. */
+.sl-slide-thumb i { animation: slSlideNudge 1.5s ease-in-out infinite; }
+@keyframes slSlideNudge {
+  0%, 100% { transform: translateX(-1px); opacity: 0.72; }
+  50%      { transform: translateX(3px);  opacity: 1; }
+}
+.sl-slide-overlay.is-dragging .sl-slide-thumb i,
+.sl-slide-overlay.is-armed .sl-slide-thumb i,
+.sl-slide-overlay.is-confirmed .sl-slide-thumb i { animation: none; transform: none; opacity: 1; }
+
+/* Far enough to count. Saying so with a ring rather than a colour change, because
+   the fill is already orange and a second orange would say nothing. */
+.sl-slide-overlay.is-armed .sl-slide-thumb {
+  box-shadow:
+    0 0 0 4px rgba(255,255,255,0.18),
+    0 6px 18px rgba(0,0,0,0.5);
+}
+.sl-slide-overlay.is-armed .sl-slide-track { border-color: rgba(255,255,255,0.26); }
+
+/* Committed. The thumb's transform is owned by JS and holds the end position, so
+   the acknowledgement is a ring rather than a scale — animating transform here
+   would override the inline value and snap the thumb back to the left at the
+   exact moment it is meant to be sitting at the end. */
+.sl-slide-overlay.is-confirmed .sl-slide-thumb {
+  background: linear-gradient(160deg, #fff, #d8ffe6);
+  color: #1f8a4c;
+  animation: slSlidePop 0.44s ease-out;
+}
+@keyframes slSlidePop {
+  0%   { box-shadow: 0 0 0 0 rgba(140,255,190,0.55), 0 6px 18px rgba(0,0,0,0.5); }
+  100% { box-shadow: 0 0 0 14px rgba(140,255,190,0), 0 6px 18px rgba(0,0,0,0.5); }
+}
+
+.sl-slide-cancel {
+  margin: 0;
+  padding: 9px 18px;
+  background: none;
+  border: none;
+  border-radius: 10px;
+  font-family: 'Blender Pro', 'Oswald', sans-serif;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.5);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.sl-slide-cancel:hover { color: #fff; background: rgba(255,255,255,0.07); }
+.sl-slide-cancel:focus-visible { outline: 2px solid rgba(251,105,0,0.6); outline-offset: 2px; }
+.sl-slide-overlay.is-confirmed .sl-slide-cancel { opacity: 0.3; pointer-events: none; }
+
+/* Reduced motion keeps the control and loses the theatre. The slide itself is
+   not decoration — it is the confirmation — so it stays; the halo, the sweep and
+   the nudge go, and the card appears instead of arriving. */
+@media (prefers-reduced-motion: reduce) {
+  .sl-slide-overlay,
+  .sl-slide-card { transition: none; }
+  .sl-slide-card { transform: none; opacity: 1; }
+  .sl-slide-mark::before { animation: none; opacity: 0; }
+  .sl-slide-label {
+    background: none;
+    color: rgba(255,255,255,0.82);
+    -webkit-text-fill-color: rgba(255,255,255,0.82);
+    animation: none;
+  }
+  .sl-slide-thumb i { animation: none; }
+  .sl-slide-overlay:not(.is-dragging) .sl-slide-thumb { transition: none; }
+  .sl-slide-overlay.is-confirmed .sl-slide-thumb { animation: none; }
+}
+
+/* Very short screens — a phone in landscape with the keyboard up. The message is
+   the first thing that can go; the question and the slider cannot. */
+@media (max-height: 420px) {
+  .sl-slide-card { padding: 16px 18px 12px; }
+  .sl-slide-mark { width: 40px; height: 40px; margin-bottom: 9px; font-size: 1.05rem; }
+  .sl-slide-mark::before { width: 40px; height: 40px; }
+  .sl-slide-copy { margin-bottom: 12px; font-size: 0.78rem; }
+  .sl-slide-track { height: 48px; }
+  .sl-slide-thumb { width: 40px; height: 40px; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   SEGMENTED PILLS
+   One rounded control per job, divided into its actions.
+
+   This replaced a split button — a primary action with the rest behind a
+   chevron. That hid things: with the vault locked, "Back up" was greyed out and
+   the only live action was inside a menu behind an unlabelled arrow, so the panel
+   read as a dead button next to a mystery.
+
+   What it is instead: the memory card has a Cloud pill and a File pill, the
+   backup card has one Backup pill. Everything is visible, everything is one tap,
+   and the grouping does the work the five free-standing ghost buttons could not —
+   five buttons of identical weight said all five were equally likely and equally
+   safe, which is how a control that brings keys back came to look like the one
+   that drops them.
+   ══════════════════════════════════════════════════════════════════════ */
+
+.sage-seg {
+  display: flex;
+  min-width: 0;
+  /* The divider between segments is a border on the segment, so the container
+     clips the outer corners rather than every segment rounding its own. */
+  overflow: hidden;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 11px;
+}
+
+.sage-seg-btn {
+  flex: 1 1 0;
+  /* 0 basis plus min-width 0 so three segments share the row evenly and the
+     longest label cannot push the others out. */
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 6px;
+  background: none;
+  border: none;
+  border-left: 1px solid rgba(255,255,255,0.12);
+  color: rgba(255,255,255,0.78);
+  font-family: 'Blender Pro', 'Oswald', sans-serif;
+  font-size: 0.73rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.14s, color 0.14s;
+}
+.sage-seg-btn:first-child { border-left: none; }
+.sage-seg-btn > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sage-seg-btn > i { flex: 0 0 auto; font-size: 0.8rem; opacity: 0.75; }
+
+.sage-seg-btn:hover { background: rgba(255,255,255,0.08); color: #fff; }
+.sage-seg-btn:hover > i { opacity: 1; color: var(--orange, #fb6900); }
+.sage-seg-btn:focus-visible {
+  outline: 2px solid rgba(251,105,0,0.6);
+  /* Inset, because an outset ring on a segment is clipped by the container. */
+  outline-offset: -2px;
+}
+.sage-seg-btn:active { background: rgba(251,105,0,0.16); }
+.sage-seg-btn:disabled { opacity: 0.4; cursor: default; }
+.sage-seg-btn:disabled:hover { background: none; color: rgba(255,255,255,0.78); }
+.sage-seg-btn:disabled:hover > i { opacity: 0.75; color: inherit; }
+
+/* Marks a segment that can lose something. Not red — red among four neutral
+   segments reads as an error state rather than as a caution — but not identical
+   to its neighbours either, which is the mistake being corrected. */
+.sage-seg-btn.is-warn { color: var(--warn, #fba600); }
+.sage-seg-btn.is-warn > i { color: var(--warn, #fba600); opacity: 0.85; }
+.sage-seg-btn.is-warn:hover {
+  background: rgba(251,166,0,0.14);
+  color: #ffc04d;
+}
+.sage-seg-btn.is-warn:hover > i { color: #ffc04d; }
+.sage-seg-btn.is-warn:disabled:hover { background: none; color: var(--warn, #fba600); }
+
+/* Busy. The label is replaced from JS; this just stops the row shifting. */
+.sage-seg-btn.is-busy > i { animation: sageSegSpin 1.1s linear infinite; }
+@keyframes sageSegSpin { to { transform: rotate(360deg); } }
+
+/* A dot when the cloud is holding something this device has not got. The count
+   itself is in the facts row below; this is only what makes anyone read it. */
+.sage-seg-btn.has-more { position: relative; }
+.sage-seg-btn.has-more::after {
+  content: '';
+  position: absolute;
+  top: 6px;
+  right: 7px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--orange, #fb6900);
+  box-shadow: 0 0 6px rgba(251,105,0,0.8);
+}
+
+/* Both action rows lay out pills. Wrapping rather than shrinking: two pills of
+   three and two segments fit one line on a phone, and if they do not, a second
+   line is better than five segments 40px wide. */
+.sage-sync-actions,
+.sage-vault-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 11px;
+}
+.sage-sync-actions .sage-seg,
+.sage-vault-actions .sage-seg { flex: 1 1 auto; }
+
+/* Very narrow phones. The icon carries the meaning at this size and the labels
+   are what stop three segments fitting. */
+@media (max-width: 360px) {
+  .sage-seg-btn { padding: 8px 4px; font-size: 0.68rem; letter-spacing: 0.02em; }
+  .sage-seg-btn { gap: 4px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sage-seg-btn { transition: none; }
+  .sage-seg-btn.is-busy > i { animation: none; opacity: 0.5; }
+}
+
+/* ── The ones that are not actions on your keys ──
+   Deliberately not buttons and deliberately outside the pill. Check reads and
+   reports, Lock forgets a passphrase, Delete backup destroys the cloud copy —
+   none of them move a key, and renderVault() disables every segment in the pill
+   while the vault is locked, which is exactly when Check is needed. */
+/* A single row, evenly spaced, with the destructive one at the far end.
+   margin-left: auto on that item is gone: in a wrapping flex row it breaks the
+   moment the row wraps, which is what left "Delete backup" hanging out of line
+   with the two beside it. space-between on the container does the same job and
+   survives the wrap. */
+.sage-vault-extras {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 12px;
+  padding-top: 11px;
+  border-top: 1px solid rgba(255,255,255,0.07);
+}
+
+/* No underline.
+   These read as one row of small controls, and an underline under each one drew
+   a line through the icon as well as the label — three short rules across the
+   card that looked like broken strikethrough rather than like links. The hairline
+   above the row separates them from the pill; the hover fill marks them as
+   pressable. */
+.sage-vault-diag {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 9px;
+  margin: 0 -3px;
+  background: none;
+  border: none;
+  border-radius: 8px;
+  font-family: 'Blender Pro', 'Oswald', sans-serif;
+  font-size: 0.73rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: rgba(255,255,255,0.5);
+  text-decoration: none;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.sage-vault-diag > i { font-size: 0.78rem; opacity: 0.7; }
+.sage-vault-diag:hover {
+  color: #fff;
+  background: rgba(255,255,255,0.07);
+}
+.sage-vault-diag:hover > i { opacity: 1; color: var(--orange, #fb6900); }
+.sage-vault-diag:focus-visible { outline: 2px solid rgba(251,105,0,0.6); outline-offset: 1px; }
+.sage-vault-diag:disabled { opacity: 0.45; cursor: default; }
+.sage-vault-diag:disabled:hover { background: none; color: rgba(255,255,255,0.5); }
+.sage-vault-diag[hidden] { display: none; }
+
+.sage-vault-diag.is-danger { color: rgba(255,157,157,0.75); }
+.sage-vault-diag.is-danger > i { color: rgba(255,157,157,0.6); }
+.sage-vault-diag.is-danger:hover {
+  color: #ffb4b4;
+  background: rgba(255,107,107,0.13);
+}
+.sage-vault-diag.is-danger:hover > i { color: #ff8a8a; }
+
+/* ══════════════════════════════════════════════════════════════════════
+   SELECTIVE RESTORE
+   A checkbox list of what the cloud is holding.
+
+   "Restore everything" is the right default and stays one tap away, but it is
+   all-or-nothing, and the cloud can hold one thing she got wrong alongside
+   thirty she got right. This is the answer to "bring back those, not that one".
+   ══════════════════════════════════════════════════════════════════════ */
+
+.sage-pick {
+  margin-top: 12px;
+  padding: 12px;
+  background: rgba(0,0,0,0.24);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 14px;
+  animation: sagePickIn 0.22s ease-out;
+}
+.sage-pick[hidden] { display: none; }
+@keyframes sagePickIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.sage-pick-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 9px;
+}
+.sage-pick-top strong {
+  font-family: 'Blender Pro', 'Oswald', sans-serif;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: rgba(255,255,255,0.9);
+}
+
+.sage-pick-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 9px;
+}
+.sage-pick-chip {
+  padding: 4px 10px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.13);
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: rgba(255,255,255,0.7);
+  cursor: pointer;
+  transition: background 0.14s, color 0.14s, border-color 0.14s;
+}
+.sage-pick-chip:hover {
+  background: rgba(251,105,0,0.16);
+  border-color: rgba(251,105,0,0.45);
+  color: #fff;
+}
+.sage-pick-chip:focus-visible { outline: 2px solid rgba(251,105,0,0.6); outline-offset: 2px; }
+.sage-pick-count {
+  margin-left: auto;
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255,255,255,0.45);
+}
+
+/* Scroll-capped. A cloud copy can hold sixty facts, and a sixty-row list inside
+   a panel that already scrolls is two scrollbars arguing. */
+.sage-pick-list {
+  max-height: 232px;
+  overflow-y: auto;
+  margin: 0 -4px 10px;
+  padding: 0 4px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.sage-pick-group {
+  margin: 8px 2px 5px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.35);
+}
+.sage-pick-group:first-child { margin-top: 0; }
+
+.sage-pick-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 8px 9px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.13s;
+}
+.sage-pick-row:hover { background: rgba(255,255,255,0.05); }
+.sage-pick-row input {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: var(--orange, #fb6900);
+  cursor: pointer;
+}
+.sage-pick-row.is-on { background: rgba(251,105,0,0.09); }
+
+.sage-pick-text {
+  display: block;
+  min-width: 0;
+  font-size: 0.79rem;
+  line-height: 1.4;
+  color: rgba(255,255,255,0.86);
+  overflow-wrap: anywhere;
+}
+.sage-pick-meta {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.68rem;
+  letter-spacing: 0.02em;
+  color: rgba(255,255,255,0.4);
+}
+/* A forgotten fact and a fact this device simply never saw come back by two
+   different routes, so the list says which is which. */
+.sage-pick-meta .is-forgotten { color: #fba600; }
+
+.sage-pick-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 6px;
+  margin: 0;
+  font-size: 0.78rem;
+  color: rgba(255,255,255,0.45);
+}
+.sage-pick-empty i { color: rgba(255,255,255,0.3); }
+
+/* The two things you can do with what is ticked. Deliberately NOT a segmented
+   pill: these are opposites, and one of them is the only irreversible action in
+   the memory panel. Grouping them into one control would say they are variations
+   of the same idea. */
+.sage-pick-foot {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.sage-pick-foot .sage-btn { flex: 1 1 140px; justify-content: center; }
+
+@media (prefers-reduced-motion: reduce) {
+  .sage-pick { animation: none; }
+  .sage-pick-row, .sage-pick-chip { transition: none; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   SCROLLBARS
+   Every scrolling surface in the app, in one place.
+
+   Until now the only styled scrollbar was the home search panel, so everything
+   else drew the operating system's: a light track, a chunky thumb, and on Windows
+   a pair of stepper arrows at each end. On a dark app that is a bright strip down
+   the edge of the panel, and the arrows turned the chat composer's two-line
+   textarea into something that looked like a number input.
+
+   A universal selector is safe here, which is worth saying because it normally is
+   not. The three places that deliberately hide their scrollbar — .sage-set-tabs,
+   .sage-chip-row, #service .history-spend-strip — all do it from a class or id
+   selector, so they outrank `*` on specificity no matter where these rules sit.
+   Adding a fourth one should follow that pattern rather than relying on order.
+   ══════════════════════════════════════════════════════════════════════ */
+
+:root {
+  --sl-bar-thumb: rgba(255,255,255,0.16);
+  --sl-bar-thumb-hover: rgba(251,105,0,0.55);
+  --sl-bar-track: rgba(255,255,255,0.04);
+}
+
+/* Firefox and anything else following the standard property. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--sl-bar-thumb) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--sl-bar-thumb);
+  /* Inset by a transparent border rather than a smaller width, so the thumb
+     floats in the gutter instead of filling it edge to edge. */
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 999px;
+  transition: background 0.15s;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--sl-bar-thumb-hover);
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:active { background: var(--orange, #fb6900); background-clip: padding-box; }
+
+/* The stepper arrows. Nobody has clicked one of these on purpose in twenty years,
+   and on a 9px gutter they are two grey squares that make a short textarea look
+   like a spinner control. */
+*::-webkit-scrollbar-button { display: none; }
+/* The little square where a vertical and a horizontal bar meet. */
+*::-webkit-scrollbar-corner { background: transparent; }
+
+/* Surfaces where the bar is part of the furniture rather than an overlay: a
+   faint track makes it clear the panel scrolls before you touch it. */
+.sage-settings-body::-webkit-scrollbar-track,
+.sage-chat-log::-webkit-scrollbar-track,
+.sage-pick-list::-webkit-scrollbar-track,
+.sage-key-grid::-webkit-scrollbar-track,
+.sage-mem-list::-webkit-scrollbar-track {
+  background: var(--sl-bar-track);
+}
+
+/* The composer grows to five rows and then scrolls. A gutter inside a rounded
+   input looks wrong at full width, so it gets the thinnest treatment. */
+.sage-chat-input::-webkit-scrollbar { width: 6px; }
+.sage-chat-input::-webkit-scrollbar-track { background: transparent; }
+
+/* ══════════════════════════════════════════════════════════════════════
+   CHAT — FINAL PASS
+   Overrides for .sage-chat-log and .sage-msg defined earlier in this file.
+
+   The log was legible but flat: every bubble the same distance from the last
+   whoever spoke, a hard edge where it met the composer, and a message that
+   simply appeared. The changes below are all about reading a conversation as a
+   conversation — who is speaking, where a turn begins, and where the scroll
+   actually ends.
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* Grouping. A reply from the same speaker sits tight against the one above it;
+   a change of speaker gets air. This is the single biggest difference between a
+   log and a conversation, and it costs two selectors. */
+.sage-chat-log { gap: 3px; scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) {
+  .sage-chat-log { scroll-behavior: auto; }
+}
+.sage-msg.is-sage + .sage-msg.is-me,
+.sage-msg.is-me + .sage-msg.is-sage { margin-top: 12px; }
+
+/* Only the last bubble in a run keeps its pointed corner — a stack of three
+   replies is one turn, not three interruptions. */
+.sage-msg.is-sage { border-bottom-left-radius: 16px; }
+.sage-msg.is-me { border-bottom-right-radius: 16px; }
+.sage-msg.is-sage:not(:has(+ .sage-msg.is-sage)) { border-bottom-left-radius: 6px; }
+.sage-msg.is-me:not(:has(+ .sage-msg.is-me)) { border-bottom-right-radius: 6px; }
+
+/* The timestamp is reference, not content. It only shows on the bubble that
+   ends a run, and it stops competing with her words for attention. */
+.sage-msg time { opacity: 0; transition: opacity 0.18s; }
+.sage-msg:not(:has(+ .sage-msg.is-sage)):not(:has(+ .sage-msg.is-me)) time,
+.sage-msg:hover time,
+.sage-msg:focus-within time { opacity: 0.45; }
+
+/* Hers reads as the voice in the room; his reads as an aside. A left accent on
+   her bubbles does what an avatar would without spending 32px of a phone's
+   width on the same photo forty times. */
+.sage-msg.is-sage {
+  position: relative;
+  background: linear-gradient(135deg, rgba(255,255,255,0.075), rgba(255,255,255,0.045));
+  box-shadow: inset 1px 0 0 rgba(251,105,0,0.28);
+}
+.sage-msg.is-me {
+  background: linear-gradient(135deg, rgba(251,105,0,0.2), rgba(251,105,0,0.13));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.07);
+}
+
+/* Arriving, rather than appearing. Rises from the side it belongs to, so the eye
+   is already looking in the right place when the text lands. */
+.sage-msg { animation: sageMsgIn 0.26s cubic-bezier(0.2,0.9,0.3,1.02); }
+@keyframes sageMsgIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sage-msg { animation: none; }
+  .sage-msg time { transition: none; }
+}
+
+/* The log ran to a hard edge against the composer, so the last line looked cut
+   off rather than scrolled to. A short fade says "there is more above" without
+   a shadow that darkens her words. */
+.sage-chat-log {
+  padding-bottom: 20px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 14px);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 14px);
+}
+
+/* A conversation grows UPWARDS from the composer. The log has a 380px floor so a
+   two-message chat does not leave a stub of a card, but with the bubbles stacked
+   from the top that floor showed as 250px of dead space underneath them — which
+   is what made the whole area look unfinished.
+ 
+   `margin-top: auto` on the first child rather than `justify-content: flex-end`
+   on the log: flex-end on a scroll container is the classic way to make the
+   overflow at the top unreachable, and this log scrolls. The auto margin
+   collapses to nothing the moment the content is taller than the box, so it
+   costs one declaration and cannot break the scroll.
+ 
+   .sage-chat-empty already sets `margin: auto` to centre itself; this sets the
+   same value for the top, so the empty state is unaffected. */
+.sage-chat-log > :first-child { margin-top: auto; }
+
+/* Her activity trail — "looking through your papers", "thinking back". These are
+   a record of what she actually did, so they are legible but deliberately not
+   competing with the reply they belong to. */
+.sage-msg .sage-act,
+.sage-msg .sage-trail { opacity: 0.85; }
+
+/* The composer. It was a row of controls; it now reads as one field with the
+   send button inside its right-hand end. */
+.sage-chat-form {
+  padding-top: 11px;
+  border-top: 1px solid rgba(255,255,255,0.07);
+}
+.sage-chat-input {
+  transition: border-color 0.16s, background 0.16s, box-shadow 0.16s;
+}
+.sage-chat-input:focus-visible,
+.sage-chat-input:focus {
+  border-color: rgba(251,105,0,0.5);
+  box-shadow: 0 0 0 3px rgba(251,105,0,0.1);
+}
+
+/* ── A page she is offering ──
+   open_section used to navigate, so the screen changed underneath him
+   mid-conversation. It is this button now, inside her bubble, and going somewhere
+   is his decision. Deliberately quiet: it is an offer, not the answer. */
+.sage-msg-go {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 9px;
+  padding: 7px 12px;
+  background: rgba(251,105,0,0.12);
+  border: 1px solid rgba(251,105,0,0.32);
+  border-radius: 999px;
+  font-family: 'Blender Pro', 'Oswald', sans-serif;
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #ffb877;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.sage-msg-go:hover {
+  background: rgba(251,105,0,0.22);
+  border-color: rgba(251,105,0,0.6);
+  color: #fff;
+}
+.sage-msg-go:focus-visible { outline: 2px solid rgba(251,105,0,0.6); outline-offset: 2px; }
+.sage-msg-go > i:first-child { font-size: 0.78rem; }
+
+/* Leans towards the page it would take you to, and only on hover — a permanently
+   sliding arrow inside a chat log is one moving thing too many. */
+.sage-msg-go-arrow { font-size: 0.66rem; opacity: 0.6; transition: transform 0.18s, opacity 0.18s; }
+.sage-msg-go:hover .sage-msg-go-arrow { transform: translateX(3px); opacity: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .sage-msg-go, .sage-msg-go-arrow { transition: none; }
+  .sage-msg-go:hover .sage-msg-go-arrow { transform: none; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   EDIT A SERVICE RECORD
+   The sheet behind a long-press on a Record History row.
+
+   Rides on .sl-modal-overlay / .sl-modal-card, which already centre on a desktop
+   and bottom-sheet below 520px, so none of that is repeated here. What IS here is
+   the one thing the shared card cannot do: the shell sets `overflow: hidden` with
+   no height cap, and six fields plus two buttons is taller than a phone in
+   landscape. So the card gets a cap and the form scrolls inside it, leaving the
+   header and the actions where your thumb left them.
+   ══════════════════════════════════════════════════════════════════════ */
+
+.svc-edit-card {
+  display: flex;
+  flex-direction: column;
+  max-height: min(88vh, 720px);
+}
+@supports (height: 1dvh) {
+  .svc-edit-card { max-height: min(88dvh, 720px); }
+}
+
+.svc-edit-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 18px 18px;
+}
+
+/* Which record this is. The header says "Edit record" for every one of them, so
+   without this line there is nothing on screen tying the sheet to the row. */
+.svc-edit-what {
+  margin: 0 0 13px;
+  font-family: 'Blender Pro', 'Oswald', sans-serif;
+  font-size: 0.8rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--orange, #fb6900);
+}
+
+/* Two columns from 420px up. Five short fields stacked vertically is a lot of
+   scrolling for what is usually a one-character correction. */
+.svc-edit-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 11px;
+}
+@media (min-width: 420px) {
+  .svc-edit-grid { grid-template-columns: 1fr 1fr; }
+}
+
+.svc-edit-field { display: block; min-width: 0; }
+.svc-edit-field > span {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.45);
+}
+.svc-edit-field--wide { margin-top: 11px; }
+.svc-edit-notes { resize: vertical; min-height: 68px; }
+
+/* The native date control renders its own text, which sits a shade lighter than
+   the rest of the app's inputs unless it is told otherwise. */
+.svc-edit-field input[type="date"] { color-scheme: dark; }
+
+.svc-edit-status {
+  margin: 12px 0 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: rgba(255,255,255,0.5);
+}
+.svc-edit-status:empty { display: none; }
+.svc-edit-status.is-bad { color: #ff9d9d; }
+
+.svc-edit-note {
+  margin: 10px 0 0;
+  font-size: 0.7rem;
+  color: rgba(255,255,255,0.32);
+}
+
+.svc-edit-actions {
+  display: flex;
+  gap: 9px;
+  margin-top: 15px;
+}
+.svc-edit-actions .sage-btn { flex: 1 1 auto; justify-content: center; }
+
+/* ── The hold itself ──
+   A row has to say that holding it does something, and it has to say how far
+   along the hold is — otherwise the only feedback is the sheet appearing, and a
+   hold that was 100ms short of firing is indistinguishable from a dead feature.
+
+   The bar is a pseudo-element on the row rather than a real child so it survives
+   renderServiceTable() rewriting the tbody's innerHTML. transform: scaleX is the
+   animated property, so it composites and does not lay the table out again on
+   every frame. */
+.service-record-row {
+  /* No text selection and no iOS callout, or a long press selects the notes cell
+     and opens the native Copy/Share menu over the sheet. */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  cursor: pointer;
+}
+.service-record-row.is-holding { position: relative; }
+.service-record-row.is-holding::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(251,105,0,0.2), rgba(251,105,0,0.06));
+  transform-origin: left center;
+  animation: svcHoldFill 520ms linear forwards;
+}
+@keyframes svcHoldFill {
+  from { transform: scaleX(0); opacity: 0.4; }
+  to   { transform: scaleX(1); opacity: 1; }
+}
+/* The bar is painted over the row's background, so the cells have to sit above
+   it or the text disappears underneath the fill. */
+.service-record-row.is-holding > td { position: relative; z-index: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .service-record-row.is-holding::after { animation: none; transform: none; opacity: 1; }
+}
+
+/* Told, not discovered. */
+.service-history-hint {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 5px 0 0;
+  font-size: 0.72rem;
+  color: rgba(255,255,255,0.38);
+}
+.service-history-hint > i { font-size: 0.72em; color: rgba(251,105,0,0.7); }
+
+/* ══════════════════════════════════════════════════════════════════════
+   READABLE TEXT
+   Everything in the app that is a sentence rather than a label.
+
+   See --sl-read. Oswald is the only webfont here and it is a condensed headline
+   face; `body` applied it to everything, so her replies, the composer, her read on
+   herself and every value typed into a form were all set in it. Condensed type
+   works on a four-word heading and fights you over a paragraph — and it fights
+   hardest on words you cannot guess from their shape, which is exactly what a
+   transliterated word is.
+
+   Deliberately NOT a change to `body`. The headings, the stat figures, the
+   uppercase labels and the nav are all designed around Oswald's proportions, and
+   swapping the global would reflow the whole app to fix the chat.
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* Her words, and his. */
+.sage-msg,
+.sage-msg p,
+.sage-chat-empty p,
+.sage-msg-file,
+.sage-step-text,
+.sage-attach-name,
+#sageChatStatus,
+/* Her read on herself, and her own rolling note. */
+.sage-health-word,
+.sage-recap-text,
+/* Values he types. A registration or a filename in condensed type is genuinely
+   ambiguous — 1 against l, 0 against O. */
+.sage-chat-input,
+.sage-set-input,
+.svc-edit-notes,
+.svc-edit-what {
+  font-family: var(--sl-read);
+}
+
+/* A shade larger and looser now it is set in a face built for reading rather than
+   for fitting. Condensed type buys width back, so dropping it costs some. */
+.sage-msg {
+  font-size: 0.9rem;
+  line-height: 1.52;
+  letter-spacing: 0;
+}
+.sage-health-word { font-size: 0.89rem; line-height: 1.58; }
+
+/* Oswald has no real italic and no small caps, so nothing below was relying on
+   them; the only thing to restate is the tabular figures, which the system faces
+   support and which the stat rows depend on to stop numbers jittering. */
+.sage-attach-size,
+.sage-msg time { font-variant-numeric: tabular-nums; }

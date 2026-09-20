@@ -146,7 +146,10 @@ const JS_FILES = [
   'src/js/script.js',
   'src/js/notifications.js',
   'src/js/sage-scheduler.js',
+  'src/js/sage-memory.js',
+  'src/js/sage-tools.js',
   'src/js/sage-ai.js',
+  'src/js/sage-autofill.js',
   'src/js/sage-ui.js',
   'src/js/home3d.js',
   'src/js/docs3d.js',
@@ -171,12 +174,23 @@ for (const rel of JS_FILES) {
   // Match the `from` clause directly rather than anchoring on the `import`
   // keyword with a bounded gap: minified bundles put thousands of characters
   // between the two, which would push the specifier out of any fixed window.
-  eachMatch(text, /\bfrom\s*['"]([^'"]+)['"]/g, (m, line) =>
-    record({ file: rel, line, ref: m[1], base: fileDir, kind: 'js-import' })
-  );
-  eachMatch(text, /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g, (m, line) =>
-    record({ file: rel, line, ref: m[1], base: fileDir, kind: 'js-dynamic-import' })
-  );
+  //
+  // Every module specifier in this repo is a relative path — there is no bundler
+  // and no node_modules — so anything not starting with . or / is not one. That
+  // guard matters: the bare `from\s*['"]` pattern also matches ordinary prose
+  // that happens to end a string with the word "from", e.g.
+  //   'Get the id from ' + 'list_media first.'
+  // which was reported as a dangling import of " + ".
+  const isModuleSpecifier = (v) => /^[./]/.test(v);
+
+  eachMatch(text, /\bfrom\s*['"]([^'"]+)['"]/g, (m, line) => {
+    if (!isModuleSpecifier(m[1])) return;
+    record({ file: rel, line, ref: m[1], base: fileDir, kind: 'js-import' });
+  });
+  eachMatch(text, /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g, (m, line) => {
+    if (!isModuleSpecifier(m[1])) return;
+    record({ file: rel, line, ref: m[1], base: fileDir, kind: 'js-dynamic-import' });
+  });
 
   // 4b. importScripts('...') → worker-relative (worker lives at repo root)
   eachMatch(text, /importScripts\(\s*['"]([^'"]+)['"]/g, (m, line) =>
