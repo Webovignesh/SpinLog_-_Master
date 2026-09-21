@@ -3319,34 +3319,44 @@ function drawCoverToThumb(media, vw, vh) {
   canvas.width = HISTORIC_THUMB_W;
   canvas.height = HISTORIC_THUMB_H;
   const ctx = canvas.getContext('2d');
-  if (!ctx || !vw || !vh) return null;
+  if (!ctx || !vw || !vh) return Promise.resolve(null);
   const scale = Math.max(HISTORIC_THUMB_W / vw, HISTORIC_THUMB_H / vh);
   const dw = vw * scale;
   const dh = vh * scale;
   ctx.drawImage(media, (HISTORIC_THUMB_W - dw) / 2, (HISTORIC_THUMB_H - dh) / 2, dw, dh);
+  // Both shapes from the one canvas: the blob uploads to storage for every
+  // device, the data URL seeds this device's frame cache so the first render
+  // paints instantly with zero network.
   return new Promise(resolve => {
+    let dataUrl = null;
+    try { dataUrl = canvas.toDataURL('image/jpeg', 0.7); } catch { dataUrl = null; }
     try {
-      canvas.toBlob(b => resolve(b), 'image/jpeg', 0.7);
+      canvas.toBlob(b => resolve(b ? { blob: b, dataUrl } : null), 'image/jpeg', 0.7);
     } catch { resolve(null); }
   });
 }
 
 function makeThumbFromImageFile(file) {
   return new Promise(resolve => {
+    let timer = null;
     try {
       const url = URL.createObjectURL(file);
       const img = new Image();
       img.onload = async () => {
         try {
-          const blob = await drawCoverToThumb(img, img.naturalWidth, img.naturalHeight);
-          resolve(blob);
+          const thumb = await drawCoverToThumb(img, img.naturalWidth, img.naturalHeight);
+          if (timer) clearTimeout(timer);
+          resolve(thumb);
         } catch { resolve(null); }
         finally { try { URL.revokeObjectURL(url); } catch {} }
       };
-      img.onerror = () => { try { URL.revokeObjectURL(url); } catch {} resolve(null); };
+      img.onerror = () => {
+        if (timer) clearTimeout(timer);
+        try { URL.revokeObjectURL(url); } catch {} resolve(null);
+      };
       img.src = url;
       // Never hang an upload on a thumb.
-      setTimeout(() => resolve(null), 6000);
+      timer = setTimeout(() => resolve(null), 6000);
     } catch { resolve(null); }
   });
 }
@@ -3367,8 +3377,8 @@ function makeThumbFromVideoFile(file) {
           // Seek slightly in so the first keyframe has decoded (else black).
           try { video.currentTime = 0.1; } catch {}
           await new Promise(r => setTimeout(r, 250));
-          const blob = await drawCoverToThumb(video, video.videoWidth, video.videoHeight);
-          finish(blob);
+          const thumb = await drawCoverToThumb(video, video.videoWidth, video.videoHeight);
+          finish(thumb);
         } catch { finish(null); }
         finally { try { URL.revokeObjectURL(url); } catch {} }
       };
@@ -3408,9 +3418,18 @@ async function uploadHistoricThumb(fileName, thumbBlob) {
 
 async function generateAndUploadHistoricThumb(file, fileName, type) {
   try {
-    const blob = await makeHistoricThumbBlob(file, type);
-    if (!blob) return false;
-    return await uploadHistoricThumb(fileName, blob);
+    const thumb = await makeHistoricThumbBlob(file, type);
+    if (!thumb || !thumb.blob) return false;
+    // Seed this device's frame cache FIRST, so the refresh below paints from
+    // cache instantly even if the storage upload is still in flight or fails.
+    // Other devices read the storage thumb once it lands.
+    try {
+      const thumbs = window.dkDocsThumbs;
+      if (thumbs && typeof thumbs.remember === 'function' && thumb.dataUrl) {
+        thumbs.remember(fileName, thumb.dataUrl);
+      }
+    } catch {}
+    return await uploadHistoricThumb(fileName, thumb.blob);
   } catch { return false; }
 }
 // Reused by the list fallback: an <img>/<video> already on screen is drawn
@@ -3419,9 +3438,9 @@ async function uploadThumbFromElement(fileName, media, kind) {
   try {
     const w = kind === 'video' ? media.videoWidth : media.naturalWidth;
     const h = kind === 'video' ? media.videoHeight : media.naturalHeight;
-    const blob = await drawCoverToThumb(media, w, h);
-    if (!blob) return false;
-    return await uploadHistoricThumb(fileName, blob);
+    const thumb = await drawCoverToThumb(media, w, h);
+    if (!thumb || !thumb.blob) return false;
+    return await uploadHistoricThumb(fileName, thumb.blob);
   } catch { return false; }
 }
 window.dkHistoricThumbName = historicThumbName;
@@ -8222,6 +8241,16 @@ window.setupCoverDateEditing = function() {
           if (t) signedUrls.delete(t);
         } catch {}
         persist();
+      },
+      /** Seed one frame (used at upload time, so first paint needs no network). */
+      remember(name, dataUrl) {
+        if (!name || !dataUrl || typeof dataUrl !== 'string') return;
+        try {
+          const map = store();
+          map.delete(name);
+          map.set(name, dataUrl);
+          persist();
+        } catch {}
       },
     };
   })();
