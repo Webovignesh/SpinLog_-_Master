@@ -4,8 +4,8 @@
   "description": "Track your bike's service history, documents, and insurance with ease.",
   "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#FB6900",
-  "theme_color": "#FB6900",
+  "background_color": "#E35D01",
+  "theme_color": "#E35D01",
   "orientation": "portrait-primary",
   "icons": [
     {
