@@ -24,7 +24,14 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
   <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;600&display=swap" rel="stylesheet">
   <link rel="manifest" href="manifest.json">
-  <meta name="theme-color" content="#050505">
+  <!-- The colour of the app's OWN top 48px, sampled from it, and the same value the
+       manifest's theme_color carries — so the status bar does not change colour when
+       the splash hands over to the page. It was #050505, a neutral near-black sitting
+       directly above a warm brown one: the backdrop layers are position:fixed and two
+       of the accent glows sit at the top of the viewport, so the strip under the status
+       bar is warm brown at every scroll position. #3d1908 is its per-channel median,
+       measured over the backdrop with the content hidden. -->
+  <meta name="theme-color" content="#3d1908">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">

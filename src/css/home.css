@@ -101,7 +101,7 @@
    Four explicit fixed layers instead of relying on where a block background
    happens to land in the painting order:
 
-     html            #050607        opaque base, painted below everything
+     html            #180e09        opaque base, painted below everything
      html::before    z-index -4     the photo as a plain CSS background
      #dkScene        z-index -3     the same photo, animated by three.js
      body::after     z-index -2     scrim + accent glows
@@ -126,9 +126,15 @@
    the photo squeaked through, but styles.css:1519 sets `html { background:#000 }`
    inside a phone media query, which cancels that hoist — body then painted
    straight over the canvas and the backdrop was invisible on mobile. */
+/* #180e09, and the point is that it is WARM. This was #050607, a cool near-black, and
+   it is the only layer on screen for the window between first paint and the bike photo
+   decoding — so on a slow cold start the app opened on a colour it never shows again.
+   This is the same value the manifest's background_color carries: the per-channel
+   median of the settled backdrop, which is the flat colour closest to it. Splash,
+   pre-decode frame and settled page are now one colour. See manifest.json. */
 html {
   color-scheme: dark;
-  background: #050607 !important;
+  background: #180e09 !important;
 }
 
 html::before {
