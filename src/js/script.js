@@ -1085,10 +1085,11 @@ window.dkBackfillMediaDates = async function dkBackfillMediaDates(options) {
   async function range(url, from, to) {
     try {
       const res = await fetch(url, { headers: { Range: `bytes=${from}-${to}` } });
-      // 206 is a real partial response. A 200 means the server ignored the header
-      // and sent everything, which is still usable — just bigger than asked for.
-      if (!res.ok && res.status !== 206) return null;
-      return await res.arrayBuffer();
+      // 206 is a real partial response. A 200 means the server ignored Range
+      // and would send the WHOLE file — accepting it is how a date backfill
+      // turns into a 200 MB egress spike, so refuse it instead of reading it.
+      if (res.status === 206) return await res.arrayBuffer();
+      return null;
     } catch { return null; }
   }
 
@@ -3097,6 +3098,15 @@ async function handleHistoricUpload(file, type, dropZone) {
     return;
   }
 
+  // Thumb is derived from the File in hand — zero egress. Fire-and-forget so
+  // a thumb failure never blocks the record. Future list views fetch the
+  // ~5 KB thumb instead of the 5-9 MB original.
+  try {
+    if (type === 'image' || type === 'video') {
+      generateAndUploadHistoricThumb(file, fileName, type).catch(() => {});
+    }
+  } catch {}
+
   // The bytes are in the bucket. What is left is the row, which is a different
   // failure with a different fix — and on a slow connection it is a wait of its own
   // rather than the tail of the previous one.
@@ -3260,6 +3270,145 @@ async function signHistoricMediaBatch(names) {
   return out;
 }
 window.dkSignHistoricMediaBatch = signHistoricMediaBatch;
+
+// ── Storage thumbnails: tiny files, not full downloads ─────────────────
+// The list used to paint each thumbnail by downloading the ORIGINAL object:
+// a 5-9 MB photo to fill a 144x112 box. Ten per page, on every new device,
+// is how a 205 MB egress spike happens with every file under 10 MB.
+//
+// Instead each upload writes a ~3-10 KB thumb next to the original:
+//
+//   <fileName>  ->  thumbs/<fileName>.jpg
+//
+// The list signs and fetches the thumb. The original is only touched when a
+// thumb is missing (old files), and then once — the frame captured is
+// uploaded for every future view on every device. No schema change: the name
+// derives from the original, so old rows work without a migration.
+const HISTORIC_THUMB_PREFIX = 'thumbs/';
+const HISTORIC_THUMB_W = 144;
+const HISTORIC_THUMB_H = 112;
+
+function historicThumbName(fileName) {
+  if (!fileName || typeof fileName !== 'string') return null;
+  if (fileName.startsWith(HISTORIC_THUMB_PREFIX)) return fileName;
+  // Storage keys are flat; strip any directory the caller passed so
+  // `a/b.jpg` and `b.jpg` cannot escape the prefix.
+  const base = fileName.split('/').pop();
+  if (!base) return null;
+  return `${HISTORIC_THUMB_PREFIX}${base}.jpg`;
+}
+
+function drawCoverToThumb(media, vw, vh) {
+  const canvas = document.createElement('canvas');
+  canvas.width = HISTORIC_THUMB_W;
+  canvas.height = HISTORIC_THUMB_H;
+  const ctx = canvas.getContext('2d');
+  if (!ctx || !vw || !vh) return null;
+  const scale = Math.max(HISTORIC_THUMB_W / vw, HISTORIC_THUMB_H / vh);
+  const dw = vw * scale;
+  const dh = vh * scale;
+  ctx.drawImage(media, (HISTORIC_THUMB_W - dw) / 2, (HISTORIC_THUMB_H - dh) / 2, dw, dh);
+  return new Promise(resolve => {
+    try {
+      canvas.toBlob(b => resolve(b), 'image/jpeg', 0.7);
+    } catch { resolve(null); }
+  });
+}
+
+function makeThumbFromImageFile(file) {
+  return new Promise(resolve => {
+    try {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = async () => {
+        try {
+          const blob = await drawCoverToThumb(img, img.naturalWidth, img.naturalHeight);
+          resolve(blob);
+        } catch { resolve(null); }
+        finally { try { URL.revokeObjectURL(url); } catch {} }
+      };
+      img.onerror = () => { try { URL.revokeObjectURL(url); } catch {} resolve(null); };
+      img.src = url;
+      // Never hang an upload on a thumb.
+      setTimeout(() => resolve(null), 6000);
+    } catch { resolve(null); }
+  });
+}
+
+function makeThumbFromVideoFile(file) {
+  return new Promise(resolve => {
+    let settled = false;
+    const finish = v => { if (!settled) { settled = true; resolve(v); } };
+    try {
+      const url = URL.createObjectURL(file);
+      const video = document.createElement('video');
+      video.muted = true;
+      video.playsInline = true;
+      video.preload = 'auto';
+      video.crossOrigin = 'anonymous';
+      video.onloadeddata = async () => {
+        try {
+          // Seek slightly in so the first keyframe has decoded (else black).
+          try { video.currentTime = 0.1; } catch {}
+          await new Promise(r => setTimeout(r, 250));
+          const blob = await drawCoverToThumb(video, video.videoWidth, video.videoHeight);
+          finish(blob);
+        } catch { finish(null); }
+        finally { try { URL.revokeObjectURL(url); } catch {} }
+      };
+      video.onerror = () => { try { URL.revokeObjectURL(url); } catch {} finish(null); };
+      video.src = url;
+      setTimeout(() => finish(null), 8000);
+    } catch { finish(null); }
+  });
+}
+
+async function makeHistoricThumbBlob(file, type) {
+  try {
+    const kind = String(type || file?.type || '').toLowerCase();
+    if (kind.includes('video')) return await makeThumbFromVideoFile(file);
+    if (kind.includes('image') || /\.(jpe?g|png|webp|gif|bmp)$/i.test(file?.name || '')) {
+      return await makeThumbFromImageFile(file);
+    }
+    return null;
+  } catch { return null; }
+}
+
+// Fire-and-forget: a missing thumb must never fail an upload or a list render.
+async function uploadHistoricThumb(fileName, thumbBlob) {
+  try {
+    if (!fileName || !thumbBlob) return false;
+    const thumbName = historicThumbName(fileName);
+    if (!thumbName) return false;
+    const { error } = await supabase.storage.from('historic-media').upload(thumbName, thumbBlob, {
+      contentType: 'image/jpeg',
+      cacheControl: '31536000',
+      upsert: true
+    });
+    if (error) return false;
+    return true;
+  } catch { return false; }
+}
+
+async function generateAndUploadHistoricThumb(file, fileName, type) {
+  try {
+    const blob = await makeHistoricThumbBlob(file, type);
+    if (!blob) return false;
+    return await uploadHistoricThumb(fileName, blob);
+  } catch { return false; }
+}
+// Reused by the list fallback: an <img>/<video> already on screen is drawn
+// down and uploaded, so the NEXT device never downloads the original.
+async function uploadThumbFromElement(fileName, media, kind) {
+  try {
+    const w = kind === 'video' ? media.videoWidth : media.naturalWidth;
+    const h = kind === 'video' ? media.videoHeight : media.naturalHeight;
+    const blob = await drawCoverToThumb(media, w, h);
+    if (!blob) return false;
+    return await uploadHistoricThumb(fileName, blob);
+  } catch { return false; }
+}
+window.dkHistoricThumbName = historicThumbName;
 
 window._historicMediaRows = new Map();
 const spinlogLazyState = { docsSetup: false, docsLoaded: false, serviceLoaded: false };
@@ -3529,6 +3678,12 @@ window._delHistoricUpload = async function(id, fileName, btn) {
         updatePopup('error', 'File delete failed: ' + storageError.message);
         return;
       }
+      // Best-effort: the tiny thumb next to the original. A missing thumb is
+      // fine — old files never had one.
+      try {
+        const t = (typeof historicThumbName === 'function' ? historicThumbName(fileName) : null);
+        if (t) await supabase.storage.from('historic-media').remove([t]);
+      } catch {}
       // Nothing to clean up in the database: the note and the date are columns on
       // the row that was just deleted, so they went with it. This only drops the
       // local copy so the table does not redraw them.
@@ -7902,11 +8057,23 @@ window.setupCoverDateEditing = function() {
     }
 
     // ── One slot ───────────────────────────────────────────────────────
-
-    async function fill(btn, signed) {
+    // Thumbs-first: the storage thumb is ~3-10 KB. The original is 5-9 MB.
+    // Order is: localStorage frame -> storage thumb -> edge transform ->
+    // original (once, then upload thumb for every future device).
+    async function fill(btn, signed, thumbSigned) {
       const name = btn.dataset.thumb;
       const kind = btn.dataset.thumbKind;
       if (!btn.isConnected) return;
+
+      // 1. Storage thumb covers both images and videos — it is always a jpeg.
+      if (thumbSigned) {
+        const t = (await probe(thumbSigned, true)) || (await probe(thumbSigned, false));
+        if (t && btn.isConnected) {
+          keepFrame(name, t, 'image');
+          paint(btn, t.currentSrc || t.src);
+          return;
+        }
+      }
 
       if (kind === 'video') {
         if (!videoFramesWelcome()) return;
@@ -7916,6 +8083,9 @@ window.setupCoverDateEditing = function() {
         // showing a frame and the <video> element is thrown away immediately rather
         // than sitting in the row holding a decoder open.
         keepFrame(name, video, 'video');
+        // One-time cost: this device paid for the original, every next device
+        // gets the tiny thumb instead.
+        try { uploadThumbFromElement(name, video, 'video').catch(() => {}); } catch {}
         const data = store().get(name);
         if (data) paint(btn, data, { cached: true });
         return;
@@ -7933,6 +8103,7 @@ window.setupCoverDateEditing = function() {
       if (!img) img = (await probe(signed, true)) || (await probe(signed, false));
       if (!img || !btn.isConnected) return;
       keepFrame(name, img, 'image');
+      try { uploadThumbFromElement(name, img, 'image').catch(() => {}); } catch {}
       paint(btn, img.currentSrc || img.src);
     }
 
@@ -7970,18 +8141,24 @@ window.setupCoverDateEditing = function() {
       if (!pending.length) return;
 
       // Reuse anything already signed this session before asking for more.
+      // Thumbs are signed in the same batch: `thumbs/<name>.jpg` (~5 KB) is
+      // what the list actually fetches; the original is fallback only.
       const needed = pending.map(b => b.dataset.thumb).filter(n => !freshUrl(n));
-      if (needed.length) {
+      const thumbNeeded = pending
+        .map(b => (typeof historicThumbName === 'function' ? historicThumbName(b.dataset.thumb) : null))
+        .filter(n => n && !freshUrl(n));
+      const allNeeded = [...new Set([...needed, ...thumbNeeded])];
+      if (allNeeded.length) {
         const signer = window.dkSignHistoricMediaBatch;
         let batch = null;
         if (typeof signer === 'function') {
-          try { batch = await signer(needed); } catch { batch = null; }
+          try { batch = await signer(allNeeded); } catch { batch = null; }
         } else if (typeof window.dkGetHistoricMediaUrl === 'function') {
           // The audit and the harness replace the single-file signer, so this path has
           // to work on its own.
           batch = new Map();
-          const urls = await Promise.all(needed.map(n => window.dkGetHistoricMediaUrl(n).catch(() => null)));
-          needed.forEach((n, i) => { if (urls[i]) batch.set(n, urls[i]); });
+          const urls = await Promise.all(allNeeded.map(n => window.dkGetHistoricMediaUrl(n).catch(() => null)));
+          allNeeded.forEach((n, i) => { if (urls[i]) batch.set(n, urls[i]); });
         }
         const at = Date.now();
         if (batch) for (const [name, url] of batch) signedUrls.set(name, { url, at });
@@ -7989,7 +8166,10 @@ window.setupCoverDateEditing = function() {
 
       await Promise.all(pending.map(btn => {
         const url = freshUrl(btn.dataset.thumb);
-        return url ? fill(btn, url) : null;
+        if (!url) return null;
+        const tName = (typeof historicThumbName === 'function' ? historicThumbName(btn.dataset.thumb) : null);
+        const thumbUrl = tName ? freshUrl(tName) : null;
+        return url ? fill(btn, url, thumbUrl) : null;
       }));
     }
 
@@ -8021,6 +8201,10 @@ window.setupCoverDateEditing = function() {
         if (!name) return;
         store().delete(name);
         signedUrls.delete(name);
+        try {
+          const t = (typeof historicThumbName === 'function' ? historicThumbName(name) : null);
+          if (t) signedUrls.delete(t);
+        } catch {}
         persist();
       },
     };
