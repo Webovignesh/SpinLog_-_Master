@@ -212,11 +212,14 @@ Each is idempotent — paste it into the Supabase SQL editor and run it once:
 | `sage_memory.sql` | Sage's memory bank: facts about the rider, her rolling recap, relationship counters and conversation episodes. |
 | `gemini_keys.sql` | Encrypted backup of the Gemini API key ring. Optional — read the header before running it. |
 | `cloud_routing.sql` | Routes the last of the device-only data through the cloud: two columns on `media_files`, three more `record_type` values in `sage_memory`, and the DELETE policies those need. **No new tables.** Run this to make a laptop and a phone agree. |
+| `park_locations.sql` | Where the bike was left, in a table of its own. Moves the spots out of `sage_memory`, removes the old rows, and gives parking the columns it always wanted. |
+| `media_taken_at.sql` | `media_files.taken_at timestamptz` — the full instant an upload was recorded, so the Uploaded column can show a clock reading and not just a day. One nullable column, no seed, nothing overwritten. |
 
-All three degrade quietly until run. Cover dates fall back to localStorage and
+Every one of them degrades quietly until run. Cover dates fall back to localStorage and
 then to the `data-due` values in `index.html`; Sage's memory falls back to
 localStorage alone, which is where it lived before the table existed; the key
-ring simply stays on the device. Nothing breaks, but her memory does not survive
+ring simply stays on the device; park spots keep living in `sage_memory`; uploads show a
+day with no time. Nothing breaks, but her memory does not survive
 clearing site data or moving to another device until `sage_memory.sql` has been
 run.
 
@@ -234,7 +237,7 @@ four things that were not.
 | Park history | `sage_memory`, `record_type = 'park'` | One row per spot |
 | Conversation | `sage_memory`, `record_type = 'message'` | One row per message |
 | Purchase-date override | `sage_memory`, `record_type = 'setting'` | One row per setting |
-| Upload notes and dates | `media_files.notes`, `media_files.historic_date` | Columns on the row they describe |
+| Upload notes, days and times | `media_files.notes`, `.historic_date`, `.taken_at` | Columns on the row they describe |
 | Custom document cards | Device cache only | Derived from `vehicle_documents`; already crosses devices through it |
 | Notification queue, cooldowns, limits | IndexedDB | The service worker reads these with the app closed and cannot see localStorage |
 | Vault passphrase | Device only, never sent | It is the only thing making the encrypted key backup private |
@@ -364,37 +367,135 @@ of `script.js` owns this. Four things about it are load-bearing:
 
 ### An upload is dated from the file, not from the clock
 
-`media_files` carries two dates and they are not interchangeable. `upload_date` is
-when the row was written and is shown nowhere. `historic_date` is when the file is
-*from*, and that is what the Uploaded column shows, what the date filter matches and
-what the table sorts on.
+`media_files` carries three dates and they are not interchangeable:
+
+| Column | Type | What it means |
+| --- | --- | --- |
+| `upload_date` | `timestamptz` | When the row was written. Shown nowhere. |
+| `historic_date` | `date` | What **day** the file is from. The filter matches on it and the table sorts on it. |
+| `taken_at` | `timestamptz` | The full **instant**, when the metadata knew one. This is what puts a clock reading under the date. |
+
+The Uploaded column prefers `taken_at`, falls back to `historic_date`, and falls back
+again to `upload_date` — ranked by how much each one knows rather than by where it came
+from. The instant only wins while it still *agrees* with the day: they are written
+together so normally they cannot disagree, but a row corrected by hand in the SQL editor
+can have a new day and a stale instant, and there the correction is the better fact.
+
+`taken_at` arrived late, and the reason is worth recording. `historic_date` is a `date`,
+so every clock reading the metadata carried was truncated to fit it — and because the
+Uploaded cell prints the day over the time, **dating a row is what made its time line
+disappear**. The time it had been showing before that came from `upload_date`: the minute
+the file arrived, dressed up as the minute it was recorded. Run
+`supabase/media_taken_at.sql` once to add the column. Until you do, uploads show a day
+with no time and `cloud-store.js` logs one line naming the file.
+
+That migration deliberately contains **no seed**. Filling `taken_at` from
+`historic_date` at midday would give every existing row a fabricated clock reading,
+which is the same mistake as the `upload_date` one with a new column. It starts null and
+stays null until something actually knows — a new upload, or the backfill below.
 
 Nothing used to fill the second one. The row was stamped with `new Date()` and the
 notes sheet showed no date field during an upload, so in a section called *Historic*
 Audio & Images — where by definition most of it is older than the app — a 2024 ride
 photo was filed under today with nowhere to say otherwise.
 
-`dkFileDate(file)` in `script.js` works it out, from three sources, best first,
-because each is wrong in a different way:
+`dkMediaDate.detail(file)` returns `{ date, at, source }`: the local day, the full
+instant, and which of the four readers below answered. **`at` is null unless a real
+clock reading was found** — that is the rule the whole feature rests on. A bare date in
+a filename and a `lastModified` both know a day and no time, and the noon they get
+internally is arithmetic. Presenting it would claim a precision the file never had, so
+those rows show one line instead of two.
 
-1. **EXIF `DateTimeOriginal`.** The only one that means "when the shutter opened".
-   JPEG only, and absent from anything a messaging app has re-encoded. Read from the
-   first 128KB rather than the whole file.
-2. **The filename.** Cameras and messaging apps both stamp it, and this is the source
+`dkMediaDate` in `script.js` works it out, from four sources, best first, because
+each is wrong in a different way:
+
+1. **EXIF `DateTimeOriginal`.** The only thing that means "when the shutter opened".
+   JPEG only, and absent from anything a messaging app has re-encoded.
+2. **The ISO-BMFF `mvhd` creation time.** MP4, M4A and MOV all carry one, which
+   matters here because half this archive is engine-sound recordings whose filenames
+   give the mileage rather than the date. Note the epoch is **1904-01-01 UTC**, not
+   1970 — sixty-six years, which is the kind of off-by-a-lifetime that looks like a
+   working parser until you read a date.
+3. **The filename.** Cameras and messaging apps both stamp it, and this is the source
    that survives everything else. `20260320_125133.jpg` and `WhatsApp Video
    2026-04-19 at 3.11.15 PM.mp4` are both in this archive, and for the second one it
    is the *only* correct answer — WhatsApp rewrites `lastModified` to the moment you
-   downloaded the file.
-3. **`file.lastModified`.** Always there, and for anything copied between devices it
+   downloaded the file. Human forms like `27th june` are read too, taking the year
+   from a reference date, because a person writing that means the one just gone.
+4. **`file.lastModified`.** Always there, and for anything copied between devices it
    is the copy time. A floor, not a first choice.
 
 Anything before 1995 or in the future is rejected rather than used: both happen, from
-a device with a wrong clock and from a filename whose digits merely look like a date.
+a device with a wrong clock, from a filename whose digits merely look like a date, and
+from an `mvhd` box full of zeroes, which decodes to 1904.
 
-The answer is a suggestion, not a decision. It arrives pre-filled in the date field
-of the sheet the upload already opens, so correcting it costs one edit and no extra
-step, and the label says **Taken on** rather than "Uploaded on" because that is the
-question being answered.
+The reader is split into `fromBytes` and `fromName` so the two callers can share it.
+An upload has a `File` in hand; the backfill below has only a range of bytes fetched
+over HTTP. Neither should carry its own copy of an EXIF parser.
+
+On an upload the answer is a suggestion, not a decision. It arrives pre-filled in the
+**Date** and **Time** fields of the sheet the upload already opens, so correcting it
+costs one edit and no extra step, and the label says **Taken on** rather than "Uploaded
+on" because that is the question being answered.
+
+The time field is optional, and emptying it is a real answer rather than a blank one: it
+says *only the day is known for this one*, which is how you throw away a reading from a
+camera with a wrong clock, and the row then shows a day with no second line. Clearing it
+deliberately does **not** clear the day — they are separate facts and the day is the one
+that survives. The same sheet edits both, reached by holding a row, and correcting the
+day carries the clock reading onto the new day rather than dropping it, because the
+correction is almost always off-by-one: a file recorded at 11pm on the 26th that every
+other reader agrees is the 27th.
+
+#### Dating the uploads that are already in the bucket
+
+Everything uploaded before any of this existed has `historic_date` null and falls back
+to showing its upload date. The metadata is still there — it is just inside a file in a
+private bucket rather than in a `File` object.
+
+```js
+await dkBackfillMediaDates()                // prints a table, writes nothing
+await dkBackfillMediaDates({ apply: true }) // writes the ones it is sure of
+```
+
+It signs a read URL per row and pulls 256KB with an HTTP `Range` request — from the
+front, and then from the back when that is not where the encoder put the `moov` box,
+which for a phone camera it usually is not. Nothing is downloaded whole.
+
+**The dry run is the default**, because this edits real rows in a live database and
+every proposed value should be visible before any of it is committed. The table names
+the *source* as well as the date, since `exif`, `mvhd` and `name` do not deserve equal
+trust and only the person reading it knows which files came through a messaging app.
+
+Three rules it will not break:
+
+- A row that already has a `taken_at` is never touched, and its file is not even
+  fetched. An instant read from the file is the most complete answer there is.
+- A row with a `historic_date` and no `taken_at` **is** re-read, but only its time can be
+  added. If the metadata disagrees about the day, the stored day wins and the clock
+  reading is moved onto it — a correction someone made on purpose is not up for revision.
+- A row whose date cannot be worked out is left null rather than being given its upload
+  date, because writing a guess turns "unknown" into "wrong" and hides it from the next
+  attempt. Same for the time: a source that only knew a day leaves `taken_at` null.
+
+That second rule is what makes it worth running again after the `taken_at` migration.
+The first pass filled the days; the second fills the times, and it skips nothing it
+has already answered completely.
+
+It writes through `dkCloudStore` rather than at the table directly —
+`setTakenAt()` for anything with a clock reading, which writes the instant and the day
+it falls on, and `setUploadDate()` for the day-only rows, which leaves `taken_at`
+untouched so a file that never reported a time is not handed one. Those functions
+already do both halves, the row and the in-memory cache the table renders from, so
+going around them meant one PATCH here and a second identical one to fix the cache:
+twenty round trips for ten rows.
+
+Both selects use `select('*')` rather than a column list, which is the opposite of the
+usual advice and deliberate. These columns arrived in three separate migrations, so any
+explicit list is a list of assumptions about the schema — and naming a column that is
+missing does not degrade, it 400s the whole read. The first version asked for `taken_at`
+and retried without it, which worked but put a red 400 in the console on every boot until
+the migration was run: a feature that is merely not enabled yet, presented as a fault.
 
 ### Deleting anything
 

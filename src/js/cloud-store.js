@@ -86,7 +86,8 @@ window.dkCloudStore = (function () {
     chat: [],          // [{ role, text, at, file }] oldest first
     settings: {},      // { ageFrom: '2024-06-27' }
     notes: {},         // { [mediaRowId]: 'text' }
-    dates: {},         // { [mediaRowId]: '2025-04-02' }
+    dates: {},         // { [mediaRowId]: '2025-04-02' }        the DAY the rider set
+    takenAt: {},       // { [mediaRowId]: ISO instant }         what the FILE reported
   };
 
   const listeners = new Set();
@@ -670,6 +671,19 @@ window.dkCloudStore = (function () {
     return cache.dates[String(id)] || '';
   }
 
+  /**
+   * The full instant the file was recorded, as an ISO string, or ''.
+   *
+   * Separate from uploadDate() because the two columns behind them are different
+   * types and mean different things: historic_date is a DATE the rider set, taken_at
+   * is a TIMESTAMP the file itself reported. The table prefers this one and falls
+   * back to the other, so a hand correction survives and a row with real metadata
+   * gets to show a clock reading.
+   */
+  function takenAt(id) {
+    return cache.takenAt[String(id)] || '';
+  }
+
   async function setNote(id, text) {
     const key = String(id);
     cache.notes[key] = text || '';
@@ -682,6 +696,51 @@ window.dkCloudStore = (function () {
     cache.dates[key] = isoDate || '';
     notify('dates');
     return writeMedia(id, { historic_date: isoDate || null });
+  }
+
+  /**
+   * @param {string|null} stamp An ISO instant, or null to clear it.
+   *
+   * Writes BOTH columns, and the reason is that they answer different questions and
+   * the table reads both. taken_at is the instant; historic_date is the day, which
+   * the date filter matches on and which stays correct for anyone whose database
+   * has not had media_taken_at.sql run against it yet.
+   *
+   * The day is derived LOCALLY rather than from the ISO string. Slicing the first
+   * ten characters off a UTC instant is the off-by-a-day this app has already been
+   * bitten by twice: 2025-06-27T19:30 in India is 14:00 UTC on the 27th, but
+   * 2025-06-27T02:30 is the 26th in UTC and the 27th on the phone.
+   */
+  async function setTakenAt(id, stamp) {
+    const key = String(id);
+    const when = stamp ? new Date(stamp) : null;
+    const good = when && !Number.isNaN(when.getTime()) ? when : null;
+
+    cache.takenAt[key] = good ? good.toISOString() : '';
+
+    // CLEARING THE INSTANT DOES NOT CLEAR THE DAY.
+    //
+    // They are separate facts and the day is the one that survives. A rider who
+    // empties the time field in the edit sheet is saying "only the day is known
+    // for this one", not "forget when it is from" — and the first version of this
+    // wrote historic_date: null alongside, so emptying one input blanked the whole
+    // Uploaded cell and lost a date nothing else could recover.
+    if (!good) {
+      notify('dates');
+      return writeMedia(id, { taken_at: null });
+    }
+
+    const day = `${good.getFullYear()}-${String(good.getMonth() + 1).padStart(2, '0')}`
+      + `-${String(good.getDate()).padStart(2, '0')}`;
+    cache.dates[key] = day;
+    notify('dates');
+
+    // Sent as two patches rather than one, because taken_at may not exist yet. A
+    // single object would take the day down with the timestamp on any database that
+    // has not run the migration, and the day is the part that already worked.
+    const dayOk = await writeMedia(id, { historic_date: day });
+    const stampOk = await writeMedia(id, { taken_at: good.toISOString() });
+    return dayOk || stampOk;
   }
 
   async function writeMedia(id, patch) {
@@ -702,6 +761,7 @@ window.dkCloudStore = (function () {
     const key = String(id);
     delete cache.notes[key];
     delete cache.dates[key];
+    delete cache.takenAt[key];
     notify('notes');
   }
 
@@ -860,18 +920,48 @@ window.dkCloudStore = (function () {
       if (oldTurns.length) deleteKeys(oldTurns).catch(() => {});
     }
 
-    // Notes and dates come from the uploads themselves.
-    const media = await supabase.from(MEDIA_TABLE).select('id, notes, historic_date');
+    // Notes, days and instants come from the uploads themselves.
+    //
+    // SELECT * AND NOT A COLUMN LIST, and that is the opposite of the usual advice.
+    //
+    // These three columns arrived in three different migrations, so any explicit list
+    // is a list of assumptions about which of them a given database has — and naming
+    // one that is missing does not degrade, it 400s the WHOLE read and takes the
+    // other two down with it. The first attempt at this asked for `taken_at` and
+    // retried without it, which worked but put a red 400 in the console on every
+    // single boot until the migration was run: a feature that is merely not enabled
+    // yet, presented as a fault.
+    //
+    // `*` cannot be wrong about the schema. It costs the columns the docs table also
+    // fetches — file_name, file_size, content_type — which for a table this size is
+    // nothing next to one guaranteed-clean read.
+    const media = await supabase.from(MEDIA_TABLE).select('*');
     if (!media.error) {
       const notes = {};
       const dates = {};
+      const takenAtMap = {};
       (media.data || []).forEach(row => {
         if (!row) return;
         if (row.notes) notes[String(row.id)] = row.notes;
         if (row.historic_date) dates[String(row.id)] = String(row.historic_date).slice(0, 10);
+        if (row.taken_at) takenAtMap[String(row.id)] = String(row.taken_at);
       });
       cache.notes = notes;
       cache.dates = dates;
+      cache.takenAt = takenAtMap;
+
+      // PostgREST returns every column as a key, null included, so the key being
+      // absent is the column being absent. With no rows at all there is nothing to
+      // look at and nothing worth saying.
+      const sample = (media.data || [])[0];
+      if (sample && !('taken_at' in sample)) {
+        console.warn('[SpinLog] ☁️ media_files has no taken_at column, so uploads show a '
+          + 'day with no time — run supabase/media_taken_at.sql once.');
+      }
+      if (sample && !('historic_date' in sample)) {
+        console.warn('[SpinLog] ☁️ media_files has no historic_date column — '
+          + 'run supabase/cloud_routing.sql once.');
+      }
     } else if (isMissing(media.error)) {
       console.warn('[SpinLog] ☁️ media_files is missing the notes / historic_date '
         + 'columns — run supabase/cloud_routing.sql once.');
@@ -912,6 +1002,6 @@ window.dkCloudStore = (function () {
     // settings
     setting, setSetting,
     // uploads
-    note, uploadDate, setNote, setUploadDate, forgetUpload,
+    note, uploadDate, takenAt, setNote, setUploadDate, setTakenAt, forgetUpload,
   };
 })();

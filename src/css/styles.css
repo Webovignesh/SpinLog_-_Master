@@ -15610,15 +15610,48 @@ select.sage-set-input option { background: #181818; color: #fff; }
   margin: 14px 0 0;
   text-align: left;
 }
-.docs-notes-date > span {
+.docs-notes-date .docs-notes-date-head {
   font-family: 'Blender Pro', 'Oswald', Arial, sans-serif;
   font-size: 0.68rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.5);
 }
-.docs-notes-date > span i { color: var(--orange); margin-right: 5px; }
-.docs-notes-date input[type="date"] {
+.docs-notes-date .docs-notes-date-head i { color: var(--orange); margin-right: 5px; }
+
+/* Date and time side by side, and the date gets the room: a time is five characters
+   and a date input carries a picker button. 1.6fr/1fr rather than two equal columns,
+   which left the date field clipping its own placeholder at 360px. */
+.docs-notes-when {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr;
+  gap: 8px;
+  align-items: end;
+}
+.docs-notes-when-part {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.docs-notes-when-part > span {
+  font-family: 'Blender Pro', 'Oswald', Arial, sans-serif;
+  font-size: 0.62rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  /* .56 not .5: this is the smallest text in the sheet and the two-tier contrast
+     floor puts anything under 0.75rem on the higher of the two. */
+  color: rgba(255, 255, 255, 0.56);
+}
+/* "optional" is a note on the label rather than part of it, so it is dimmer than the
+   label and separated from it. No text-transform override: the face has no lowercase
+   to switch to, which is why the middot in the markup is carrying the distinction. */
+.docs-notes-when-part > span em {
+  font-style: normal;
+  color: rgba(255, 255, 255, 0.5);
+}
+.docs-notes-date input[type="date"],
+.docs-notes-date input[type="time"] {
   width: 100%;
   min-height: 46px;
   padding: 0 14px;
@@ -15629,10 +15662,23 @@ select.sage-set-input option { background: #181818; color: #fff; }
   font-family: 'Oswald', Arial, sans-serif;
   font-size: 0.9rem;
 }
-.docs-notes-date input[type="date"]:focus {
+.docs-notes-date input[type="date"]:focus,
+.docs-notes-date input[type="time"]:focus {
   outline: none;
   border-color: var(--orange);
   box-shadow: 0 0 0 3px rgba(251, 105, 0, 0.15);
+}
+/* The time input's own clear/spin affordances are Chrome's, and on a dark field they
+   render as a near-invisible grey. Same treatment the date picker indicator already
+   gets further up this file. */
+.docs-notes-date input[type="time"]::-webkit-calendar-picker-indicator {
+  filter: invert(1) opacity(0.55);
+  cursor: pointer;
+}
+@media (max-width: 380px) {
+  /* Below this the two fields together cannot hold a date picker and a 12-hour time
+     without one of them clipping, so they stack. */
+  .docs-notes-when { grid-template-columns: 1fr; }
 }
 
 /* ════════════════════════════════════════════════════════════════════════

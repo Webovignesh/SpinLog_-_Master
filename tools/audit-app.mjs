@@ -546,6 +546,63 @@ const browser = await chromium.launch();
     ok('and falls back to lastModified', dates.plain === '2025-11-06', String(dates.plain));
     ok('and refuses a date in the future', dates.future === null, String(dates.future));
 
+    // ── THE TIME, which is the half that used to be thrown away ──
+    //
+    // historic_date is a `date`, so every clock reading the metadata carried was
+    // truncated to fit it — and because the Uploaded column prints the day over the
+    // time, dating a row is what made its time line disappear. taken_at holds the
+    // instant, and the rule that matters is that it stays NULL unless a real reading
+    // was found. A day plus a default noon is not a time.
+    const clocks = await page.evaluate(async () => {
+      const mk = (name, ms, type) =>
+        new File([new Uint8Array([1, 2, 3])], name, { type, lastModified: ms });
+      const d = window.dkMediaDate;
+      if (!d || typeof d.detail !== 'function') return { missing: true };
+      const local = (iso) => {
+        if (!iso) return null;
+        const x = new Date(iso);
+        return `${String(x.getHours()).padStart(2, '0')}:${String(x.getMinutes()).padStart(2, '0')}`;
+      };
+      const timed = await d.detail(mk('WhatsApp Video 2026-04-19 at 3.11.15 PM.mp4', Date.now(), 'video/mp4'));
+      const camera = await d.detail(mk('20260320_125133.jpg', Date.now(), 'image/jpeg'));
+      const bare = await d.detail(mk('Screenshot 2026-04-19.png', Date.now(), 'image/png'));
+      const modOnly = await d.detail(mk('1000013060.mp4', Date.UTC(2025, 10, 6, 8, 11), 'video/mp4'));
+      return {
+        timed: { date: timed.date, clock: local(timed.at), source: timed.source },
+        camera: { date: camera.date, clock: local(camera.at) },
+        bare: { date: bare.date, at: bare.at, source: bare.source },
+        modOnly: { date: modOnly.date, at: modOnly.at, source: modOnly.source },
+        // The two halves of the edit sheet's time field, round-tripped.
+        roundTrip: typeof historicStampFrom === 'function' && typeof historicClockOf === 'function'
+          ? historicClockOf(historicStampFrom('2025-06-27', '07:05'))
+          : null,
+        // A blank time is not midnight. It is "nobody knows", and it has to stay
+        // distinguishable from a file that really was recorded at 00:00.
+        blankIsNotMidnight: typeof historicStampFrom === 'function'
+          ? historicStampFrom('2025-06-27', '') === '' && historicStampFrom('2025-06-27', '00:00') !== ''
+          : null,
+        // Moving a corrected day must not move the clock reading.
+        moved: typeof historicStampOnDay === 'function'
+          ? local(historicStampOnDay(new Date(2025, 5, 26, 23, 14, 0).toISOString(), '2025-06-27'))
+          : null,
+      };
+    });
+    ok('dkMediaDate.detail reads a clock reading out of a filename that has one',
+      clocks.timed?.clock === '15:11', JSON.stringify(clocks.timed));
+    ok('and out of a camera timestamp', clocks.camera?.clock === '12:51', JSON.stringify(clocks.camera));
+    ok('and leaves the time null for a bare date',
+      clocks.bare?.date === '2026-04-19' && clocks.bare?.at === null, JSON.stringify(clocks.bare));
+    ok('and null for a lastModified, which is a copy time',
+      clocks.modOnly?.date === '2025-11-06' && clocks.modOnly?.at === null, JSON.stringify(clocks.modOnly));
+    ok('the edit sheet round-trips a time without drifting', clocks.roundTrip === '07:05',
+      String(clocks.roundTrip));
+    ok('an empty time field is not midnight', clocks.blankIsNotMidnight === true,
+      String(clocks.blankIsNotMidnight));
+    ok('correcting the day keeps the clock reading', clocks.moved === '23:14', String(clocks.moved));
+    ok('the cloud store can read and write taken_at', await page.evaluate(() =>
+      typeof window.dkCloudStore?.takenAt === 'function'
+      && typeof window.dkCloudStore?.setTakenAt === 'function'));
+
     // End to end: the sheet the upload opens has to arrive with it filled in.
     await goToSection(page, 'docs');
     const sheet = await page.evaluate(async () => {
@@ -560,11 +617,18 @@ const browser = await chromium.launch();
       await new Promise(r => setTimeout(r, 1100));
       const field = document.getElementById('historicNotesDateField');
       const dateEl = document.getElementById('historicNotesDate');
+      const timeEl = document.getElementById('historicNotesTime');
       return {
         open: document.getElementById('historicNotesModal')?.classList.contains('show'),
         shown: field ? !field.hasAttribute('hidden') : false,
         value: dateEl?.value || null,
         max: dateEl?.max || null,
+        time: timeEl?.value || null,
+        // Two inputs, two labels. A single <label> around both would name the time
+        // field "Taken on" as well, which is the date's name.
+        labelled: !!timeEl?.closest('label') && timeEl?.closest('label')
+          !== dateEl?.closest('label'),
+        timeRequired: timeEl?.required ?? null,
       };
     });
     ok('the upload sheet shows the date field', sheet.skip === true || (sheet.open && sheet.shown),
@@ -572,6 +636,11 @@ const browser = await chromium.launch();
     ok('pre-filled from the file itself', sheet.skip === true || sheet.value === '2026-03-20',
       String(sheet.value));
     ok('and it will not accept a future date', sheet.skip === true || !!sheet.max, String(sheet.max));
+    ok('the time comes through too', sheet.skip === true || sheet.time === '12:51', String(sheet.time));
+    ok('and it has a label of its own', sheet.skip === true || sheet.labelled === true,
+      String(sheet.labelled));
+    ok('and is optional, because not every file knows one',
+      sheet.skip === true || sheet.timeRequired === false, String(sheet.timeRequired));
     // Leave nothing open for the checks that follow.
     await press('and the sheet cancels cleanly', () => page.evaluate(() =>
       document.getElementById('historicNotesSkip')?.click()));

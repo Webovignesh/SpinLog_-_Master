@@ -352,44 +352,86 @@ window.dkSlideOpen = function dkSlideOpen(el, ms = 190, shift) {
 // everything else in this archive — the point of "Historic Audio & Images" is that
 // most of it is older than the app.
 //
-// Three sources, best first, because each is wrong in a different way:
+// FOUR SOURCES, best first, because each is wrong in a different way:
 //
-//   1. EXIF DateTimeOriginal. The only one that means "when the shutter opened".
+//   1. EXIF DateTimeOriginal. The only thing that means "when the shutter opened".
 //      JPEG only, and absent from anything re-encoded by a messaging app.
 //
-//   2. The FILENAME. Cameras and messaging apps both stamp it, and this is the one
+//   2. The ISO-BMFF creation time, from the `mvhd` box. MP4, M4A and MOV all carry
+//      one, which matters here because half this archive is engine-sound recordings
+//      whose filenames say the mileage rather than the date.
+//
+//   3. The FILENAME. Cameras and messaging apps both stamp it, and this is the one
 //      that survives everything else: `20260320_125133.jpg` and `WhatsApp Video
 //      2026-04-19 at 3.11.15 PM.mp4` are both in this archive, and for the second
 //      one it is the ONLY correct source — WhatsApp rewrites lastModified to the
-//      moment you downloaded it.
+//      moment you downloaded it. Human forms like "27th june" are read too, with
+//      the year taken from a reference date, because a person writing that means
+//      the one that has just happened.
 //
-//   3. file.lastModified. Always present, and for a file copied between devices it
+//   4. file.lastModified. Always present, and for a file copied between devices it
 //      is the copy time. Last resort rather than first.
 //
-// Returns a local ISO date string, or null. Never throws and never rejects: a date
-// that cannot be worked out has to leave the field empty for the user to fill,
-// not break the upload.
+// The reader is split so both callers can share it: an upload has a File in hand,
+// while the backfill for files already in the bucket has only a range of bytes
+// fetched over HTTP. Neither should have its own copy of an EXIF parser.
 // ════════════════════════════════════════════════════════════════════════
-window.dkFileDate = async function dkFileDate(file) {
-  if (!file) return null;
+window.dkMediaDate = (function () {
+  'use strict';
 
-  const iso = (d) => {
+  const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun',
+    'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+  /**
+   * A Date, or null if it is not one worth believing.
+   *
+   * Both ends of the window are load-bearing. Nothing here predates digital
+   * cameras, and nothing in an archive of things that have already happened is in
+   * the future — and both DO turn up: a device with a flat battery and a wrong
+   * clock, a filename whose digits merely look like a date, and an `mvhd` box full
+   * of zeroes, which decodes to 1904.
+   */
+  function ok(d) {
     if (!d || Number.isNaN(d.getTime())) return null;
-    // Nothing from the future, and nothing from before digital cameras. Both
-    // happen: a device with a wrong clock, and a filename whose digits merely
-    // look like a date.
     const year = d.getFullYear();
     if (year < 1995 || d.getTime() > Date.now() + 86400000) return null;
-    return `${year}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  };
+    return d;
+  }
 
-  // ── 1. EXIF ──────────────────────────────────────────────────────────
-  const fromExif = async () => {
-    if (!/^image\/jpe?g$/i.test(file.type || '') && !/\.jpe?g$/i.test(file.name || '')) return null;
-    // 128KB is well past where the APP1 block lives, and avoids reading a 10MB
-    // photo into memory to find twenty bytes.
-    const buf = await file.slice(0, 131072).arrayBuffer();
-    const view = new DataView(buf);
+  /** The LOCAL calendar day, as YYYY-MM-DD. Never toISOString().slice(10). */
+  function iso(d) {
+    const good = ok(d);
+    if (!good) return null;
+    return `${good.getFullYear()}-${String(good.getMonth() + 1).padStart(2, '0')}`
+      + `-${String(good.getDate()).padStart(2, '0')}`;
+  }
+
+  /**
+   * The full instant, as an ISO string, or null.
+   *
+   * This is the part that used to be thrown away. EXIF carries DateTimeOriginal to
+   * the second and `mvhd` carries a creation time to the second, and both were being
+   * truncated to a day to fit a `date` column — so the Record History table, which
+   * prints the day over the time, lost its time line the moment a row was dated.
+   * The time it showed before that came from upload_date, which is the minute the
+   * file arrived dressed up as the minute it was recorded.
+   */
+  function stamp(d) {
+    const good = ok(d);
+    return good ? good.toISOString() : null;
+  }
+
+  /** Does this source know a real clock reading, or only a day? */
+  function hasClock(d, source) {
+    if (!ok(d)) return false;
+    // A bare date in a filename ("2026-04-19", "20260320") gives midnight or the
+    // noon default, neither of which is a fact. EXIF and mvhd are to the second, and
+    // a filename that carried a time was parsed with it.
+    return source !== 'day-only';
+  }
+
+  // ── EXIF, from a JPEG's APP1 block ──────────────────────────────────
+  function fromExif(view) {
     if (view.byteLength < 4 || view.getUint16(0) !== 0xFFD8) return null;   // not a JPEG
 
     let at = 2;
@@ -406,7 +448,6 @@ window.dkFileDate = async function dkFileDate(file) {
         const get32 = (o) => view.getUint32(o, little);
         if (get16(tiff + 2) !== 0x2A) return null;
 
-        // Walk IFD0 looking for the Exif sub-IFD, then that for tag 0x9003.
         const readIfd = (offset, tag) => {
           if (offset + 2 > view.byteLength) return null;
           const count = get16(offset);
@@ -420,31 +461,126 @@ window.dkFileDate = async function dkFileDate(file) {
         const ifd0 = tiff + get32(tiff + 4);
         const exifPtr = readIfd(ifd0, 0x8769);
         if (exifPtr === null) return null;
-        const dateOffset = readIfd(tiff + exifPtr, 0x9003);   // DateTimeOriginal
-        if (dateOffset === null) return null;
+        // 0x9003 DateTimeOriginal, and 0x9004 DateTimeDigitized as the runner-up.
+        const at9003 = readIfd(tiff + exifPtr, 0x9003);
+        const at9004 = readIfd(tiff + exifPtr, 0x9004);
+        const offset = at9003 !== null ? at9003 : at9004;
+        if (offset === null) return null;
 
         // "YYYY:MM:DD HH:MM:SS", 19 ASCII bytes.
         let text = '';
         for (let i = 0; i < 19; i += 1) {
-          const c = view.getUint8(tiff + dateOffset + i);
+          const c = view.getUint8(tiff + offset + i);
           if (!c) break;
           text += String.fromCharCode(c);
         }
         const m = text.match(/^(\d{4}):(\d{2}):(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/);
         if (!m) return null;
-        return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
+        return ok(new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]));
       }
       if (marker === 0xDA) break;          // start of scan: no metadata past here
       if (size < 2) break;
       at += 2 + size;
     }
     return null;
-  };
+  }
 
-  // ── 2. The filename ──────────────────────────────────────────────────
-  const fromName = () => {
-    const name = String(file.name || '');
-    const patterns = [
+  // ── ISO base media: MP4, M4A, MOV ───────────────────────────────────
+  //
+  // The creation time lives in `moov` > `mvhd`, and `moov` is at the front of the
+  // file on some encoders and behind a multi-megabyte `mdat` on others — a phone
+  // camera usually writes it last. So: walk the top-level boxes properly, and if
+  // the walk runs off the end of the bytes we have, fall back to scanning them for
+  // the `mvhd` signature. The scan can in principle hit four matching bytes inside
+  // compressed audio; the date window in ok() is what makes that harmless, and the
+  // backfill shows every value for review before writing any of it.
+  //
+  // The epoch is 1904-01-01 UTC, not 1970. Sixty-six years, which is exactly the
+  // kind of off-by-a-lifetime that looks like a working parser until you read a
+  // date.
+  const MP4_EPOCH_OFFSET = 2082844800;
+
+  function readMvhd(view, at) {
+    // at points to the start of the mvhd box body, just past size+type.
+    if (at + 20 > view.byteLength) return null;
+    const version = view.getUint8(at);
+    let seconds;
+    if (version === 1) {
+      if (at + 12 > view.byteLength) return null;
+      // 64-bit. The high word is zero for every real date, so the low word is the
+      // whole answer and this avoids BigInt.
+      const high = view.getUint32(at + 4);
+      const low = view.getUint32(at + 8);
+      if (high !== 0) return null;
+      seconds = low;
+    } else if (version === 0) {
+      seconds = view.getUint32(at + 4);
+    } else {
+      return null;
+    }
+    if (!seconds) return null;                       // zeroed, which means unset
+    return ok(new Date((seconds - MP4_EPOCH_OFFSET) * 1000));
+  }
+
+  function typeAt(view, at) {
+    if (at + 8 > view.byteLength) return null;
+    let s = '';
+    for (let i = 0; i < 4; i += 1) s += String.fromCharCode(view.getUint8(at + 4 + i));
+    return s;
+  }
+
+  function fromIsoBmff(view) {
+    // Only bother if this looks like one: box 1 is normally `ftyp`.
+    // Walk the top level looking for moov, then its children for mvhd.
+    let at = 0;
+    let sawBox = false;
+    while (at + 8 <= view.byteLength) {
+      const size = view.getUint32(at);
+      const type = typeAt(view, at);
+      if (!type || !/^[a-zA-Z0-9 ]{4}$/.test(type)) break;
+      sawBox = true;
+      if (type === 'moov') {
+        // Children start right after this box's header.
+        let child = at + 8;
+        const stop = Math.min(view.byteLength, size > 8 ? at + size : view.byteLength);
+        while (child + 8 <= stop) {
+          const csize = view.getUint32(child);
+          const ctype = typeAt(view, child);
+          if (ctype === 'mvhd') return readMvhd(view, child + 8);
+          if (!csize || csize < 8) break;
+          child += csize;
+        }
+        break;
+      }
+      if (size === 0) break;              // "to end of file"
+      if (size < 8) break;                // 1 means a 64-bit largesize; not worth it
+      at += size;
+    }
+
+    if (!sawBox) return null;
+
+    // moov was not in the bytes we hold. Scan for the signature instead.
+    for (let i = 0; i + 12 <= view.byteLength; i += 1) {
+      if (view.getUint8(i) !== 0x6D) continue;                 // 'm'
+      if (typeAt(view, i - 4) !== 'mvhd') continue;
+      const found = readMvhd(view, i + 4);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  // ── The filename ────────────────────────────────────────────────────
+  /**
+   * @param {string} name
+   * @param {Date|number|null} [reference] Used only to supply a YEAR to a name that
+   *   gives a day and a month and no year — "27th june". A person writing that means
+   *   the one that has just happened, so the year is the reference's, stepped back
+   *   by one if that would put the date in the reference's future.
+   */
+  function fromName(name, reference) {
+    const text = String(name || '');
+
+    const numeric = [
       // WhatsApp: "... 2026-04-19 at 3.11.15 PM ..."
       /(\d{4})-(\d{2})-(\d{2})\s+at\s+(\d{1,2})\.(\d{2})\.(\d{2})\s*(AM|PM)?/i,
       // Camera: 20260320_125133  /  IMG_20240712_143500
@@ -453,32 +589,390 @@ window.dkFileDate = async function dkFileDate(file) {
       /(?:^|[^\d])(\d{4})-(\d{2})-(\d{2})(?:[^\d]|$)/,
       /(?:^|[^\d])(\d{4})(\d{2})(\d{2})(?:[^\d]|$)/,
     ];
-    for (const re of patterns) {
-      const m = name.match(re);
+    for (const re of numeric) {
+      const m = text.match(re);
       if (!m) continue;
-      let hour = m[4] ? Number(m[4]) : 12;
-      // A 12-hour stamp with a meridiem needs converting; a 24-hour one does not.
+      // Whether the pattern that matched actually captured a clock reading. The
+      // first two do; the last two are a bare date and get noon, which is a
+      // placeholder and must not be presented as a time.
+      const timed = !!m[4];
+      let hour = timed ? Number(m[4]) : 12;
       const mer = m[7];
       if (mer) {
         if (/pm/i.test(mer) && hour < 12) hour += 12;
         if (/am/i.test(mer) && hour === 12) hour = 0;
       }
-      const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]),
-        hour, m[5] ? Number(m[5]) : 0, m[6] ? Number(m[6]) : 0);
-      const ok = iso(d);
-      if (ok) return d;
+      const found = ok(new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]),
+        hour, m[5] ? Number(m[5]) : 0, m[6] ? Number(m[6]) : 0));
+      if (found) { found.dkTimed = timed; return found; }
+    }
+
+    // "27th june", "3 Aug", "Dec 14". Only used when there is a reference to take
+    // the year from — a bare day and month on its own is a guess, not a date.
+    if (reference) {
+      const ref = new Date(reference);
+      if (!Number.isNaN(ref.getTime())) {
+        const dayFirst = text.match(/(?:^|[^\d])(\d{1,2})(?:st|nd|rd|th)?[\s\-_.]*([a-z]{3,})/i);
+        const monthFirst = text.match(/([a-z]{3,})[\s\-_.]*(\d{1,2})(?:st|nd|rd|th)?(?:[^\d]|$)/i);
+        for (const m of [dayFirst, monthFirst]) {
+          if (!m) continue;
+          const isDayFirst = m === dayFirst;
+          const dayText = isDayFirst ? m[1] : m[2];
+          const monthText = isDayFirst ? m[2] : m[1];
+          const month = MONTHS.indexOf(String(monthText).slice(0, 3).toLowerCase());
+          const day = Number(dayText);
+          if (month === -1 || !(day >= 1 && day <= 31)) continue;
+          let year = ref.getFullYear();
+          let d = new Date(year, month, day, 12, 0, 0);
+          // A month later than the reference means last year's one.
+          if (d.getTime() > ref.getTime() + 86400000) d = new Date(year - 1, month, day, 12, 0, 0);
+          const found = ok(d);
+          // "27th june" is a day. The noon is arithmetic, not a time.
+          if (found) { found.dkTimed = false; return found; }
+        }
+      }
     }
     return null;
-  };
+  }
 
-  try {
-    const exif = await fromExif().catch(() => null);
-    const picked = iso(exif) || iso(fromName())
-      || iso(file.lastModified ? new Date(file.lastModified) : null);
-    return picked;
-  } catch {
+  // ── Public ──────────────────────────────────────────────────────────
+
+  /**
+   * Read the metadata out of bytes already in hand.
+   * @returns {{date: string, source: string}|null}
+   */
+  function fromBytes(buffer, name) {
+    if (!buffer || !buffer.byteLength) return null;
+    const view = new DataView(buffer);
+
+    // Sniffed by content, not by extension, because half these filenames have been
+    // through a messaging app and an `.m4a` that is really an MP4 is routine.
+    let found = null;
+    if (view.byteLength > 3 && view.getUint16(0) === 0xFFD8) found = fromExif(view);
+    // Both of these are accurate to the second, so both carry a time.
+    if (found) return { date: iso(found), at: stamp(found), source: 'exif' };
+
+    found = fromIsoBmff(view);
+    if (found) return { date: iso(found), at: stamp(found), source: 'mvhd' };
+
     return null;
   }
+
+  /**
+   * Everything knowable about a File the user has just chosen.
+   * @returns {Promise<{date: string|null, at: string|null, source: string}>}
+   *   `date` is the local calendar day. `at` is the full instant, and is null when
+   *   the source only knew a day — a bare date in a filename, or a lastModified that
+   *   is really a copy time. A row with a null `at` shows no clock reading, which is
+   *   the honest outcome: inventing "12:00 am" would claim a precision the file did
+   *   not have.
+   */
+  async function detail(file) {
+    if (!file) return { date: null, at: null, source: 'none' };
+    try {
+      // 256KB from the front covers every EXIF block and a front-loaded moov.
+      const head = file.slice ? await file.slice(0, 262144).arrayBuffer().catch(() => null) : null;
+      let hit = head ? fromBytes(head, file.name) : null;
+
+      // A phone camera writes moov AFTER the media data, so for anything of any
+      // size the front of the file will not have it. One more read from the tail.
+      if (!hit && file.slice && file.size > 262144) {
+        const tail = await file.slice(Math.max(0, file.size - 262144)).arrayBuffer().catch(() => null);
+        if (tail) hit = fromBytes(tail, file.name);
+      }
+      if (hit && hit.date) return { date: hit.date, at: hit.at, source: hit.source };
+
+      const named = fromName(file.name, file.lastModified || Date.now());
+      if (named) {
+        return {
+          date: iso(named),
+          at: named.dkTimed ? stamp(named) : null,
+          source: named.dkTimed ? 'name' : 'name (day only)',
+        };
+      }
+
+      // lastModified is a real instant, but for anything copied between devices it
+      // is the copy time — so the day is worth using and the clock reading is not.
+      const mod = file.lastModified ? new Date(file.lastModified) : null;
+      if (ok(mod)) return { date: iso(mod), at: null, source: 'lastModified (day only)' };
+      return { date: null, at: null, source: 'none' };
+    } catch {
+      return { date: null, at: null, source: 'none' };
+    }
+  }
+
+  /** Just the day, for the callers that only ever wanted that. */
+  async function fromFile(file) {
+    return (await detail(file)).date;
+  }
+
+  return { detail, fromFile, fromBytes, fromName, iso, stamp, ok, hasClock };
+})();
+
+/** Kept as the name the upload path calls, and the one the audits assert. */
+window.dkFileDate = function dkFileDate(file) {
+  return window.dkMediaDate.fromFile(file);
+};
+
+/**
+ * The clock reading from `stamp`, moved onto `day`. '' when there is no reading.
+ *
+ * Used whenever a DAY is corrected on a row that already has real metadata, which is
+ * the common case: the correction is usually off-by-one, a file recorded at 11pm on
+ * the 26th that every reader agrees is the 27th. Moving the day and keeping 23:14
+ * preserves the one fact the file actually reported; the alternative is throwing the
+ * time away because the day beside it moved.
+ *
+ * AT TRUE TOP LEVEL, and that is not tidiness. Four callers need it and they are in
+ * three different scopes — the backfill above, the Record History edit sheet inside
+ * the big DOMContentLoaded closure, and Sage's set_media_date tool. None of those can
+ * see the others' locals, and a second copy is how two of them end up disagreeing
+ * about what "keep the time" means.
+ */
+function historicStampOnDay(stamp, day) {
+  if (!stamp || !/^\d{4}-\d{2}-\d{2}$/.test(String(day || ''))) return '';
+  const from = new Date(stamp);
+  if (Number.isNaN(from.getTime())) return '';
+  const [y, m, d] = String(day).split('-').map(Number);
+  // Built from LOCAL parts so the clock reading the rider can see is the one that is
+  // kept. Rebuilding it in UTC moves the displayed time by the timezone offset.
+  const moved = new Date(y, m - 1, d, from.getHours(), from.getMinutes(), from.getSeconds());
+  return Number.isNaN(moved.getTime()) ? '' : moved.toISOString();
+}
+
+/**
+ * An instant as the 'HH:MM' an <input type="time"> wants, in the rider's own zone.
+ * '' when there is no instant, which is what an empty time field means.
+ */
+function historicClockOf(stamp) {
+  if (!stamp) return '';
+  const d = new Date(stamp);
+  if (Number.isNaN(d.getTime())) return '';
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+/**
+ * The reverse: a local day plus 'HH:MM' back into an ISO instant.
+ *
+ * Returns '' for a blank time rather than midnight, and that distinction is the
+ * whole point of the field. Midnight is a real reading that some files genuinely
+ * have; blank means nobody knows, and the two must not collapse into each other.
+ */
+function historicStampFrom(day, clock) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day || ''))) return '';
+  const m = String(clock || '').match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return '';
+  const [y, mo, d] = String(day).split('-').map(Number);
+  const at = new Date(y, mo - 1, d, Number(m[1]), Number(m[2]), 0);
+  return Number.isNaN(at.getTime()) ? '' : at.toISOString();
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// SpinLog | DATING THE UPLOADS THAT ARE ALREADY IN THE BUCKET
+//
+// dkFileDate only helps a file being chosen now. Everything uploaded before it
+// existed has `historic_date` null and shows its upload date instead, which for an
+// archive of old recordings is the one date that is never interesting: an engine
+// sound from the 27th of June reads as uploaded in August, because it was.
+//
+// The metadata is still there. It is just inside a file in a private bucket rather
+// than in a File object, so this fetches enough of each one to read it — a signed
+// URL and an HTTP Range request, 256KB from the front and, when that is not where
+// the encoder put the `moov` box, 256KB from the back. Nothing is downloaded whole.
+//
+// ── IT IS A DRY RUN UNLESS YOU SAY OTHERWISE ────────────────────────
+//
+//   await dkBackfillMediaDates()                → prints a table, writes nothing
+//   await dkBackfillMediaDates({ apply: true }) → writes the ones it is sure of
+//
+// This edits real rows in a live database, so the default has to be the harmless
+// one, and every proposed value has to be visible before anything is committed. The
+// table names the SOURCE for each date as well as the date, because "exif" and
+// "name" and "mvhd" do not deserve equal trust and the person reading it is the
+// only one who knows which files came through WhatsApp.
+//
+// Three rules it will not break:
+//   · A row that already has a `taken_at` is never touched. That is the most complete
+//     answer there is — an instant, from the file — and nothing here can improve it.
+//   · A row that has a `historic_date` and no `taken_at` is re-read, but only its
+//     TIME can be added. If the metadata disagrees about the day, the stored day
+//     wins: it was either set by hand in the edit sheet or written by an earlier run
+//     of this, and a correction someone made on purpose is not up for revision.
+//   · A row whose date cannot be worked out is left alone rather than being given
+//     its upload date, which is what it already falls back to on screen. Writing a
+//     guess would turn "unknown" into "wrong" and hide it from the next attempt.
+//     The same goes for the time: a source that only knew a day leaves taken_at
+//     null, because an invented "12:00 am" reads exactly like a real reading.
+// ════════════════════════════════════════════════════════════════════════
+window.dkBackfillMediaDates = async function dkBackfillMediaDates(options) {
+  'use strict';
+  const opts = options || {};
+  const apply = opts.apply === true;
+  const BUCKET = 'historic-media';
+  const CHUNK = 262144;
+
+  const sb = window.supabaseClient;
+  if (!sb) { console.error('[SpinLog] No database connection.'); return null; }
+
+  // `*` rather than a column list, for the same reason cloud-store uses it: naming
+  // `taken_at` on a database that has not run media_taken_at.sql 400s the whole read,
+  // and this tool would report "could not read the uploads" over a column it is only
+  // checking. `*` cannot be wrong about the schema.
+  const { data: rows, error } = await sb.from('media_files').select('*')
+    .order('id', { ascending: true });
+  if (error) { console.error('[SpinLog] Could not read the uploads:', error.message); return null; }
+  if (rows.length && !('taken_at' in rows[0])) {
+    console.warn('[SpinLog] media_files has no taken_at column, so only DAYS can be '
+      + 'written — run supabase/media_taken_at.sql once, then run this again for the times.');
+  }
+
+  /** One ranged read. Returns an ArrayBuffer or null; never throws. */
+  async function range(url, from, to) {
+    try {
+      const res = await fetch(url, { headers: { Range: `bytes=${from}-${to}` } });
+      // 206 is a real partial response. A 200 means the server ignored the header
+      // and sent everything, which is still usable — just bigger than asked for.
+      if (!res.ok && res.status !== 206) return null;
+      return await res.arrayBuffer();
+    } catch { return null; }
+  }
+
+  const plan = [];
+  for (const row of rows) {
+    const current = row.historic_date ? String(row.historic_date).slice(0, 10) : null;
+    const timed = row.taken_at ? String(row.taken_at) : null;
+    // An instant already on the row is the complete answer. Nothing below can beat
+    // it, so the file is not even fetched.
+    if (timed) {
+      plan.push({ row, current, timed, next: null, at: null, source: 'already timed' });
+      continue;
+    }
+
+    // The filename first, because it costs nothing and is the most trustworthy
+    // source for anything that has been through a messaging app.
+    const named = window.dkMediaDate.fromName(row.original_name, row.upload_date);
+    let next = named ? window.dkMediaDate.iso(named) : null;
+    // Only when the pattern that matched actually captured a clock reading.
+    // "WhatsApp Video 2026-04-19 at 3.11.15 PM" did; "20260320" did not, and the
+    // noon it was given is arithmetic rather than a time.
+    let at = named && named.dkTimed ? window.dkMediaDate.stamp(named) : null;
+    let source = next ? (at ? 'name' : 'name (day only)') : null;
+
+    // Fetched when there is no date at all, and ALSO when there is a date but no
+    // time — which after the first run of this is every remaining row. The bytes are
+    // the only place a clock reading can come from for a camera file.
+    if (!next || !at) {
+      const { data: signed } = await sb.storage.from(BUCKET)
+        .createSignedUrl(row.file_name, 300);
+      const url = signed?.signedUrl;
+      if (url) {
+        const head = await range(url, 0, CHUNK - 1);
+        let hit = head ? window.dkMediaDate.fromBytes(head, row.original_name) : null;
+        if (!hit) {
+          // The encoder put moov at the end. Ask for the last chunk; the server
+          // clamps a suffix range for us.
+          const tail = await range(url, -CHUNK, '');
+          const tail2 = tail || await range(url, 0, CHUNK * 8);
+          if (tail2) hit = window.dkMediaDate.fromBytes(tail2, row.original_name);
+        }
+        // exif and mvhd are both to the second, so a hit here always carries a time.
+        if (hit && hit.at) { next = hit.date; at = hit.at; source = hit.source; }
+        else if (hit && hit.date && !next) { next = hit.date; source = hit.source; }
+      }
+    }
+
+    // A day someone already stored outranks a day guessed here, so the metadata gets
+    // to supply the TIME and not to move the date. Without this, re-running to pick
+    // up times would quietly revise dates that were corrected by hand.
+    if (current && at && window.dkMediaDate.iso(new Date(at)) !== current) {
+      at = historicStampOnDay(at, current);
+      source += ' (time only)';
+    }
+
+    plan.push({ row, current, timed, next: current || next, at, source: source || 'no date found' });
+  }
+
+  // ── Report ──────────────────────────────────────────────────────────
+  const clock = (iso) => {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? '—'
+      : d.toLocaleTimeString('en-GB', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true });
+  };
+  const table = plan.map(p => ({
+    id: p.row.id,
+    kind: p.row.media_type,
+    file: p.row.original_name,
+    'day now': p.current || (p.row.upload_date || '').slice(0, 10) + ' (upload)',
+    'time now': clock(p.timed),
+    'day would be': p.next || '—',
+    'time would be': clock(p.at),
+    from: p.source,
+  }));
+  console.log(`[SpinLog] ${apply ? 'APPLYING' : 'DRY RUN — nothing is being written'}`);
+  (console.table || console.log)(table);
+
+  // Worth writing when it adds a day the row does not have, or a time it does not
+  // have. A row where both already match what was found is left alone.
+  const todo = plan.filter(p => (p.next && p.next !== p.current) || (p.at && !p.timed));
+  const times = todo.filter(p => p.at).length;
+  console.log(`[SpinLog] ${todo.length} of ${plan.length} uploads can be improved from their own `
+    + `metadata — ${times} of them with a real clock reading.`);
+  if (!apply) {
+    console.log('[SpinLog] Run dkBackfillMediaDates({ apply: true }) to write these.');
+    return { dryRun: true, plan: table, would: todo.length, withTime: times };
+  }
+
+  // ── Write ───────────────────────────────────────────────────────────
+  //
+  // THROUGH dkCloudStore, not straight at the table. Its setters already do both
+  // halves — the row and the in-memory cache the Record History table renders from —
+  // so going round them meant writing the row here and then calling a setter to fix
+  // the cache, which issued a second, identical PATCH for every upload. Twenty round
+  // trips for ten rows. One path, one write.
+  //
+  // setTakenAt for anything with a clock reading, because it writes the instant AND
+  // the day it falls on. setUploadDate only for the day-only rows: it does not touch
+  // taken_at, so a file that never reported a time is not handed one.
+  let done = 0;
+  let timed = 0;
+  const failed = [];
+  const store = window.dkCloudStore;
+  for (const p of todo) {
+    let err = null;
+    if (p.at && store && typeof store.setTakenAt === 'function') {
+      const saved = await store.setTakenAt(p.row.id, p.at);
+      if (saved === false) err = 'the database refused it';
+      else timed += 1;
+    } else if (store && typeof store.setUploadDate === 'function') {
+      const saved = await store.setUploadDate(p.row.id, p.next);
+      if (saved === false) err = 'the database refused it';
+    } else {
+      const patch = p.at ? { historic_date: p.next, taken_at: p.at } : { historic_date: p.next };
+      const res = await sb.from('media_files').update(patch).eq('id', p.row.id);
+      err = res.error && res.error.message;
+    }
+    if (err) { failed.push(`${p.row.id}: ${err}`); continue; }
+    done += 1;
+  }
+
+  if (failed.length) {
+    console.error('[SpinLog] Some rows refused the update:', failed);
+    // A missing column is the one failure worth naming, because the fix is a file
+    // in this repo rather than anything about the data.
+    if (failed.some(f => /historic_date/.test(f))) {
+      console.error('[SpinLog] media_files has no historic_date column — '
+        + 'run supabase/cloud_routing.sql once.');
+    }
+    if (failed.some(f => /taken_at/.test(f))) {
+      console.error('[SpinLog] media_files has no taken_at column — '
+        + 'run supabase/media_taken_at.sql once.');
+    }
+  }
+  console.log(`[SpinLog] ✅ Updated ${done} upload(s) from their own metadata`
+    + `${timed ? `, ${timed} of them with a real time` : ''}.`);
+  if (typeof window.loadHistoricUploads === 'function') window.loadHistoricUploads();
+  return { applied: done, withTime: timed, failed };
 };
 
 // ════════════════════════════════════════════════════════════════════════
@@ -1516,6 +2010,44 @@ function getHistoricLocalDate(id) {
   return store ? store.uploadDate(id) : '';
 }
 
+/** The full instant an upload was recorded, ISO, or '' when only a day is known. */
+function getHistoricTakenAt(id) {
+  const store = cloudStore();
+  return store && typeof store.takenAt === 'function' ? store.takenAt(id) : '';
+}
+
+/** Writes the instant AND the day it falls on. See cloud-store setTakenAt. */
+function setHistoricTakenAt(id, stamp) {
+  const store = cloudStore();
+  if (store && typeof store.setTakenAt === 'function') return store.setTakenAt(id, stamp);
+  return Promise.resolve(false);
+}
+
+/**
+ * The one value the Uploaded column, the sort and the date filter all read.
+ *
+ * Three candidates, ranked by how much they know rather than by where they came
+ * from:
+ *
+ *   taken_at       an instant, read out of the file itself       → day AND time
+ *   historic_date  a day, set by the rider or by the backfill    → day only
+ *   upload_date    an instant, but the wrong one: when the file
+ *                  arrived, not when it was recorded             → last resort
+ *
+ * The instant only wins while it still AGREES with the day. They are written
+ * together so normally they cannot disagree — but a row edited by an older build,
+ * by Sage's set_media_date tool or by hand in the SQL editor can have a corrected
+ * day and a stale instant, and in that case the correction is the better fact. The
+ * clock reading is dropped rather than shown against a day nothing was recorded on.
+ */
+function historicWhenFor(row) {
+  if (!row) return '';
+  const stamp = getHistoricTakenAt(row.id);
+  const day = getHistoricLocalDate(row.id);
+  if (stamp && (!day || docsIsoDay(stamp) === day)) return stamp;
+  return day || row.upload_date;
+}
+
 /**
  * @param {object} [options]
  * @param {object|null} [options.context] What the file actually is
@@ -1524,10 +2056,14 @@ function getHistoricLocalDate(id) {
  *   stays hidden rather than inventing something.
  * @param {string|null} [options.date] Pass an ISO date to also edit the uploaded
  *   date in this same sheet. When given, the promise resolves
- *   `{ notes, date }` instead of a bare notes string — the upload flow has no date
- *   to correct yet, so it keeps the old shape and the old return value.
+ *   `{ notes, date, time }` instead of a bare notes string. Passing null keeps the
+ *   old shape and the old bare-string return, which two callers still rely on.
+ * @param {string} [options.time] 'HH:MM', or '' for a file that only knew a day.
+ *   Only read when `date` is given. An empty string is a real answer rather than a
+ *   missing one: it is what the rider leaves behind to say "no time on this", and
+ *   what the table reads as "print one line, not two".
  */
-function showHistoricNotesModal({ title = 'Add upload notes', help = 'Write what this file is about. Notes are required.', initial = '', required = true, context = null, date = null, dateLabelText = 'Taken on' } = {}) {
+function showHistoricNotesModal({ title = 'Add upload notes', help = 'Write what this file is about. Notes are required.', initial = '', required = true, context = null, date = null, time = '', dateLabelText = 'Taken on' } = {}) {
   return new Promise(resolve => {
     const modal = document.getElementById('historicNotesModal');
     const titleEl = document.getElementById('historicNotesTitle');
@@ -1538,13 +2074,17 @@ function showHistoricNotesModal({ title = 'Add upload notes', help = 'Write what
     const closeBtn = document.getElementById('historicNotesCancel');
     const dateField = document.getElementById('historicNotesDateField');
     const dateInput = document.getElementById('historicNotesDate');
+    // Optional in the DOM as well as in the data. A phone running a service worker
+    // from before this field existed has a cached index.html without it, and the
+    // sheet has to keep working there — the date is the part that always worked.
+    const timeInput = document.getElementById('historicNotesTime');
     const wantsDate = date !== null && !!dateField && !!dateInput;
 
     if (!modal || !input || !saveBtn || !cancelBtn || !closeBtn) {
       const fallback = prompt(title, initial || '');
       const value = (fallback || '').trim();
       const bare = required && !value ? null : value;
-      resolve(wantsDate && bare !== null ? { notes: bare, date } : bare);
+      resolve(wantsDate && bare !== null ? { notes: bare, date, time } : bare);
       return;
     }
 
@@ -1555,6 +2095,9 @@ function showHistoricNotesModal({ title = 'Add upload notes', help = 'Write what
     if (dateField && dateInput) {
       if (wantsDate) {
         dateInput.value = String(date).slice(0, 10);
+        // Blank is a meaningful value here, not an empty state: it says the source
+        // only knew a day, and it is how the rider removes a time that is wrong.
+        if (timeInput) timeInput.value = /^\d{2}:\d{2}/.test(String(time || '')) ? String(time).slice(0, 5) : '';
         dateField.removeAttribute('hidden');
         // The same field answers two different questions and the label has to say
         // which. On an upload it is a guess read off the file that the rider is
@@ -1566,6 +2109,7 @@ function showHistoricNotesModal({ title = 'Add upload notes', help = 'Write what
         dateInput.max = localIsoDate();
       } else {
         dateInput.value = '';
+        if (timeInput) timeInput.value = '';
         dateField.setAttribute('hidden', '');
       }
     }
@@ -1612,7 +2156,7 @@ function showHistoricNotesModal({ title = 'Add upload notes', help = 'Write what
         return;
       }
       clean();
-      resolve(wantsDate ? { notes, date: dateInput.value } : notes);
+      resolve(wantsDate ? { notes, date: dateInput.value, time: timeInput ? timeInput.value : '' } : notes);
     };
     const onKey = (e) => {
       if (e.key === 'Escape') cancel();
@@ -2093,20 +2637,25 @@ async function ensureDocsLoaded() {
 
 // --- HISTORIC MEDIA LOGIC ---
 
+/**
+ * @returns {Promise<boolean>} false when the note is on this device only, which is
+ *   what happens on a schema with no notes column or no UPDATE policy. Sage reports
+ *   it back as `storedInDb`.
+ */
 async function updateHistoricNotes(id, notes) {
-  // Notes are supported in newer schemas. If the notes column/update policy is not present, keep them locally.
-  let { error } = await supabase
-    .from('media_files')
-    .update({ notes })
-    .eq('id', id);
-
-  if (error) {
-    console.warn('Historic notes DB update skipped:', error);
-    setHistoricLocalNote(id, notes);
-    return false;
+  const store = cloudStore();
+  if (store) {
+    // ONE WRITE, not two. This used to PATCH the row here and then call
+    // setHistoricLocalNote, which goes to the same cloud-store setter and issues a
+    // second, byte-identical PATCH — two round trips for every note saved, and the
+    // second one arriving after the success popup had already been shown.
+    return (await store.setNote(id, notes)) !== false;
   }
-  setHistoricLocalNote(id, notes);
-  return true;
+  // No cloud store means the page is mid-boot or offline. Straight at the table, and
+  // the local copy is not worth keeping: there is nothing holding it.
+  const { error } = await supabase.from('media_files').update({ notes }).eq('id', id);
+  if (error) console.warn('Historic notes DB update skipped:', error);
+  return !error;
 }
 
 // Helper: get signed URL for historic-media bucket
@@ -2124,7 +2673,15 @@ async function handleHistoricUpload(file, type, dropZone) {
   // lastModified as the floor. It is a suggestion, not a decision: it is an
   // editable input sitting in the sheet the upload already opens, so a wrong guess
   // costs one correction and no extra step.
-  const guessedDate = (await window.dkFileDate(file).catch(() => null)) || localIsoDate();
+  //
+  // detail() rather than dkFileDate(), because the sheet asks for a DAY and the
+  // table shows a TIME. Both come out of the same read; asking for only the day
+  // is what used to throw the clock reading away.
+  const found = await window.dkMediaDate.detail(file).catch(() => null);
+  const guessedDate = found?.date || localIsoDate();
+  // Null unless the source knew a real clock reading. EXIF and mvhd do, and so does
+  // a filename that carried one; a bare date and a lastModified do not.
+  const guessedStamp = found?.at || '';
 
   const answer = await showHistoricNotesModal({
     title: 'Add notes for this upload',
@@ -2132,6 +2689,9 @@ async function handleHistoricUpload(file, type, dropZone) {
     initial: '',
     required: true,
     date: guessedDate,
+    // Blank for a source that only knew a day — a bare date in a filename, or a
+    // lastModified that is really a copy time. The rider can fill it in or leave it.
+    time: historicClockOf(guessedStamp),
     // The File itself goes over, so she describes what is actually in it rather
     // than guessing from the name.
     context: {
@@ -2147,9 +2707,16 @@ async function handleHistoricUpload(file, type, dropZone) {
     if (input) input.value = '';
     return;
   }
-  // Passing `date` changes the resolved shape from a bare string to {notes, date}.
+  // Passing `date` changes the resolved shape from a bare string to {notes, date, time}.
   const notes = typeof answer === 'string' ? answer : answer.notes;
   const historicDate = typeof answer === 'string' ? guessedDate : (answer.date || guessedDate);
+  // Rebuilt from the two fields the rider actually saw rather than from the guess, so
+  // correcting either one lands — including emptying the time, which is how you say
+  // "this file's clock was wrong" and get a day with no second line.
+  const answerTime = typeof answer === 'string'
+    ? historicClockOf(guessedStamp)
+    : (answer.time || '');
+  const takenAt = historicStampFrom(historicDate, answerTime);
 
   const bucket = 'historic-media';
   const clean = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
@@ -2181,30 +2748,38 @@ async function handleHistoricUpload(file, type, dropZone) {
     original_name: file.name,
     file_size: file.size,
     content_type: contentType,
-    // TWO DIFFERENT DATES, and they are not interchangeable.
-    // upload_date is when this row was written and is used for nothing the user
-    // sees. historic_date is when the file is FROM, which is what the Uploaded
-    // column shows, what the date filter matches and what the table sorts on.
+    // THREE DIFFERENT DATES, and they are not interchangeable.
+    //   upload_date    when this row was written. Used for nothing the user sees.
+    //   historic_date  what DAY the file is from. The filter matches on it and the
+    //                  table sorts on it.
+    //   taken_at       the full instant, when the metadata knew one. This is what
+    //                  puts a clock reading under the date in the Uploaded column.
     upload_date: new Date().toISOString(),
     historic_date: historicDate || null,
+    taken_at: takenAt || null,
     notes
   };
 
   let inserted = null;
   let { data, error } = await supabase.from('media_files').insert([row]).select();
-  // Both columns arrived in cloud_routing.sql, and this table predates it, so an
-  // instance that has not run the migration has neither. Retry without whichever
-  // one the database complains about rather than failing an upload over a column
-  // that only carries metadata.
-  for (const column of ['historic_date', 'notes']) {
-    if (!error || !String(error.message || '').toLowerCase().includes(column)) continue;
+  // These three columns arrived in three different migrations and this table
+  // predates all of them, so an instance that has not run one is missing a column.
+  // Retry without whichever one the database complains about rather than failing an
+  // upload over a column that only carries metadata.
+  //
+  // The drops ACCUMULATE. Rebuilding the payload from `row` each time and deleting
+  // one column would put the previously dropped one back, so a database missing two
+  // of the three could never succeed.
+  const dropped = [];
+  for (const column of ['taken_at', 'historic_date', 'notes']) {
+    if (!error) break;
+    if (!String(error.message || '').toLowerCase().includes(column)) continue;
+    dropped.push(column);
     const fallback = { ...row };
-    delete fallback[column];
-    if (column === 'historic_date') delete fallback.historic_date;
+    dropped.forEach(name => { delete fallback[name]; });
     const retry = await supabase.from('media_files').insert([fallback]).select();
     data = retry.data;
     error = retry.error;
-    if (!error) break;
   }
 
   if (error) {
@@ -2217,11 +2792,14 @@ async function handleHistoricUpload(file, type, dropZone) {
   inserted = data && data[0];
   if (inserted?.id) {
     setHistoricLocalNote(inserted.id, notes);
-    // Through the same helper the edit path uses, so the table shows the file's
+    // Through the same helpers the edit path uses, so the table shows the file's
     // own date immediately rather than after the next full cloud read. The row
-    // already carries it, so the write this makes is idempotent — worth it to keep
+    // already carries both, so the write this makes is idempotent — worth it to keep
     // one path for "the date of an upload changed".
-    if (historicDate) setHistoricLocalDate(inserted.id, historicDate);
+    //
+    // setTakenAt fills the day as well, so the two are never called together.
+    if (takenAt) setHistoricTakenAt(inserted.id, takenAt);
+    else if (historicDate) setHistoricLocalDate(inserted.id, historicDate);
   }
   finishUploadPercent();
   updatePopup('success', 'Uploaded with notes!');
@@ -2375,7 +2953,9 @@ async function loadHistoricUploads() {
   for (const row of data) {
     const notes = row.notes || getHistoricLocalNote(row.id) || 'No notes saved';
     const kind = String(row.media_type || '').toLowerCase();
-    const when = getHistoricLocalDate(row.id) || row.upload_date;
+    // Prefers the instant the FILE reported over the day anyone set, so a row with
+    // real metadata gets its clock reading back. A day-only row has no second line.
+    const when = historicWhenFor(row);
     const time = docsFormatTime(when);
     // Only a picture or a video HAS a frame to show. Audio gets its waveform glyph and
     // costs nothing, which is most of why thumbnails are affordable at all.
@@ -2478,13 +3058,17 @@ window._editHistoricMedia = async function(id) {
   const row = window._historicMediaRows?.get(Number(id)) || null;
   const currentDate = String(getHistoricLocalDate(id) || row?.upload_date || '').slice(0, 10)
     || localIsoDate();
+  // What the file reported, if anything did. Empty for a row that only ever knew a
+  // day, and emptying it again is how the rider throws a wrong reading away.
+  const currentTime = historicClockOf(getHistoricTakenAt(id));
 
   const result = await showHistoricNotesModal({
     title: 'Edit this upload',
-    help: 'Change the note or the date it is from.',
+    help: 'Change the note, or the date and time it is from.',
     initial: current === 'No notes saved' ? '' : current,
     required: true,
     date: currentDate,
+    time: currentTime,
     // storageName lets her pull the file back out of the vault and look at it;
     // sizeBytes lets her skip that when it is too big to send.
     context: row ? {
@@ -2499,14 +3083,35 @@ window._editHistoricMedia = async function(id) {
 
   const notes = typeof result === 'string' ? result : result.notes;
   const nextDate = typeof result === 'string' ? null : result.date;
+  const nextTime = typeof result === 'string' ? currentTime : (result.time || '');
 
   showPopup('loading', 'Saving…');
   await updateHistoricNotes(id, notes);
 
+  const dayMoved = !!nextDate && nextDate !== currentDate;
+  const timeMoved = nextTime !== currentTime;
   let dateWarning = null;
-  if (nextDate && nextDate !== currentDate) {
-    const saved = await persistHistoricDateToDatabase(id, nextDate);
-    setHistoricLocalDate(saved.id || id, saved.value);
+  if (dayMoved || timeMoved) {
+    const day = nextDate || currentDate;
+    // upload_date only needs rewriting when the DAY moved. Changing just the time is
+    // a fact about the recording, and upload_date is a fact about the upload.
+    const saved = dayMoved
+      ? await persistHistoricDateToDatabase(id, day)
+      : { ok: true, id };
+    // `day` and not `saved.value`: saved.value is the noon-UTC instant that went into
+    // upload_date, and handing that to setUploadDate put an instant in the cache for a
+    // column that stores a day. The row then showed a fabricated "5:30 pm" until the
+    // next cloud read truncated it away again.
+    const stamp = historicStampFrom(day, nextTime);
+    if (stamp) {
+      // One call: setTakenAt writes the instant and the day it falls on.
+      await setHistoricTakenAt(saved.id || id, stamp);
+    } else {
+      // No time any more. Clear the instant — which deliberately leaves the day
+      // alone — and then make sure the day itself is stored.
+      await setHistoricTakenAt(saved.id || id, null);
+      setHistoricLocalDate(saved.id || id, day);
+    }
     if (!saved.ok) {
       dateWarning = 'Note saved. The date is on this device only — add an UPDATE '
         + 'policy for media_files to sync it.';
@@ -2514,7 +3119,10 @@ window._editHistoricMedia = async function(id) {
   }
 
   if (dateWarning) updatePopup('error', dateWarning);
-  else updatePopup('success', nextDate && nextDate !== currentDate ? 'Note and date updated!' : 'Note updated!');
+  else if (dayMoved && timeMoved) updatePopup('success', 'Note, date and time updated!');
+  else if (dayMoved) updatePopup('success', 'Note and date updated!');
+  else if (timeMoved) updatePopup('success', 'Note and time updated!');
+  else updatePopup('success', 'Note updated!');
   loadHistoricUploads();
 };
 
@@ -4890,7 +5498,12 @@ async function getBillFileUrl(fileName) {
       const row = window._historicMediaRows?.get(Number(id));
       if (!row) return { ok: false, error: `No upload with id ${id}. Use list_media first.` };
       const result = await persistHistoricDateToDatabase(Number(id), date);
-      setHistoricLocalDate(result.id || Number(id), result.value);
+      // Same two rules as the edit sheet: the day she was given is what gets cached
+      // (not result.value, which is a noon-UTC instant for a column that holds a
+      // day), and a row with a real clock reading keeps it on the new day.
+      const moved = historicStampOnDay(getHistoricTakenAt(Number(id)), date);
+      if (moved) await setHistoricTakenAt(result.id || Number(id), moved);
+      else setHistoricLocalDate(result.id || Number(id), date);
       await loadHistoricUploads();
       return {
         ok: true, id: Number(id), date, storedInDb: result.ok,

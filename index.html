@@ -13,7 +13,7 @@
        needs no JS change. Keep the version segment of CACHE_NAME in service-worker.js
        in step with this — that file cannot read a meta tag, and a mismatch means the
        number on screen is not the number that is actually cached. -->
-  <meta name="version" content="1.9.3"/>
+  <meta name="version" content="1.9.4"/>
   <title>SpinLog</title>
   <!-- Not decoration. This is what an install prompt, a shared link and a
        browser's own history entry show underneath the title, and without it they
@@ -971,11 +971,34 @@
            not, lastModified as the floor. See dkFileDate() in script.js. The label
            says "Taken on" rather than "Uploaded on" because that is the question
            being answered — everything in this section is older than the app, and the
-           upload time is the one date that is never interesting. -->
-      <label class="docs-notes-date" id="historicNotesDateField" hidden>
-        <span><i class="fas fa-calendar-days" aria-hidden="true"></i> <span id="historicNotesDateLabel">Taken on</span></span>
-        <input type="date" id="historicNotesDate" />
-      </label>
+           upload time is the one date that is never interesting.
+           The TIME beside it is optional and is meant to be emptied. EXIF and the
+           mvhd box in an MP4 both read to the second, so most files fill it in — but
+           a bare date in a filename does not know one, and a camera with a wrong
+           clock reports one that is worse than nothing. Blank means "only the day is
+           known", which is what the table then shows.
+           A <div> with two labels rather than one <label> around both: a label points
+           at its first input, so wrapping these together would leave the time field
+           silently named "Taken on" as well. -->
+      <div class="docs-notes-date" id="historicNotesDateField" hidden>
+        <span class="docs-notes-date-head"><i class="fas fa-calendar-days" aria-hidden="true"></i> <span id="historicNotesDateLabel">Taken on</span></span>
+        <div class="docs-notes-when">
+          <label class="docs-notes-when-part">
+            <span>Date</span>
+            <input type="date" id="historicNotesDate" />
+          </label>
+          <label class="docs-notes-when-part docs-notes-when-time">
+            <!-- The separator is doing real work. Blender Pro Heavy is a CAPS-ONLY
+                 face — the same quirk that turned a "Next due" label into "NEXT DUE"
+                 in the service table — so lowercasing the qualifier is not available
+                 and "TIME OPTIONAL" reads as one field name. A middot makes it two
+                 things, which is the convention the file rows already use for
+                 "AUDIO · 1.9 MB". -->
+            <span>Time <em>· optional</em></span>
+            <input type="time" id="historicNotesTime" step="60" />
+          </label>
+        </div>
+      </div>
 
       <!-- Hidden until the upload flow tells autofill which file this is, so it
            never appears when there is nothing for her to write about. -->
