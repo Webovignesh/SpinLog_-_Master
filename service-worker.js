@@ -4,7 +4,7 @@
 // Version segment matches <meta name="version"> in index.html. That meta is what the
 // screen shows; this is what is actually cached. If they disagree, the number on the
 // home chip is a lie about which build is running.
-const CACHE_NAME = 'spinlog-cache-v1.9.5-upload-phases';
+const CACHE_NAME = 'spinlog-cache-v1.9.6-named-dates';
 const OFFLINE_URL = 'index.html';
 
 // The scheduler is shared with the page so foreground and background agree on

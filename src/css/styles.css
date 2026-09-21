@@ -6586,17 +6586,11 @@ body {
   letter-spacing: .08em;
   text-transform: uppercase;
 }
-#docs #uploadProgressBar {
-  grid-column: 1 / -1;
-  width: 0%;
-  height: 8px;
-  background: linear-gradient(90deg, #fb6900 60%, #fba600 100%);
-  border-radius: 999px;
-  margin: 0;
-  transition: width 0.25s cubic-bezier(.4,2,.2,1);
-  box-shadow: 0 1px 12px #fb690066;
-  display: none;
-}
+/* #docs #uploadProgressBar is gone, along with its element and two later
+   `grid-column: 1 / -1 !important` re-statements of the same rule. It drew the same
+   percentage the upload popup does, from behind that popup's blurred overlay, so what
+   it added to the screen was a band of orange under a dialog that was already
+   answering the question. See the markup comment in index.html. */
 #docs .docs-history-wrap {
   background: transparent;
   border: 1px solid rgba(255,255,255,0.08);
@@ -7531,9 +7525,6 @@ body {
 #docs .historic-upload-grid .drop-zone {
   min-height: 190px !important;
 }
-#docs #uploadProgressBar {
-  grid-column: 1 / -1 !important;
-}
 #docs .docs-date-cell {
   display: inline-flex;
   align-items: center;
@@ -7652,9 +7643,7 @@ body {
 #docs .historic-upload-grid .drop-zone {
   min-height: 190px !important;
 }
-#docs #uploadProgressBar {
-  grid-column: 1 / -1 !important;
-}.docs-primary-btn,
+.docs-primary-btn,
 .docs-secondary-btn {
   min-height: 46px;
   border-radius: 999px;
@@ -9406,8 +9395,7 @@ section {
    ========================================================= */
 
 /* Positioning context for the injected canvas. Absolute children of a grid
-   container are taken out of flow, so this cannot disturb the track sizing or
-   #uploadProgressBar's grid-column. */
+   container are taken out of flow, so this cannot disturb the track sizing. */
 #docs .historic-upload-grid {
   position: relative;
 }
@@ -16616,9 +16604,9 @@ body {
 
    It has to be dynamic, and plain `:last-child:nth-child(odd)` is NOT, because
    neither grid contains only tiles:
-     - the upload grid gets #uploadProgressBar appended in the markup AND a
-       <canvas class="dz3d-canvas"> inserted as its FIRST child by docs3d.js, so
-       "Historic Videos" is child 4 of 5 — even, and not last;
+     - the upload grid gets a <canvas class="dz3d-canvas"> inserted as its FIRST child
+       by docs3d.js, so "Historic Videos" is child 4 of 4 — even, and the count shifts
+       the moment that canvas lands;
      - the vault grid gets custom document cards inserted before the add tile.
    Counting raw children gave the right answer for about a second and the wrong one
    as soon as the canvas landed: measured 278px wide before docs3d booted and 134px
@@ -16632,9 +16620,13 @@ body {
    Still dynamic in the way that matters: add a custom document card and the add tile
    goes back to one column on its own, because the tile count turns even.
 
-   Phone widths only. From 769px up these grids are three or five columns and a
-   stretched last tile would be a banner. */
-@media (max-width: 768px) {
+   760px AND NOT 768px, which was an eight-pixel window with a real device in it.
+   Both grids turn three-column at 761px — that is where the `@media (max-width: 760px)`
+   two-column override stops — but this rule used to run to 768px. So from 761 to 768
+   inclusive the last tile stretched across a THREE-column row: one empty slot beside
+   tiles 1 and 2, and a full-width band underneath. 768px is iPad portrait.
+   Measured, not reasoned: 2 columns at 760, 3 at 761, last tile full width at both. */
+@media (max-width: 760px) {
   #docs .vehicle-docs-grid > :is(.doc-card, .doc-add-tile):nth-child(odd of .doc-card, .doc-add-tile):nth-last-child(1 of .doc-card, .doc-add-tile),
   #docs .historic-upload-grid > .drop-zone:nth-child(odd of .drop-zone):nth-last-child(1 of .drop-zone) {
     grid-column: 1 / -1 !important;
@@ -18267,7 +18259,6 @@ body {
    appearing at it. */
 .dk-next-bar > span,
 .sage-meter-bar > span,
-#uploadProgressBar,
 .dk-tl-track > span {
   transition: width 320ms var(--sl-ease), background-color 220ms var(--sl-ease);
 }

@@ -425,12 +425,26 @@ a different way:
    give the mileage rather than the date. Note the epoch is **1904-01-01 UTC**, not
    1970 — sixty-six years, which is the kind of off-by-a-lifetime that looks like a
    working parser until you read a date.
-4. **The filename.** Cameras and messaging apps both stamp it, and this is the source
-   that survives everything else. `20260320_125133.jpg` and `WhatsApp Video
-   2026-04-19 at 3.11.15 PM.mp4` are both in this archive, and for the second one it
-   is the *only* correct answer — WhatsApp rewrites `lastModified` to the moment you
-   downloaded the file. Human forms like `27th june` are read too, taking the year
-   from a reference date, because a person writing that means the one just gone.
+4. **The filename.** Cameras, messaging apps and export tools all stamp it, and this
+   is the source that survives everything else. `20260320_125133.jpg` and `WhatsApp
+   Video 2026-04-19 at 3.11.15 PM.mp4` are both in this archive, and for the second one
+   it is the *only* correct answer — WhatsApp rewrites `lastModified` to the moment you
+   downloaded the file.
+
+   **A colon is illegal in a filename** on Windows and on macOS both, so nothing that
+   stamps a time into one can use the obvious separator. Every pattern accepts `.`, `_`,
+   `-` or `:`, which is why none of them can simply look for `HH:MM:SS`.
+
+   Dates written the way a person writes them are read too — `ChatGPT Image Sep 21,
+   2026, 02_16_47 PM.png`, `21st June 2025, 9.30 PM` — and that form carries its own
+   year and its own time, so it loses nothing. It used to fall through to the
+   day-and-month reader and come back as a *day*: the file said 2:16 pm and the row
+   showed no time at all.
+
+   The month has to be a **whole** word — `Sep`, `Sept`, `September`. Slicing to three
+   letters and looking them up made `Marathon 12, 2025` read as 12 March. Bare forms
+   like `27th june` still work, taking the year from a reference date, because a person
+   writing that means the one just gone.
 5. **`file.lastModified`.** Always there, and for anything copied between devices it
    is the copy time. The weakest answer, and it *does* supply a time — refusing it
    meant a graphic with no EXIF and no date in its name could never show one, which is
@@ -438,6 +452,13 @@ a different way:
    acceptable is that it lands in an editable field the rider is looking at. The
    backfill is unaffected and must stay that way — it works from bytes fetched over
    HTTP, has no `File`, and so never reaches this branch.
+
+   It also fills in the **time alone** when a name knew only a day, and whether that is
+   worth anything comes down to *which day* the timestamp lands on. The same day as the
+   name means a file written here and left alone, so its clock reading is probably the
+   real one — source `name + timestamp`. A different day means the file has been copied
+   since, and then the time says when the copy happened and nothing about the recording,
+   so it is left out and the row stays one line.
 
 Anything before 1995 or in the future is rejected rather than used: both happen, from
 a device with a wrong clock, from a filename whose digits merely look like a date, and
@@ -486,6 +507,13 @@ Uploading… 35%
 Saving the record… 78%     ← the bytes are in the bucket; the row is a separate failure
 Uploaded — 04 Jul 2025, 2:45 pm
 ```
+
+**One surface, not two.** There used to be a second: `#uploadProgressBar`, an 8px orange
+bar across the drop-zone grid showing the same percentage. It sat behind a modal overlay
+with a blur over it, so what it contributed was a smear of orange under a dialog already
+reading "Uploading… 36%". Element, CSS and JS are all gone. It had been kept on the
+belief that the grid's last-tile arithmetic counted it as a child — that arithmetic reads
+`:nth-last-child(1 of .drop-zone)` and counts only drop zones, so nothing depended on it.
 
 The percentage is still paced rather than measured — `supabase-js` resolves `upload()`
 in one shot with no progress events — but the creep is now eased rather than random, so

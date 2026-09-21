@@ -13,7 +13,7 @@
        needs no JS change. Keep the version segment of CACHE_NAME in service-worker.js
        in step with this — that file cannot read a meta tag, and a mismatch means the
        number on screen is not the number that is actually cached. -->
-  <meta name="version" content="1.9.5"/>
+  <meta name="version" content="1.9.6"/>
   <title>SpinLog</title>
   <!-- Not decoration. This is what an install prompt, a shared link and a
        browser's own history entry show underneath the title, and without it they
@@ -790,7 +790,12 @@
         <p>Tap or drag videos. Notes are saved with the file.</p>
         <span>MP4 · MOV · AVI · WEBM</span>
       </div>
-      <div id="uploadProgressBar"></div>
+      <!-- #uploadProgressBar used to be here: an 8px orange bar across the grid that
+           showed the same percentage the upload popup does. It sat behind a modal
+           overlay with a blur over it, so all it contributed was a smear of orange
+           under a dialog already reading "Uploading… 36%". The popup is the one
+           indicator now. Nothing depends on the child count — the last-tile rule
+           counts `:nth-last-child(1 of .drop-zone)`. -->
     </div>
 
     <div class="docs-record-inner">

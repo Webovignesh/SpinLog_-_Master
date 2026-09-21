@@ -834,10 +834,11 @@ for (const size of SIZES) {
         })(),
         // Both docs grids are two columns here and both hold an odd number of tiles,
         // so the last one used to sit in the left column with the right half empty.
-        // It now spans the row, and it does that from :last-child:nth-child(odd)
-        // rather than a hardcoded child index, so it undoes itself when the count
-        // turns even. The upload grid also has #uploadProgressBar as a fourth child,
-        // which is display:none but still counts for :nth-child.
+        // It now spans the row, and it does that from
+        // :nth-child(odd of .drop-zone):nth-last-child(1 of .drop-zone) rather than a
+        // hardcoded index, so it undoes itself when the tile count turns even and it
+        // ignores whatever else is in the grid — docs3d.js inserts a <canvas> as the
+        // FIRST child, which a plain :nth-child would have counted.
         grids: (() => {
           const read = sel => {
             const g = document.querySelector(sel);

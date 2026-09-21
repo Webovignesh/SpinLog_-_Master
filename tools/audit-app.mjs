@@ -565,13 +565,22 @@ const browser = await chromium.launch();
       };
       const timed = await d.detail(mk('WhatsApp Video 2026-04-19 at 3.11.15 PM.mp4', Date.now(), 'video/mp4'));
       const camera = await d.detail(mk('20260320_125133.jpg', Date.now(), 'image/jpeg'));
+      // lastModified on a DIFFERENT day from the one in the name, so the same-day
+      // borrow below cannot satisfy this one by accident.
       const bare = await d.detail(mk('Screenshot 2026-04-19.png', Date.now(), 'image/png'));
+      // And the same name with lastModified ON that day, which is the borrow.
+      const borrowMs = Date.UTC(2026, 3, 19, 8, 40);
+      const borrowed = await d.detail(mk('Screenshot 2026-04-19.png', borrowMs, 'image/png'));
       const modMs = Date.UTC(2025, 10, 6, 8, 11);
       const modOnly = await d.detail(mk('1000013060.mp4', modMs, 'video/mp4'));
       return {
         timed: { date: timed.date, clock: local(timed.at), source: timed.source },
         camera: { date: camera.date, clock: local(camera.at) },
         bare: { date: bare.date, at: bare.at, source: bare.source },
+        borrowed: {
+          date: borrowed.date, clock: local(borrowed.at), source: borrowed.source,
+          want: local(new Date(borrowMs).toISOString()),
+        },
         modOnly: {
           date: modOnly.date, clock: local(modOnly.at), source: modOnly.source,
           // Derived here rather than hardcoded, so the assertion does not depend on
@@ -591,13 +600,45 @@ const browser = await chromium.launch();
         moved: typeof historicStampOnDay === 'function'
           ? local(historicStampOnDay(new Date(2025, 5, 26, 23, 14, 0).toISOString(), '2025-06-27'))
           : null,
+
+        // ── A DATE A PERSON WOULD WRITE, with a clock reading ──
+        //
+        // "ChatGPT Image Sep 21, 2026, 02_16_47 PM.png" carries a full timestamp and
+        // matched none of the numeric patterns, so it fell through to the day-and-month
+        // reader and came back as a DAY — the file said 2:16 pm and the row showed no
+        // time at all. A colon is illegal in a filename on both Windows and macOS, so
+        // the separator is whatever the writer substituted.
+        written: (() => {
+          const hit = d.fromName('ChatGPT Image Sep 21, 2026, 02_16_47 PM.png', Date.now());
+          return hit ? { day: d.iso(hit), clock: local(hit.toISOString()), timed: !!hit.dkTimed } : null;
+        })(),
+        writtenAm: (() => {
+          const hit = d.fromName('ChatGPT Image September 3 2025 at 9.05 PM.png', Date.now());
+          return hit ? { day: d.iso(hit), clock: local(hit.toISOString()) } : null;
+        })(),
+        dayFirstWritten: (() => {
+          const hit = d.fromName('21st June 2025, 9.30 PM.jpg', Date.now());
+          return hit ? { day: d.iso(hit), clock: local(hit.toISOString()) } : null;
+        })(),
+        // A word that merely STARTS like a month is not one. Slicing to three letters
+        // and looking them up made "Marathon 12, 2025" read as 12 March.
+        notAMonth: d.fromName('Marathon 12, 2025 10.30 AM.png', Date.now()),
+        stillAMonth: d.iso(d.fromName('Engine Sound-27th june- under 100km.m4a',
+          Date.UTC(2025, 7, 3))),
       };
     });
     ok('dkMediaDate.detail reads a clock reading out of a filename that has one',
       clocks.timed?.clock === '15:11', JSON.stringify(clocks.timed));
     ok('and out of a camera timestamp', clocks.camera?.clock === '12:51', JSON.stringify(clocks.camera));
-    ok('and leaves the time null for a bare date',
+    ok('and leaves the time null for a bare date whose file was touched later',
       clocks.bare?.date === '2026-04-19' && clocks.bare?.at === null, JSON.stringify(clocks.bare));
+    // Whether lastModified is worth anything for a name that knew only a day comes
+    // down to WHICH DAY it lands on. The same day is a file written here and left
+    // alone; a different day is a copy, and then the time says when the copy happened.
+    ok('but borrows the time when the file was last touched on that same day',
+      clocks.borrowed?.date === '2026-04-19'
+      && clocks.borrowed?.clock === clocks.borrowed?.want
+      && clocks.borrowed?.source === 'name + timestamp', JSON.stringify(clocks.borrowed));
     // lastModified DOES get to supply a clock reading now. It is the weakest source
     // here — for anything copied between devices it is the copy — but it lands in an
     // editable field the rider is looking at, and refusing it meant a graphic with no
@@ -722,6 +763,17 @@ const browser = await chromium.launch();
     ok('an empty time field is not midnight', clocks.blankIsNotMidnight === true,
       String(clocks.blankIsNotMidnight));
     ok('correcting the day keeps the clock reading', clocks.moved === '23:14', String(clocks.moved));
+    ok('a date written the way a person writes it keeps its time',
+      clocks.written?.day === '2026-09-21' && clocks.written?.clock === '14:16'
+      && clocks.written?.timed === true, JSON.stringify(clocks.written));
+    ok('with the month spelled out and an "at"',
+      clocks.writtenAm?.day === '2025-09-03' && clocks.writtenAm?.clock === '21:05',
+      JSON.stringify(clocks.writtenAm));
+    ok('and day-first', clocks.dayFirstWritten?.day === '2025-06-21'
+      && clocks.dayFirstWritten?.clock === '21:30', JSON.stringify(clocks.dayFirstWritten));
+    ok('a word that only starts like a month is not one', clocks.notAMonth === null,
+      JSON.stringify(clocks.notAMonth));
+    ok('but a real one still is', clocks.stillAMonth === '2025-06-27', String(clocks.stillAMonth));
     ok('the cloud store can read and write taken_at', await page.evaluate(() =>
       typeof window.dkCloudStore?.takenAt === 'function'
       && typeof window.dkCloudStore?.setTakenAt === 'function'));
@@ -834,20 +886,23 @@ const browser = await chromium.launch();
       await new Promise(r => setTimeout(r, 1400));
       clearInterval(watch);
       window.dkMediaDate.detail = real;
-      const bar = document.getElementById('uploadProgressBar');
       return {
         said: seen.some(t => /^Reading the file/.test(t)),
         sheetOpen: !!document.getElementById('historicNotesModal')?.classList.contains('show'),
         popupGone: !document.getElementById('customPopup')?.classList.contains('show'),
-        barGone: !bar || getComputedStyle(bar).display === 'none',
+        // The second surface is gone entirely: an 8px orange bar behind a blurred
+        // modal overlay, drawing the same percentage the dialog already stated.
+        noBar: !document.getElementById('uploadProgressBar'),
         seen,
       };
     });
     ok('a slow metadata read says so', waiting.skip === true || waiting.said === true,
       JSON.stringify(waiting.seen));
     ok('and stops saying so before the sheet opens',
-      waiting.skip === true || (waiting.sheetOpen && waiting.popupGone && waiting.barGone),
+      waiting.skip === true || (waiting.sheetOpen && waiting.popupGone),
       JSON.stringify(waiting));
+    ok('the popup is the only progress surface', waiting.skip === true || waiting.noBar === true,
+      String(waiting.noBar));
     await press('and that sheet cancels cleanly too', () => page.evaluate(() =>
       document.getElementById('historicNotesSkip')?.click()));
   }

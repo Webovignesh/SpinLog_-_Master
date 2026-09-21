@@ -383,6 +383,28 @@ window.dkMediaDate = (function () {
     'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
   /**
+   * A month number from a written month, or -1.
+   *
+   * WHOLE WORD, not the first three letters. Slicing to three and looking them up in
+   * MONTHS meant "Marathon 12, 2025" read as 12 March and "Service-3-2025" as 3
+   * September — a word that merely starts like a month became a date. The abbreviation
+   * has to be one anybody actually writes: Sep, Sept, September.
+   */
+  function monthIndex(word) {
+    const w = String(word || '').trim().toLowerCase();
+    if (!/^(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)([a-z]*)$/.test(w)) return -1;
+    const short = w.slice(0, 3);
+    const full = ['january', 'february', 'march', 'april', 'may', 'june',
+      'july', 'august', 'september', 'october', 'november', 'december'];
+    const idx = MONTHS.indexOf(short);
+    if (idx === -1) return -1;
+    // Either the bare abbreviation, the conventional four-letter "Sept", or the whole
+    // word. Anything else that happens to start with three month letters is not one.
+    if (w === short || w === 'sept' || w === full[idx]) return idx;
+    return -1;
+  }
+
+  /**
    * A Date, or null if it is not one worth believing.
    *
    * Both ends of the window are load-bearing. Nothing here predates digital
@@ -729,9 +751,15 @@ window.dkMediaDate = (function () {
   function fromName(name, reference) {
     const text = String(name || '');
 
+    // A COLON IS ILLEGAL IN A FILENAME, on Windows and on macOS both, so no writer
+    // that stamps a time into one can use the obvious separator. Every pattern below
+    // therefore accepts '.', '_', '-' or ':' between the parts of the clock reading,
+    // and that is why they cannot simply look for HH:MM:SS.
+    const CLOCK = '(\\d{1,2})[._:-](\\d{2})(?:[._:-](\\d{2}))?\\s*(AM|PM)?';
     const numeric = [
-      // WhatsApp: "... 2026-04-19 at 3.11.15 PM ..."
-      /(\d{4})-(\d{2})-(\d{2})\s+at\s+(\d{1,2})\.(\d{2})\.(\d{2})\s*(AM|PM)?/i,
+      // WhatsApp: "2026-04-19 at 3.11.15 PM". Also plain "2026-09-21 14.16.47" and
+      // "2026-09-21, 14_16", which the `at` used to be required for.
+      new RegExp(`(\\d{4})-(\\d{2})-(\\d{2})(?:\\s+at\\s+|,?\\s+)${CLOCK}`, 'i'),
       // Camera: 20260320_125133  /  IMG_20240712_143500
       /(?:^|[^\d])(\d{4})(\d{2})(\d{2})[_\-T](\d{2})(\d{2})(\d{2})(?:[^\d]|$)/,
       // Screenshot / plain date: 2026-04-19, 20260320
@@ -756,6 +784,42 @@ window.dkMediaDate = (function () {
       if (found) { found.dkTimed = timed; return found; }
     }
 
+    // ── A WRITTEN MONTH WITH A FULL YEAR AND A CLOCK READING ──
+    //
+    // "ChatGPT Image Sep 21, 2026, 02_16_47 PM.png" — and every other tool that names
+    // an export the way a person would write the date. None of the numeric patterns
+    // above touch it, so it used to fall through to the day-and-month reader below,
+    // which returns a DAY: the file said 2:16 pm and the row showed no time at all.
+    //
+    // Distinct from that reader because this form carries its own year and its own
+    // time, so it needs no reference date and loses nothing.
+    const written = [
+      // "Sep 21, 2026, 02_16_47 PM"  ·  "September 21 2026 at 2.16 PM"
+      new RegExp(`([a-z]{3,9})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?,?\\s+(\\d{4})`
+        + `(?:,|\\s+at)?\\s+${CLOCK}`, 'i'),
+      // "21 Sep 2026 14.16"  ·  "21st June 2025, 9.30 PM"
+      new RegExp(`(\\d{1,2})(?:st|nd|rd|th)?\\s+([a-z]{3,9})\\.?,?\\s+(\\d{4})`
+        + `(?:,|\\s+at)?\\s+${CLOCK}`, 'i'),
+    ];
+    for (let i = 0; i < written.length; i += 1) {
+      const m = text.match(written[i]);
+      if (!m) continue;
+      const monthText = i === 0 ? m[1] : m[2];
+      const dayText = i === 0 ? m[2] : m[1];
+      const month = monthIndex(monthText);
+      const day = Number(dayText);
+      if (month === -1 || !(day >= 1 && day <= 31)) continue;
+      let hour = Number(m[4]);
+      const mer = m[7];
+      if (mer) {
+        if (/pm/i.test(mer) && hour < 12) hour += 12;
+        if (/am/i.test(mer) && hour === 12) hour = 0;
+      }
+      const found = ok(new Date(Number(m[3]), month, day,
+        hour, m[5] ? Number(m[5]) : 0, m[6] ? Number(m[6]) : 0));
+      if (found) { found.dkTimed = true; return found; }
+    }
+
     // "27th june", "3 Aug", "Dec 14". Only used when there is a reference to take
     // the year from — a bare day and month on its own is a guess, not a date.
     if (reference) {
@@ -768,7 +832,7 @@ window.dkMediaDate = (function () {
           const isDayFirst = m === dayFirst;
           const dayText = isDayFirst ? m[1] : m[2];
           const monthText = isDayFirst ? m[2] : m[1];
-          const month = MONTHS.indexOf(String(monthText).slice(0, 3).toLowerCase());
+          const month = monthIndex(monthText);
           const day = Number(dayText);
           if (month === -1 || !(day >= 1 && day <= 31)) continue;
           let year = ref.getFullYear();
@@ -849,11 +913,23 @@ window.dkMediaDate = (function () {
 
       const named = fromName(file.name, file.lastModified || Date.now());
       if (named) {
-        return {
-          date: iso(named),
-          at: named.dkTimed ? stamp(named) : null,
-          source: named.dkTimed ? 'name' : 'name (day only)',
-        };
+        const day = iso(named);
+        let at = named.dkTimed ? stamp(named) : null;
+        let source = named.dkTimed ? 'name' : 'name (day only)';
+        // The name knew a day and no time — "Screenshot 2026-04-19.png", "27th june".
+        // lastModified knows a time, and whether it is worth anything depends entirely
+        // on WHICH DAY it lands on. The same day as the name means a file that was
+        // written here and left alone, and its clock reading is probably the real one.
+        // A different day means it has been copied since, and then the time says when
+        // the copy happened and nothing at all about the recording.
+        if (!at) {
+          const mod = file.lastModified ? new Date(file.lastModified) : null;
+          if (ok(mod) && iso(mod) === day) {
+            at = stamp(mod);
+            source = 'name + timestamp';
+          }
+        }
+        return { date: day, at, source };
       }
 
       // lastModified, and it DOES get to supply a clock reading.
@@ -1630,20 +1706,18 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-// ── ONE UPLOAD PROGRESS INDICATOR, IN TWO PLACES ──────────────────────
+// ── ONE UPLOAD PROGRESS INDICATOR, IN ONE PLACE ───────────────────────
 //
-// There used to be two of these. showProgressBar/finishProgressBar/
-// errorProgressBar drove #uploadProgressBar — the 8px gradient bar that spans
-// the drop-zone grid — and startUploadPercent/finishUploadPercent/
-// errorUploadPercent drove a percentage in the loading popup. Only the second
-// set was ever called, so the bar in the markup never moved: a styled,
-// precached element that existed solely because the grid's
-// `:last-child:nth-child(odd)` arithmetic counts it as a fourth child.
+// The popup, and only the popup. There used to be a second surface:
+// #uploadProgressBar, an 8px orange bar spanning the drop-zone grid, showing the same
+// number. Two things drawing one fact, and the bar was the worse of the two — it sits
+// behind a modal overlay with a blur over it, so what it actually contributed was a
+// smear of orange under a dialog that already said "Uploading… 36%".
 //
-// Deleting it was the wrong fix, because that arithmetic is real and
-// audit-mobile asserts it. So the two sets are one set, and the bar shows the
-// same number the popup does. The popup is modal and centred; the bar is in the
-// grid you just dropped a file on, which is where you are looking.
+// Its markup and CSS are gone with it. It was kept once on the belief that the grid's
+// last-tile arithmetic counted it as a child; that arithmetic now reads
+// `:nth-last-child(1 of .drop-zone)` and counts only drop zones, so nothing depends on
+// it being there.
 //
 // The percentage is a paced estimate, not a byte count — supabase-js resolves
 // upload() in one shot with no progress events — so it climbs to 93 and waits
@@ -1674,25 +1748,8 @@ let uploadPercentTimer = null;
 let uploadPercent = 0;
 let uploadPhase = 'Uploading';
 
-/** Paint the bar, or hide it. `null` hides. */
-function paintUploadBar(percent) {
-  const bar = document.getElementById('uploadProgressBar');
-  if (!bar) return;
-  if (percent === null) {
-    bar.style.display = 'none';
-    bar.style.width = '0%';
-    bar.style.background = '';
-    return;
-  }
-  bar.style.display = 'block';
-  bar.style.width = `${percent}%`;
-}
-
-/** Both surfaces, one number, one label. */
 function paintUploadStep() {
-  const shown = Math.round(uploadPercent);
-  showPopup('loading', `${uploadPhase}… ${shown}%`);
-  paintUploadBar(shown);
+  showPopup('loading', `${uploadPhase}… ${Math.round(uploadPercent)}%`);
 }
 
 function stopUploadTimer() {
@@ -1739,7 +1796,6 @@ function setUploadPhase(phase, atLeast) {
 function cancelUploadPercent() {
   stopUploadTimer();
   hidePopup();
-  paintUploadBar(null);
 }
 
 /**
@@ -1754,35 +1810,18 @@ function cancelUploadPercent() {
 function finishUploadPercent(message) {
   stopUploadTimer();
   uploadPercent = 100;
-  paintUploadBar(100);
   if (message) {
     showPopup('success', message);
-    // Later than the popup's own 3s dismiss would be pointless; 900ms is long enough
-    // for the bar to be seen full rather than vanishing mid-fill.
-    setTimeout(() => paintUploadBar(null), 900);
     return;
   }
   showPopup('loading', `${uploadPhase}… 100%`);
-  setTimeout(() => {
-    hidePopup();
-    // After the popup, so the bar is briefly seen full rather than vanishing
-    // at the same moment the success message does.
-    paintUploadBar(null);
-  }, 700);
+  setTimeout(hidePopup, 700);
 }
 
 /** @param {string} [message] Why it failed. Said once, here, rather than twice. */
 function errorUploadPercent(message) {
   stopUploadTimer();
   showPopup('error', message || 'Upload failed.');
-  const bar = document.getElementById('uploadProgressBar');
-  if (bar) {
-    // Red and full: the bar has to stop claiming progress it did not make.
-    bar.style.display = 'block';
-    bar.style.width = '100%';
-    bar.style.background = '#b52222';
-  }
-  setTimeout(() => paintUploadBar(null), 1200);
 }
 
 
@@ -2942,6 +2981,9 @@ function uploadDateProvenance(found) {
   if (source === 'exif') return 'Date and time read from the photo\u2019s EXIF.';
   if (source === 'png') return 'Date and time read from the image\u2019s own metadata.';
   if (source === 'mvhd') return 'Date and time read from the video\u2019s metadata.';
+  if (source === 'name + timestamp') {
+    return 'Date read from the file name, time from the file itself \u2014 worth a check.';
+  }
   if (source.startsWith('name')) {
     return timed
       ? 'Date and time read from the file name.'
