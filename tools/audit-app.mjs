@@ -436,6 +436,148 @@ const browser = await chromium.launch();
   ok('no control threw across the whole crawl', pageErrors.length === 0, pageErrors.join(' | '));
 
   // ════════════════════════════════════════════════════════════════════
+  // 3b  BACK CLOSES WHAT IS ON TOP
+  // ════════════════════════════════════════════════════════════════════
+  //
+  // On a phone the back gesture is the primary way out of anything, and with a
+  // dialog open it used to go back a PAGE and leave the dialog sitting over the
+  // section it had just arrived at. On the last entry in the stack it closed the
+  // installed app outright with a modal still up.
+  //
+  // Three things have to hold, and the third is the one that broke first: an
+  // overlay must absorb the press, a press with nothing open must still navigate,
+  // and closing a surface that ALSO navigates must not undo the navigation.
+  {
+    const guard = () => page.evaluate(() => ({
+      ...(window.dkBackGuardState || {}),
+      section: document.querySelector('main section.active')?.id,
+      overlay: !!(document.querySelector('.sl-modal-overlay.sl-modal--open')
+        || document.querySelector('#docs .docs-modal.show')
+        || document.querySelector('.docs-player.is-open')
+        || document.querySelector('.sl-slide-overlay:not(.is-leaving)')),
+    }));
+
+    ok('the back guard is running', await page.evaluate(() => typeof window.dkBackGuardState) === 'object');
+
+    // ── a dialog absorbs the press ──
+    await goToSection(page, 'home');
+    await press('a cover card opens its editor', () => page.evaluate(() =>
+      document.querySelector('.dk-cover-card')?.click()));
+    let g = await guard();
+    ok('and the guard takes a history entry for it', g.overlay === true && g.held === true,
+      JSON.stringify(g));
+    await page.goBack();
+    await page.waitForTimeout(650);
+    g = await guard();
+    ok('back shuts the dialog', g.overlay === false, JSON.stringify(g));
+    ok('and does not leave the page it was over', g.section === 'home', String(g.section));
+
+    // ── with nothing open, back still navigates ──
+    await goToSection(page, 'service');
+    await page.goBack();
+    await page.waitForTimeout(700);
+    ok('with nothing open, back still moves between sections',
+      await page.evaluate(() => document.querySelector('main section.active')?.id) !== 'service');
+
+    // ── the slide dialog resolves rather than hanging ──
+    await goToSection(page, 'home');
+    await page.evaluate(() => { window.__backProbe = window.SageConfirm.slide({ title: 'Back probe' }); });
+    await page.waitForTimeout(450);
+    ok('the slide dialog takes an entry too',
+      (await guard()).held === true);
+    await page.goBack();
+    await page.waitForTimeout(650);
+    ok('back cancels it', (await guard()).overlay === false);
+    // A dialog closed without resolving its promise leaves every caller awaiting
+    // it for ever, which is worse than the dialog staying up.
+    ok('and resolves it false rather than leaving the promise pending',
+      await page.evaluate(() => window.__backProbe.then(v => v === false)) === true);
+
+    // ── a surface that closes BY navigating must not lose the navigation ──
+    //
+    // Picking a search result shuts the panel and then jumps to a section, in that
+    // order. The guard's entry is spent by a MutationObserver microtask, which runs
+    // AFTER the click handler — so spending it unconditionally popped the section
+    // that had just been pushed and the jump appeared to pick the wrong page.
+    await goToSection(page, 'home');
+    const jumped = await page.evaluate(async () => {
+      const i = document.getElementById('dkSearchInput');
+      if (!i) return { skip: true };
+      i.value = 'service';
+      i.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise(r => setTimeout(r, 450));
+      const items = [...document.querySelectorAll('#dkSearchPanel .dk-search-item')];
+      if (!items.length) return { skip: true };
+      items[0].click();
+      await new Promise(r => setTimeout(r, 900));
+      return { section: document.querySelector('main section.active')?.id };
+    });
+    ok('choosing a search result keeps the section it navigated to',
+      jumped.skip === true || jumped.section !== 'home', JSON.stringify(jumped));
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  // 3c  AN UPLOAD IS DATED FROM THE FILE, NOT FROM THE CLOCK
+  // ════════════════════════════════════════════════════════════════════
+  //
+  // "Historic Audio & Images" is, by name, older than the app. The row used to be
+  // stamped with `new Date()` and the sheet showed no date at all, so a 2024 ride
+  // photo was filed under today with nowhere to say otherwise.
+  {
+    const dates = await page.evaluate(async () => {
+      if (typeof window.dkFileDate !== 'function') return { missing: true };
+      const mk = (name, ms, type) =>
+        new File([new Uint8Array([1, 2, 3])], name, { type, lastModified: ms });
+      return {
+        // The filename is the only correct source for a WhatsApp file: it rewrites
+        // lastModified to the moment you downloaded it.
+        whatsapp: await window.dkFileDate(mk('WhatsApp Video 2026-04-19 at 3.11.15 PM.mp4', Date.now(), 'video/mp4')),
+        camera: await window.dkFileDate(mk('20260320_125133.jpg', Date.now(), 'image/jpeg')),
+        prefixed: await window.dkFileDate(mk('IMG_20240712_143500.jpg', Date.now(), 'image/jpeg')),
+        // No date in the name, so it falls through to lastModified.
+        plain: await window.dkFileDate(mk('1000013060.mp4', Date.UTC(2025, 10, 6, 8, 11), 'video/mp4')),
+        // A clock set to 2099 is a broken clock, not a date.
+        future: await window.dkFileDate(mk('whatever.png', Date.UTC(2099, 0, 1), 'image/png')),
+      };
+    });
+    ok('dkFileDate reads the date out of a filename', dates.whatsapp === '2026-04-19', JSON.stringify(dates));
+    ok('and out of a camera timestamp', dates.camera === '2026-03-20', String(dates.camera));
+    ok('and out of a prefixed one', dates.prefixed === '2024-07-12', String(dates.prefixed));
+    ok('and falls back to lastModified', dates.plain === '2025-11-06', String(dates.plain));
+    ok('and refuses a date in the future', dates.future === null, String(dates.future));
+
+    // End to end: the sheet the upload opens has to arrive with it filled in.
+    await goToSection(page, 'docs');
+    const sheet = await page.evaluate(async () => {
+      const zone = document.querySelector('.drop-zone[data-type="image"]');
+      const input = zone?.querySelector('input[type=file]');
+      if (!input) return { skip: true };
+      const dt = new DataTransfer();
+      dt.items.add(new File([new Uint8Array([1, 2, 3])], '20260320_125133.jpg',
+        { type: 'image/jpeg', lastModified: Date.now() }));
+      input.files = dt.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise(r => setTimeout(r, 1100));
+      const field = document.getElementById('historicNotesDateField');
+      const dateEl = document.getElementById('historicNotesDate');
+      return {
+        open: document.getElementById('historicNotesModal')?.classList.contains('show'),
+        shown: field ? !field.hasAttribute('hidden') : false,
+        value: dateEl?.value || null,
+        max: dateEl?.max || null,
+      };
+    });
+    ok('the upload sheet shows the date field', sheet.skip === true || (sheet.open && sheet.shown),
+      JSON.stringify(sheet));
+    ok('pre-filled from the file itself', sheet.skip === true || sheet.value === '2026-03-20',
+      String(sheet.value));
+    ok('and it will not accept a future date', sheet.skip === true || !!sheet.max, String(sheet.max));
+    // Leave nothing open for the checks that follow.
+    await press('and the sheet cancels cleanly', () => page.evaluate(() =>
+      document.getElementById('historicNotesSkip')?.click()));
+  }
+
+  // ════════════════════════════════════════════════════════════════════
   // 4  TEXT CONTRAST
   // ════════════════════════════════════════════════════════════════════
   //

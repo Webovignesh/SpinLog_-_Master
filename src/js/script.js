@@ -140,6 +140,348 @@ window.dkSlideOpen = function dkSlideOpen(el, ms = 190, shift) {
 };
 
 // ════════════════════════════════════════════════════════════════════════
+// SpinLog | BACK CLOSES WHAT IS ON TOP
+//
+// On a phone the back gesture is the primary way out of anything. This app had
+// nothing between it and the section router: with a dialog open, an edge swipe
+// went back a PAGE and left the dialog sitting over the section you had just
+// arrived at. Worse on the last entry in the stack, where it closed the installed
+// app outright with a modal still up.
+//
+// An overlay IS a page as far as the user is concerned, so it gets a history entry
+// of its own, and back spends that entry instead of a section.
+//
+// ── HOW IT WORKS, AND THE THREE THINGS THAT MAKE IT SAFE ────────────
+//
+// 1. THE PUSHED ENTRY DOES NOT CHANGE THE URL. `pushState(state, '', location.href)`
+//    adds a stack entry at the same address, so popping it cannot fire
+//    `hashchange` — and `hashchange` is what drives the section router. Without
+//    this, dismissing a dialog would also navigate a section back.
+//
+// 2. IT IS DRIVEN BY OBSERVATION, NOT BY CALL SITES. There are nine of these
+//    surfaces and between them roughly twenty ways to close one — an X, a Cancel,
+//    a backdrop click, Escape, a save that closes on success, a promise resolving.
+//    Hooking each would mean editing every one and would still miss the next one
+//    added. A MutationObserver on the roots watches the attributes that actually
+//    carry the state, so every path is covered by construction.
+//
+// 3. CLOSING IS DELEGATED TO ESCAPE. Every one of these overlays already has a
+//    working Escape handler, including the nesting rules between them — the slide
+//    dialog swallows the key in the capture phase so it cannot also close the
+//    settings dialog behind it, and the settings dialog closes its memory chooser
+//    before itself. Dispatching Escape reuses all of that, along with each
+//    overlay's own state cleanup. Re-deriving "which one is on top" here would be
+//    a second copy of rules that already exist, and the two would drift.
+//
+// `held` is the whole state machine, and it is set to false BEFORE the close runs
+// on a real back press. That is what stops the observer seeing the close, thinking
+// it owns the entry, and calling history.back() a second time — which would eat a
+// section or leave the app.
+// ════════════════════════════════════════════════════════════════════════
+(function dkBackGuard() {
+  'use strict';
+
+  /** Press a control if it is there, and report whether it was. */
+  function tap(el) {
+    if (!el) return false;
+    el.click();
+    return true;
+  }
+
+  /** Send Escape to a specific element, for the handlers bound to one. */
+  function escape(target) {
+    (target || document).dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Escape', code: 'Escape', keyCode: 27, which: 27,
+      bubbles: true, cancelable: true,
+    }));
+    return true;
+  }
+
+  /**
+   * Every surface a back press should shut: how to tell it is up, and how to shut
+   * it. Innermost first, because that is the order they stack on screen and the
+   * first match is what gets closed.
+   *
+   * EACH ONE NAMES ITS OWN CLOSE, and the first version of this did not — it just
+   * dispatched Escape at the document and trusted every overlay to have a handler.
+   * Most do. The cover-date editor did not, so back pressed against it did nothing
+   * at all, twice over: no Escape handler to catch the key, and no other route in.
+   * (That gap is now filled as well, because a modal you cannot dismiss from the
+   * keyboard is a fault on its own.)
+   *
+   * Pressing the overlay's own close BUTTON rather than reaching into its state is
+   * deliberate. Every one of these has cleanup attached to that control — a promise
+   * to resolve, a timer to clear, an interval polling a distance, focus to hand
+   * back — and half of it lives in closures nothing out here can reach.
+   */
+  const SURFACES = [
+    {
+      // Created and removed at runtime by sage-confirm.js, so it is found by
+      // selector rather than by id. `is-leaving` means it is already going.
+      find: () => document.querySelector('.sl-slide-overlay:not(.is-leaving)'),
+      // Its own API, which resolves the promise the caller is awaiting. Cancelling
+      // any other way would leave that promise pending for ever.
+      close: () => { window.SageConfirm?.dismiss(false); return true; },
+    },
+    {
+      find: () => document.querySelector('.sl-modal-overlay.sl-modal--open'),
+      close: (el) => tap(el.querySelector('.sl-modal-close, [data-sl-close]')) || escape(),
+    },
+    {
+      find: () => document.querySelector('#docs .docs-modal.show'),
+      close: (el) => tap(el.querySelector('.docs-modal-close, #historicNotesSkip')) || escape(),
+    },
+    {
+      find: () => document.querySelector('.docs-player.is-open'),
+      close: () => tap(document.getElementById('docsPlayerClose')) || escape(),
+    },
+    {
+      // The loading / result popup. Included on purpose: one left up by a failed
+      // write is exactly the kind of thing you try to back out of.
+      find: () => document.querySelector('#customPopup.show'),
+      close: () => { window.hidePopup?.(); return true; },
+    },
+    {
+      find: () => {
+        const p = document.getElementById('dkSearchPanel');
+        return p && !p.hidden ? p : null;
+      },
+      // Its Escape handler is bound to the INPUT, not the document.
+      close: () => escape(document.getElementById('dkSearchInput')),
+    },
+    {
+      // Both dropdown menus listen for Escape on the document.
+      find: () => document.querySelector('.custom-entry-select.is-open, .custom-history-select.is-open'),
+      close: () => escape(),
+    },
+  ];
+
+  function openSurface() {
+    for (const surface of SURFACES) {
+      let el = null;
+      try { el = surface.find(); } catch { el = null; }
+      if (el) return { el, surface };
+    }
+    return null;
+  }
+
+  let held = false;
+  // Visible so tools/ can assert the state machine rather than infer it from
+  // whether something happened to close.
+  const debug = { pops: 0, pushes: 0, spends: 0 };
+  Object.defineProperty(window, 'dkBackGuardState', {
+    get: () => ({ held, open: !!openSurface(), ...debug }),
+  });
+
+  function sync() {
+    const open = !!openSurface();
+    if (open && !held) {
+      held = true;
+      debug.pushes += 1;
+      // Same URL, so popping this cannot move the section router.
+      try { history.pushState({ dkOverlay: true }, '', location.href); } catch { held = false; }
+      return;
+    }
+    if (!open && held) {
+      // Closed by its own UI rather than by back, so the entry we added is still on
+      // the stack and has to be spent — otherwise back would need two presses.
+      held = false;
+
+      // ONLY IF OUR ENTRY IS STILL THE TOP ONE.
+      //
+      // Some surfaces close by navigating. Picking a result in the command-centre
+      // search shuts the panel and then jumps to a section, and in that order: the
+      // panel hides, the section pushes `#service`, and only then does this
+      // observer run — MutationObserver callbacks are microtasks, so they land
+      // after the click handler has finished. Spending unconditionally popped the
+      // section that had just been pushed, so searching for a service record
+      // dropped you back on whatever page you started from. It looked like the
+      // search was picking the wrong section.
+      //
+      // `history.state` is the test. Ours carries `dkOverlay`; a section push
+      // carries null. If the top of the stack is not ours, the entry is buried
+      // under a real navigation and must be left alone — one stale entry costs a
+      // single extra back press somewhere harmless, and undoing a navigation the
+      // user asked for does not.
+      try {
+        if (history.state && history.state.dkOverlay) {
+          debug.spends += 1;
+          history.back();
+        }
+      } catch { /* nothing to go back to */ }
+    }
+  }
+
+  window.addEventListener('popstate', () => {
+    debug.pops += 1;
+    if (!held) return;                  // not ours: let the section router have it
+    const found = openSurface();
+    if (!found) { held = false; return; }
+    // BEFORE the close, so the observer below sees held === false and does not try
+    // to spend an entry the browser has already popped. Getting this the wrong way
+    // round eats a section, or exits the app.
+    held = false;
+    try { found.surface.close(found.el); } catch { /* leave it up rather than break */ }
+  });
+
+  function watch() {
+    // Feature-checked rather than assumed. Every browser this app supports has it,
+    // but tools/audit-boot.mjs evaluates these files against a minimal stub of a
+    // document and reports any ReferenceError as a real fault — which is exactly
+    // the signal it exists to give, so it should not be spent on a missing DOM API.
+    if (!document.body || typeof MutationObserver !== 'function') return;
+    const observer = new MutationObserver(sync);
+    observer.observe(document.body, {
+      subtree: true,
+      childList: true,                  // the slide overlay is added and removed
+      attributes: true,
+      attributeFilter: ['class', 'hidden', 'aria-hidden'],
+    });
+    sync();
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watch);
+  else watch();
+})();
+
+// ════════════════════════════════════════════════════════════════════════
+// SpinLog | WHEN WAS THIS FILE ACTUALLY FROM?
+//
+// An upload's date should be the date the thing HAPPENED, not the date it was
+// uploaded. Those are the same for a photo taken minutes ago and years apart for
+// everything else in this archive — the point of "Historic Audio & Images" is that
+// most of it is older than the app.
+//
+// Three sources, best first, because each is wrong in a different way:
+//
+//   1. EXIF DateTimeOriginal. The only one that means "when the shutter opened".
+//      JPEG only, and absent from anything re-encoded by a messaging app.
+//
+//   2. The FILENAME. Cameras and messaging apps both stamp it, and this is the one
+//      that survives everything else: `20260320_125133.jpg` and `WhatsApp Video
+//      2026-04-19 at 3.11.15 PM.mp4` are both in this archive, and for the second
+//      one it is the ONLY correct source — WhatsApp rewrites lastModified to the
+//      moment you downloaded it.
+//
+//   3. file.lastModified. Always present, and for a file copied between devices it
+//      is the copy time. Last resort rather than first.
+//
+// Returns a local ISO date string, or null. Never throws and never rejects: a date
+// that cannot be worked out has to leave the field empty for the user to fill,
+// not break the upload.
+// ════════════════════════════════════════════════════════════════════════
+window.dkFileDate = async function dkFileDate(file) {
+  if (!file) return null;
+
+  const iso = (d) => {
+    if (!d || Number.isNaN(d.getTime())) return null;
+    // Nothing from the future, and nothing from before digital cameras. Both
+    // happen: a device with a wrong clock, and a filename whose digits merely
+    // look like a date.
+    const year = d.getFullYear();
+    if (year < 1995 || d.getTime() > Date.now() + 86400000) return null;
+    return `${year}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+
+  // ── 1. EXIF ──────────────────────────────────────────────────────────
+  const fromExif = async () => {
+    if (!/^image\/jpe?g$/i.test(file.type || '') && !/\.jpe?g$/i.test(file.name || '')) return null;
+    // 128KB is well past where the APP1 block lives, and avoids reading a 10MB
+    // photo into memory to find twenty bytes.
+    const buf = await file.slice(0, 131072).arrayBuffer();
+    const view = new DataView(buf);
+    if (view.byteLength < 4 || view.getUint16(0) !== 0xFFD8) return null;   // not a JPEG
+
+    let at = 2;
+    while (at + 4 < view.byteLength) {
+      if (view.getUint8(at) !== 0xFF) { at += 1; continue; }
+      const marker = view.getUint8(at + 1);
+      const size = view.getUint16(at + 2);
+      if (marker === 0xE1) {
+        // APP1: "Exif\0\0" then a TIFF header.
+        const tiff = at + 10;
+        if (tiff + 8 > view.byteLength) return null;
+        const little = view.getUint16(tiff) === 0x4949;
+        const get16 = (o) => view.getUint16(o, little);
+        const get32 = (o) => view.getUint32(o, little);
+        if (get16(tiff + 2) !== 0x2A) return null;
+
+        // Walk IFD0 looking for the Exif sub-IFD, then that for tag 0x9003.
+        const readIfd = (offset, tag) => {
+          if (offset + 2 > view.byteLength) return null;
+          const count = get16(offset);
+          for (let i = 0; i < count; i += 1) {
+            const entry = offset + 2 + i * 12;
+            if (entry + 12 > view.byteLength) return null;
+            if (get16(entry) === tag) return get32(entry + 8);
+          }
+          return null;
+        };
+        const ifd0 = tiff + get32(tiff + 4);
+        const exifPtr = readIfd(ifd0, 0x8769);
+        if (exifPtr === null) return null;
+        const dateOffset = readIfd(tiff + exifPtr, 0x9003);   // DateTimeOriginal
+        if (dateOffset === null) return null;
+
+        // "YYYY:MM:DD HH:MM:SS", 19 ASCII bytes.
+        let text = '';
+        for (let i = 0; i < 19; i += 1) {
+          const c = view.getUint8(tiff + dateOffset + i);
+          if (!c) break;
+          text += String.fromCharCode(c);
+        }
+        const m = text.match(/^(\d{4}):(\d{2}):(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/);
+        if (!m) return null;
+        return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
+      }
+      if (marker === 0xDA) break;          // start of scan: no metadata past here
+      if (size < 2) break;
+      at += 2 + size;
+    }
+    return null;
+  };
+
+  // ── 2. The filename ──────────────────────────────────────────────────
+  const fromName = () => {
+    const name = String(file.name || '');
+    const patterns = [
+      // WhatsApp: "... 2026-04-19 at 3.11.15 PM ..."
+      /(\d{4})-(\d{2})-(\d{2})\s+at\s+(\d{1,2})\.(\d{2})\.(\d{2})\s*(AM|PM)?/i,
+      // Camera: 20260320_125133  /  IMG_20240712_143500
+      /(?:^|[^\d])(\d{4})(\d{2})(\d{2})[_\-T](\d{2})(\d{2})(\d{2})(?:[^\d]|$)/,
+      // Screenshot / plain date: 2026-04-19, 20260320
+      /(?:^|[^\d])(\d{4})-(\d{2})-(\d{2})(?:[^\d]|$)/,
+      /(?:^|[^\d])(\d{4})(\d{2})(\d{2})(?:[^\d]|$)/,
+    ];
+    for (const re of patterns) {
+      const m = name.match(re);
+      if (!m) continue;
+      let hour = m[4] ? Number(m[4]) : 12;
+      // A 12-hour stamp with a meridiem needs converting; a 24-hour one does not.
+      const mer = m[7];
+      if (mer) {
+        if (/pm/i.test(mer) && hour < 12) hour += 12;
+        if (/am/i.test(mer) && hour === 12) hour = 0;
+      }
+      const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]),
+        hour, m[5] ? Number(m[5]) : 0, m[6] ? Number(m[6]) : 0);
+      const ok = iso(d);
+      if (ok) return d;
+    }
+    return null;
+  };
+
+  try {
+    const exif = await fromExif().catch(() => null);
+    const picked = iso(exif) || iso(fromName())
+      || iso(file.lastModified ? new Date(file.lastModified) : null);
+    return picked;
+  } catch {
+    return null;
+  }
+};
+
+// ════════════════════════════════════════════════════════════════════════
 // SpinLog | APP VERSION
 //
 // One literal, in the <meta name="version"> tag, painted into every element
@@ -1185,7 +1527,7 @@ function getHistoricLocalDate(id) {
  *   `{ notes, date }` instead of a bare notes string — the upload flow has no date
  *   to correct yet, so it keeps the old shape and the old return value.
  */
-function showHistoricNotesModal({ title = 'Add upload notes', help = 'Write what this file is about. Notes are required.', initial = '', required = true, context = null, date = null } = {}) {
+function showHistoricNotesModal({ title = 'Add upload notes', help = 'Write what this file is about. Notes are required.', initial = '', required = true, context = null, date = null, dateLabelText = 'Taken on' } = {}) {
   return new Promise(resolve => {
     const modal = document.getElementById('historicNotesModal');
     const titleEl = document.getElementById('historicNotesTitle');
@@ -1214,6 +1556,14 @@ function showHistoricNotesModal({ title = 'Add upload notes', help = 'Write what
       if (wantsDate) {
         dateInput.value = String(date).slice(0, 10);
         dateField.removeAttribute('hidden');
+        // The same field answers two different questions and the label has to say
+        // which. On an upload it is a guess read off the file that the rider is
+        // being invited to correct; on an edit it is the value already stored.
+        const dateLabel = document.getElementById('historicNotesDateLabel');
+        if (dateLabel) dateLabel.textContent = dateLabelText || 'Taken on';
+        // A date in the future is a wrong clock or a misread filename, and this is
+        // an archive of things that have already happened.
+        dateInput.max = localIsoDate();
       } else {
         dateInput.value = '';
         dateField.setAttribute('hidden', '');
@@ -1257,7 +1607,7 @@ function showHistoricNotesModal({ title = 'Add upload notes', help = 'Write what
       input.style.borderColor = '';
       if (wantsDate && !dateInput.value) {
         dateInput.focus();
-        helpEl.textContent = 'That upload needs a date.';
+        helpEl.textContent = 'That upload needs a date — when was the file taken?';
         helpEl.classList.add('is-bad');
         return;
       }
@@ -1761,11 +2111,27 @@ async function updateHistoricNotes(id, notes) {
 
 // Helper: get signed URL for historic-media bucket
 async function handleHistoricUpload(file, type, dropZone) {
-  const notes = await showHistoricNotesModal({
+  // WHEN THE FILE IS FROM, offered before it is asked for.
+  //
+  // This sheet used to show no date at all during an upload, and the row was
+  // stamped with `new Date()` — the moment of upload. For a section called
+  // Historic Audio & Images that is the one date almost guaranteed to be wrong:
+  // everything in here is older than the app, and a 2024 ride photo was being
+  // filed under today.
+  //
+  // So the field is shown, pre-filled from the file's own metadata — EXIF capture
+  // time where there is one, the date in the filename where there is not, and
+  // lastModified as the floor. It is a suggestion, not a decision: it is an
+  // editable input sitting in the sheet the upload already opens, so a wrong guess
+  // costs one correction and no extra step.
+  const guessedDate = (await window.dkFileDate(file).catch(() => null)) || localIsoDate();
+
+  const answer = await showHistoricNotesModal({
     title: 'Add notes for this upload',
     help: 'Notes are required for Historic Audio & Images uploads.',
     initial: '',
     required: true,
+    date: guessedDate,
     // The File itself goes over, so she describes what is actually in it rather
     // than guessing from the name.
     context: {
@@ -1773,14 +2139,17 @@ async function handleHistoricUpload(file, type, dropZone) {
       fileName: file.name,
       mediaType: type,
       sizeBytes: file.size,
-      uploadedOn: localIsoDate(),
+      uploadedOn: guessedDate,
     }
   });
-  if (!notes) {
+  if (!answer) {
     const input = dropZone?.querySelector('input[type="file"]');
     if (input) input.value = '';
     return;
   }
+  // Passing `date` changes the resolved shape from a bare string to {notes, date}.
+  const notes = typeof answer === 'string' ? answer : answer.notes;
+  const historicDate = typeof answer === 'string' ? guessedDate : (answer.date || guessedDate);
 
   const bucket = 'historic-media';
   const clean = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
@@ -1812,18 +2181,30 @@ async function handleHistoricUpload(file, type, dropZone) {
     original_name: file.name,
     file_size: file.size,
     content_type: contentType,
+    // TWO DIFFERENT DATES, and they are not interchangeable.
+    // upload_date is when this row was written and is used for nothing the user
+    // sees. historic_date is when the file is FROM, which is what the Uploaded
+    // column shows, what the date filter matches and what the table sorts on.
     upload_date: new Date().toISOString(),
+    historic_date: historicDate || null,
     notes
   };
 
   let inserted = null;
   let { data, error } = await supabase.from('media_files').insert([row]).select();
-  if (error && String(error.message || '').toLowerCase().includes('notes')) {
+  // Both columns arrived in cloud_routing.sql, and this table predates it, so an
+  // instance that has not run the migration has neither. Retry without whichever
+  // one the database complains about rather than failing an upload over a column
+  // that only carries metadata.
+  for (const column of ['historic_date', 'notes']) {
+    if (!error || !String(error.message || '').toLowerCase().includes(column)) continue;
     const fallback = { ...row };
-    delete fallback.notes;
+    delete fallback[column];
+    if (column === 'historic_date') delete fallback.historic_date;
     const retry = await supabase.from('media_files').insert([fallback]).select();
     data = retry.data;
     error = retry.error;
+    if (!error) break;
   }
 
   if (error) {
@@ -1834,7 +2215,14 @@ async function handleHistoricUpload(file, type, dropZone) {
   }
 
   inserted = data && data[0];
-  if (inserted?.id) setHistoricLocalNote(inserted.id, notes);
+  if (inserted?.id) {
+    setHistoricLocalNote(inserted.id, notes);
+    // Through the same helper the edit path uses, so the table shows the file's
+    // own date immediately rather than after the next full cloud read. The row
+    // already carries it, so the write this makes is idempotent — worth it to keep
+    // one path for "the date of an upload changed".
+    if (historicDate) setHistoricLocalDate(inserted.id, historicDate);
+  }
   finishUploadPercent();
   updatePopup('success', 'Uploaded with notes!');
   const input = dropZone?.querySelector('input[type="file"]');
@@ -5978,6 +6366,18 @@ window.setupCoverDateEditing = function() {
 
   closeBtn?.addEventListener('click', closeModal);
   modal?.addEventListener('click', e => { if (e.target === modal) closeModal(); });
+  // ESCAPE, WHICH THIS ONE WAS MISSING.
+  //
+  // The other four dialogs on this shell have had it since they were written; this
+  // one had a close button and a backdrop click and nothing for the keyboard. Found
+  // by the back-gesture work rather than by looking: the guard at the top of this
+  // file shuts an overlay by pressing its own close control and falls back to
+  // Escape, and this was the one surface where neither route existed from outside.
+  // Guarded on the open class like its siblings, so it cannot swallow a key meant
+  // for something layered over it.
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && modal?.classList.contains('sl-modal--open')) closeModal();
+  });
 };
 
 // ════════════════════════════════════════════════════════════

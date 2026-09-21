@@ -13,7 +13,7 @@
        needs no JS change. Keep the version segment of CACHE_NAME in service-worker.js
        in step with this — that file cannot read a meta tag, and a mismatch means the
        number on screen is not the number that is actually cached. -->
-  <meta name="version" content="1.9.2"/>
+  <meta name="version" content="1.9.3"/>
   <title>SpinLog</title>
   <!-- Not decoration. This is what an install prompt, a shared link and a
        browser's own history entry show underneath the title, and without it they
@@ -962,13 +962,18 @@
       <p id="historicNotesHelp">Write what this file is about. Notes are required.</p>
       <textarea id="historicNotesInput" rows="5" maxlength="600" placeholder="Example: Cold start after 5,999 km service, new exhaust tone, highway ride photo..."></textarea>
 
-      <!-- Only shown when EDITING an existing upload, which is why it lives here
-           rather than in a second dialog. Holding a row used to need two separate
-           popups — a pencil for the note and another pencil for the date — so the
-           date joins the note in the one sheet the gesture already opens. During an
-           upload there is nothing to correct yet, so it stays hidden. -->
+      <!-- Shown for both jobs this sheet does, which is why it lives here rather
+           than in a second dialog. Holding a row used to need two separate popups —
+           a pencil for the note and another pencil for the date — so the date joins
+           the note in the one sheet the gesture already opens.
+           On an UPLOAD it arrives pre-filled from the file's own metadata: EXIF
+           capture time where there is one, the date in the filename where there is
+           not, lastModified as the floor. See dkFileDate() in script.js. The label
+           says "Taken on" rather than "Uploaded on" because that is the question
+           being answered — everything in this section is older than the app, and the
+           upload time is the one date that is never interesting. -->
       <label class="docs-notes-date" id="historicNotesDateField" hidden>
-        <span><i class="fas fa-calendar-days" aria-hidden="true"></i> Uploaded on</span>
+        <span><i class="fas fa-calendar-days" aria-hidden="true"></i> <span id="historicNotesDateLabel">Taken on</span></span>
         <input type="date" id="historicNotesDate" />
       </label>
 

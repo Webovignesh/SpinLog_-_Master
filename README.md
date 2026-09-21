@@ -146,11 +146,20 @@ and then asserts the invariants that hold everywhere: no uncaught error, no cons
 error, every `window.*` the modules look each other up by, no duplicate id, no
 dangling `aria-*` reference, one `h1`, every decorative icon hidden from assistive
 tech, the version on screen matching the meta tag, routing that moves focus into the
-section it opened, WCAG AA contrast, a visible focus state on every focusable
-control, motion actually stopping under `prefers-reduced-motion`, and nothing
-overflowing the viewport at nine widths.
+section it opened, the back gesture closing an overlay instead of a page, an upload
+dated from the file rather than the clock, WCAG AA contrast, a visible focus state on
+every focusable control, motion actually stopping under `prefers-reduced-motion`, and
+nothing overflowing the viewport at nine widths.
 
-Two things about it are worth knowing before changing it.
+Three things about it are worth knowing before changing it.
+
+**Its idea of "on screen" is not `offsetParent`.** That was the whole test, and it
+was correct for exactly as long as everything hidden in this app was hidden with
+`display: none`. The overlays hide with `visibility` now, so that they can animate
+out, and visibility does not affect layout — so every control inside a shut dialog
+started looking measurable. It reported the notes sheet's Save button at 1.04:1,
+because the sheet was not painted and the pixel sampler read the page behind it.
+`IS_SHOWN` at the top of the file is the replacement.
 
 **Contrast is measured off the rendered pixels, not modelled from the cascade.** The
 first version composited every translucent background up the tree, which is what you
@@ -321,6 +330,71 @@ unrecoverable. A recoverable backup would be one the server could decrypt, which
 is the thing being avoided. If you would rather not store keys off-device at all,
 do not run the migration — the Backup panel will simply report that it is not set
 up.
+
+### Back is a way out of things, not just off the page
+
+On a phone the back gesture is the primary way out of anything, and this app had
+nothing between it and the section router. With a dialog open it went back a *page*
+and left the dialog sitting over the section it had just arrived at; on the last
+entry in the stack it closed the installed app outright with a modal still up.
+
+An overlay is a page as far as anyone using it is concerned, so it gets a history
+entry of its own and back spends that instead of a section. `dkBackGuard` at the top
+of `script.js` owns this. Four things about it are load-bearing:
+
+- **The pushed entry does not change the URL.** `pushState(state, '', location.href)`
+  adds a stack entry at the same address, so popping it cannot fire `hashchange` —
+  and `hashchange` is what drives the section router. Without that, dismissing a
+  dialog would also navigate a section back.
+- **It is driven by a `MutationObserver`, not by call sites.** There are nine of
+  these surfaces and roughly twenty ways to close one: an X, a Cancel, a backdrop
+  click, Escape, a save that closes on success, a promise resolving. Hooking each
+  would mean editing all of them and would still miss the tenth.
+- **Each surface names its own close.** The first version dispatched Escape at the
+  document and trusted every overlay to have a handler. Most do. The cover-date
+  editor did not, so back pressed against it did nothing at all — no handler to
+  catch the key and no other route in from outside. That gap is filled now too,
+  because a modal you cannot dismiss from the keyboard is a fault on its own.
+- **An entry is only spent if it is still on top.** `history.state.dkOverlay` is the
+  test. Some surfaces close *by* navigating — picking a search result shuts the panel
+  and then jumps to a section, in that order — and the observer runs after the click
+  handler, so spending unconditionally popped the section that had just been pushed.
+  Searching for a service record dropped you back where you started, and it looked
+  like the search was choosing the wrong page.
+
+### An upload is dated from the file, not from the clock
+
+`media_files` carries two dates and they are not interchangeable. `upload_date` is
+when the row was written and is shown nowhere. `historic_date` is when the file is
+*from*, and that is what the Uploaded column shows, what the date filter matches and
+what the table sorts on.
+
+Nothing used to fill the second one. The row was stamped with `new Date()` and the
+notes sheet showed no date field during an upload, so in a section called *Historic*
+Audio & Images — where by definition most of it is older than the app — a 2024 ride
+photo was filed under today with nowhere to say otherwise.
+
+`dkFileDate(file)` in `script.js` works it out, from three sources, best first,
+because each is wrong in a different way:
+
+1. **EXIF `DateTimeOriginal`.** The only one that means "when the shutter opened".
+   JPEG only, and absent from anything a messaging app has re-encoded. Read from the
+   first 128KB rather than the whole file.
+2. **The filename.** Cameras and messaging apps both stamp it, and this is the source
+   that survives everything else. `20260320_125133.jpg` and `WhatsApp Video
+   2026-04-19 at 3.11.15 PM.mp4` are both in this archive, and for the second one it
+   is the *only* correct answer — WhatsApp rewrites `lastModified` to the moment you
+   downloaded the file.
+3. **`file.lastModified`.** Always there, and for anything copied between devices it
+   is the copy time. A floor, not a first choice.
+
+Anything before 1995 or in the future is rejected rather than used: both happen, from
+a device with a wrong clock and from a filename whose digits merely look like a date.
+
+The answer is a suggestion, not a decision. It arrives pre-filled in the date field
+of the sheet the upload already opens, so correcting it costs one edit and no extra
+step, and the label says **Taken on** rather than "Uploaded on" because that is the
+question being answered.
 
 ### Deleting anything
 
