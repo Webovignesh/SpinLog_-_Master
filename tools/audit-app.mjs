@@ -566,12 +566,18 @@ const browser = await chromium.launch();
       const timed = await d.detail(mk('WhatsApp Video 2026-04-19 at 3.11.15 PM.mp4', Date.now(), 'video/mp4'));
       const camera = await d.detail(mk('20260320_125133.jpg', Date.now(), 'image/jpeg'));
       const bare = await d.detail(mk('Screenshot 2026-04-19.png', Date.now(), 'image/png'));
-      const modOnly = await d.detail(mk('1000013060.mp4', Date.UTC(2025, 10, 6, 8, 11), 'video/mp4'));
+      const modMs = Date.UTC(2025, 10, 6, 8, 11);
+      const modOnly = await d.detail(mk('1000013060.mp4', modMs, 'video/mp4'));
       return {
         timed: { date: timed.date, clock: local(timed.at), source: timed.source },
         camera: { date: camera.date, clock: local(camera.at) },
         bare: { date: bare.date, at: bare.at, source: bare.source },
-        modOnly: { date: modOnly.date, at: modOnly.at, source: modOnly.source },
+        modOnly: {
+          date: modOnly.date, clock: local(modOnly.at), source: modOnly.source,
+          // Derived here rather than hardcoded, so the assertion does not depend on
+          // which timezone the machine running the audit is in.
+          want: local(new Date(modMs).toISOString()),
+        },
         // The two halves of the edit sheet's time field, round-tripped.
         roundTrip: typeof historicStampFrom === 'function' && typeof historicClockOf === 'function'
           ? historicClockOf(historicStampFrom('2025-06-27', '07:05'))
@@ -592,10 +598,127 @@ const browser = await chromium.launch();
     ok('and out of a camera timestamp', clocks.camera?.clock === '12:51', JSON.stringify(clocks.camera));
     ok('and leaves the time null for a bare date',
       clocks.bare?.date === '2026-04-19' && clocks.bare?.at === null, JSON.stringify(clocks.bare));
-    ok('and null for a lastModified, which is a copy time',
-      clocks.modOnly?.date === '2025-11-06' && clocks.modOnly?.at === null, JSON.stringify(clocks.modOnly));
+    // lastModified DOES get to supply a clock reading now. It is the weakest source
+    // here — for anything copied between devices it is the copy — but it lands in an
+    // editable field the rider is looking at, and refusing it meant a graphic with no
+    // EXIF and no date in its name could never show a time at all.
+    ok('and falls back to the file\u2019s own timestamp for the time too',
+      clocks.modOnly?.date === '2025-11-06'
+      && clocks.modOnly?.clock === clocks.modOnly?.want
+      && clocks.modOnly?.source === 'lastModified', JSON.stringify(clocks.modOnly));
     ok('the edit sheet round-trips a time without drifting', clocks.roundTrip === '07:05',
       String(clocks.roundTrip));
+
+    // ── THE CONTAINERS, from real bytes ──
+    //
+    // A PNG uploaded with a day and no time is what started this: the EXIF reader
+    // required a JPEG's SOI marker, so a PNG holding the identical TIFF block in its
+    // eXIf chunk got nothing, and neither did a WebP or a HEIC. These are built byte
+    // by byte rather than read from a fixture, because the point is to prove the
+    // parser and a fixture would only prove the fixture.
+    const containers = await page.evaluate(async () => {
+      const d = window.dkMediaDate;
+      if (!d || typeof d.fromBytes !== 'function') return { missing: true };
+      const local = (iso) => {
+        if (!iso) return null;
+        const x = new Date(iso);
+        return `${String(x.getFullYear())}-${String(x.getMonth() + 1).padStart(2, '0')}`
+          + `-${String(x.getDate()).padStart(2, '0')} `
+          + `${String(x.getHours()).padStart(2, '0')}:${String(x.getMinutes()).padStart(2, '0')}`;
+      };
+
+      /** A minimal little-endian TIFF block carrying DateTimeOriginal. 64 bytes. */
+      const tiff = (text) => {
+        const b = new Uint8Array(64);
+        const v = new DataView(b.buffer);
+        b.set([0x49, 0x49], 0);                  // 'II'
+        v.setUint16(2, 0x2A, true);              // the 42 magic
+        v.setUint32(4, 8, true);                 // IFD0 starts at 8
+        v.setUint16(8, 1, true);                 // one entry
+        v.setUint16(10, 0x8769, true);           // ExifIFD pointer
+        v.setUint16(12, 4, true);                // LONG
+        v.setUint32(14, 1, true);
+        v.setUint32(18, 26, true);               // the sub-IFD is at 26
+        v.setUint32(22, 0, true);                // no IFD1
+        v.setUint16(26, 1, true);                // sub-IFD, one entry
+        v.setUint16(28, 0x9003, true);           // DateTimeOriginal
+        v.setUint16(30, 2, true);                // ASCII
+        v.setUint32(32, 20, true);
+        v.setUint32(36, 44, true);               // the string is at 44
+        v.setUint32(40, 0, true);
+        for (let i = 0; i < 19; i += 1) b[44 + i] = text.charCodeAt(i);
+        return b;
+      };
+
+      const PNG_SIG = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+      /** length(4) type(4) data crc(4). The CRC is not checked, so it is zeroes. */
+      const chunk = (type, data) => {
+        const out = new Uint8Array(12 + data.length);
+        new DataView(out.buffer).setUint32(0, data.length);
+        for (let i = 0; i < 4; i += 1) out[4 + i] = type.charCodeAt(i);
+        out.set(data, 8);
+        return out;
+      };
+      const join = (...parts) => {
+        const flat = [];
+        parts.forEach(p => { [...p].forEach(x => flat.push(x)); });
+        return new Uint8Array(flat);
+      };
+
+      // tIME is UTC by the spec, so the expectation is derived through Date.UTC.
+      const timeChunk = new Uint8Array(7);
+      new DataView(timeChunk.buffer).setUint16(0, 2025);
+      timeChunk.set([7, 4, 9, 15, 0], 2);        // 4 July, 09:15:00
+      const pngTime = join(PNG_SIG, chunk('tIME', timeChunk));
+      const pngExif = join(PNG_SIG, chunk('eXIf', tiff('2025:12:24 18:45:30')));
+      const pngText = join(PNG_SIG, chunk('tEXt',
+        new TextEncoder().encode('Creation Time\u00002025-08-09T21:30:00')));
+
+      // A JPEG, to prove the refactor did not break the path that already worked.
+      const exifBlock = tiff('2024:07:12 14:35:00');
+      const jpeg = join([0xFF, 0xD8, 0xFF, 0xE1], [0x00, 0x48],
+        [0x45, 0x78, 0x69, 0x66, 0x00, 0x00], exifBlock, [0xFF, 0xD9]);
+      // An APP1 that is XMP rather than EXIF, in front of the real one. The old walk
+      // took the first APP1 it saw as EXIF and gave up when it was not.
+      const xmpFirst = join([0xFF, 0xD8, 0xFF, 0xE1], [0x00, 0x0A],
+        [0x68, 0x74, 0x74, 0x70, 0x3A, 0x2F, 0x2F],
+        [0xFF, 0xE1], [0x00, 0x48], [0x45, 0x78, 0x69, 0x66, 0x00, 0x00], exifBlock);
+      // A container nothing recognises, with an EXIF block buried in it — which is
+      // how WebP and HEIC both carry one.
+      const unknown = join([0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00,
+        0x57, 0x45, 0x42, 0x50, 0x45, 0x58, 0x49, 0x46, 0x00, 0x00, 0x00, 0x40],
+        exifBlock);
+
+      const read = (bytes, name) => {
+        const hit = d.fromBytes(bytes.buffer, name);
+        return hit ? { at: local(hit.at), source: hit.source } : null;
+      };
+      return {
+        pngTime: read(pngTime, 'graphic.png'),
+        pngExif: read(pngExif, 'graphic.png'),
+        pngText: read(pngText, 'graphic.png'),
+        jpeg: read(jpeg, 'photo.jpg'),
+        xmpFirst: read(xmpFirst, 'photo.jpg'),
+        unknown: read(unknown, 'photo.webp'),
+        // Nothing in it. Must stay null rather than inventing something from noise.
+        noise: read(new Uint8Array(2048).fill(0x41), 'blob.bin'),
+        wantTime: local(new Date(Date.UTC(2025, 6, 4, 9, 15)).toISOString()),
+      };
+    });
+    ok('EXIF still reads out of a JPEG', containers.jpeg?.at === '2024-07-12 14:35',
+      JSON.stringify(containers.jpeg));
+    ok('and past an APP1 that is not EXIF', containers.xmpFirst?.at === '2024-07-12 14:35',
+      JSON.stringify(containers.xmpFirst));
+    ok('a PNG eXIf chunk is read', containers.pngExif?.at === '2025-12-24 18:45',
+      JSON.stringify(containers.pngExif));
+    ok('a PNG tIME chunk is read as UTC', containers.pngTime?.at === containers.wantTime,
+      JSON.stringify(containers.pngTime) + ' want ' + containers.wantTime);
+    ok('a PNG Creation Time text chunk is read', containers.pngText?.at === '2025-08-09 21:30',
+      JSON.stringify(containers.pngText));
+    ok('an EXIF block in an unrecognised container is found anyway',
+      containers.unknown?.at === '2024-07-12 14:35', JSON.stringify(containers.unknown));
+    ok('and noise yields nothing rather than a date', containers.noise === null,
+      JSON.stringify(containers.noise));
     ok('an empty time field is not midnight', clocks.blankIsNotMidnight === true,
       String(clocks.blankIsNotMidnight));
     ok('correcting the day keeps the clock reading', clocks.moved === '23:14', String(clocks.moved));
@@ -643,6 +766,89 @@ const browser = await chromium.launch();
       sheet.skip === true || sheet.timeRequired === false, String(sheet.timeRequired));
     // Leave nothing open for the checks that follow.
     await press('and the sheet cancels cleanly', () => page.evaluate(() =>
+      document.getElementById('historicNotesSkip')?.click()));
+    await page.waitForTimeout(350);
+
+    // ── A GRAPHIC WITH NOTHING IN IT ──
+    //
+    // The case that exposed all of this: Title.png uploaded showing a day and no
+    // time, because no reader answered and lastModified was refused a clock. The
+    // sheet must now arrive with both filled in AND say where they came from, since
+    // "worth a check" and "read from the photo's EXIF" ask for different attention.
+    const plain = await page.evaluate(async () => {
+      const zone = document.querySelector('.drop-zone[data-type="image"]');
+      const input = zone?.querySelector('input[type=file]');
+      if (!input) return { skip: true };
+      const mod = Date.UTC(2026, 1, 14, 6, 40);
+      const dt = new DataTransfer();
+      dt.items.add(new File([new Uint8Array([1, 2, 3, 4])], 'Title.png',
+        { type: 'image/png', lastModified: mod }));
+      input.files = dt.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise(r => setTimeout(r, 1100));
+      const d = new Date(mod);
+      return {
+        date: document.getElementById('historicNotesDate')?.value || null,
+        time: document.getElementById('historicNotesTime')?.value || null,
+        help: document.getElementById('historicNotesHelp')?.textContent.trim() || '',
+        wantDate: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+          + `-${String(d.getDate()).padStart(2, '0')}`,
+        wantTime: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
+      };
+    });
+    ok('a file with no metadata at all still gets a time offered',
+      plain.skip === true || (plain.date === plain.wantDate && plain.time === plain.wantTime),
+      JSON.stringify(plain));
+    ok('and the sheet says where the date came from',
+      plain.skip === true || /own timestamp/.test(plain.help), plain.help);
+    await page.evaluate(() => document.getElementById('historicNotesSkip')?.click());
+    await page.waitForTimeout(350);
+
+    // ── THE WAIT BEFORE THE SHEET ──
+    //
+    // Reading a file's metadata happens before anything opens, so a 200MB video off a
+    // phone spent seconds with nothing on screen — a tap that appeared to do nothing.
+    // It is announced on a 200ms delay, so this has to make the read slow to see it.
+    // Then the announcement has to GET OUT OF THE WAY: the popup is a modal overlay
+    // at z-index 10000 and the sheet opens underneath it.
+    const waiting = await page.evaluate(async () => {
+      const zone = document.querySelector('.drop-zone[data-type="image"]');
+      const input = zone?.querySelector('input[type=file]');
+      if (!input) return { skip: true };
+      const real = window.dkMediaDate.detail;
+      window.dkMediaDate.detail = async (f) => {
+        await new Promise(r => setTimeout(r, 600));
+        return real.call(window.dkMediaDate, f);
+      };
+      const seen = [];
+      const watch = setInterval(() => {
+        const up = document.getElementById('customPopup')?.classList.contains('show');
+        const t = document.getElementById('popupMessage')?.textContent.trim();
+        if (up && t && !seen.includes(t)) seen.push(t);
+      }, 60);
+      const dt = new DataTransfer();
+      dt.items.add(new File([new Uint8Array([1, 2, 3, 4])], 'Slow.png',
+        { type: 'image/png', lastModified: Date.UTC(2026, 1, 14, 6, 40) }));
+      input.files = dt.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise(r => setTimeout(r, 1400));
+      clearInterval(watch);
+      window.dkMediaDate.detail = real;
+      const bar = document.getElementById('uploadProgressBar');
+      return {
+        said: seen.some(t => /^Reading the file/.test(t)),
+        sheetOpen: !!document.getElementById('historicNotesModal')?.classList.contains('show'),
+        popupGone: !document.getElementById('customPopup')?.classList.contains('show'),
+        barGone: !bar || getComputedStyle(bar).display === 'none',
+        seen,
+      };
+    });
+    ok('a slow metadata read says so', waiting.skip === true || waiting.said === true,
+      JSON.stringify(waiting.seen));
+    ok('and stops saying so before the sheet opens',
+      waiting.skip === true || (waiting.sheetOpen && waiting.popupGone && waiting.barGone),
+      JSON.stringify(waiting));
+    await press('and that sheet cancels cleanly too', () => page.evaluate(() =>
       document.getElementById('historicNotesSkip')?.click()));
   }
 

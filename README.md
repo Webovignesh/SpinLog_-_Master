@@ -400,34 +400,50 @@ Audio & Images — where by definition most of it is older than the app — a 20
 photo was filed under today with nowhere to say otherwise.
 
 `dkMediaDate.detail(file)` returns `{ date, at, source }`: the local day, the full
-instant, and which of the four readers below answered. **`at` is null unless a real
-clock reading was found** — that is the rule the whole feature rests on. A bare date in
-a filename and a `lastModified` both know a day and no time, and the noon they get
-internally is arithmetic. Presenting it would claim a precision the file never had, so
-those rows show one line instead of two.
+instant, and which of the readers below answered. `at` is null when nothing knew a
+clock reading — a bare date in a filename gives midnight or a default noon, and neither
+is a fact — and a row with a null `at` shows one line instead of two.
 
-`dkMediaDate` in `script.js` works it out, from four sources, best first, because
-each is wrong in a different way:
+`dkMediaDate` in `script.js` works it out, best first, because each source is wrong in
+a different way:
 
-1. **EXIF `DateTimeOriginal`.** The only thing that means "when the shutter opened".
-   JPEG only, and absent from anything a messaging app has re-encoded.
-2. **The ISO-BMFF `mvhd` creation time.** MP4, M4A and MOV all carry one, which
+1. **EXIF `DateTimeOriginal`.** The only thing that means "when the shutter opened",
+   with `DateTimeDigitized` and IFD0's `DateTime` behind it. Read from **any**
+   container, not just a JPEG: `readExifTiff()` takes an offset to the `II`/`MM`
+   byte-order mark and knows nothing about wrappers, so the same function serves a
+   JPEG's APP1 marker, a PNG's `eXIf` chunk and — via `fromTiffScan()`, which looks for
+   the header rather than learning the format — a WebP `EXIF` chunk and a HEIC item.
+   This used to be inlined behind a check for the JPEG SOI marker, which meant a PNG
+   holding byte-identical metadata got nothing at all.
+2. **PNG's own chunks**, for the graphics that carry no EXIF: `eXIf`, then a
+   `tEXt`/`iTXt` chunk keyed `Creation Time`, then `tIME` — which is **UTC** by the
+   spec, so it goes through `Date.UTC`. Scanned for by chunk type rather than walked
+   from the signature, because a PNG larger than the 256KB slice in hand ends a walk at
+   the first `IDAT`, and the tail slice has no signature at its front.
+3. **The ISO-BMFF `mvhd` creation time.** MP4, M4A and MOV all carry one, which
    matters here because half this archive is engine-sound recordings whose filenames
    give the mileage rather than the date. Note the epoch is **1904-01-01 UTC**, not
    1970 — sixty-six years, which is the kind of off-by-a-lifetime that looks like a
    working parser until you read a date.
-3. **The filename.** Cameras and messaging apps both stamp it, and this is the source
+4. **The filename.** Cameras and messaging apps both stamp it, and this is the source
    that survives everything else. `20260320_125133.jpg` and `WhatsApp Video
    2026-04-19 at 3.11.15 PM.mp4` are both in this archive, and for the second one it
    is the *only* correct answer — WhatsApp rewrites `lastModified` to the moment you
    downloaded the file. Human forms like `27th june` are read too, taking the year
    from a reference date, because a person writing that means the one just gone.
-4. **`file.lastModified`.** Always there, and for anything copied between devices it
-   is the copy time. A floor, not a first choice.
+5. **`file.lastModified`.** Always there, and for anything copied between devices it
+   is the copy time. The weakest answer, and it *does* supply a time — refusing it
+   meant a graphic with no EXIF and no date in its name could never show one, which is
+   what `Title.png` was: a day, no time, and nowhere to say otherwise. What makes it
+   acceptable is that it lands in an editable field the rider is looking at. The
+   backfill is unaffected and must stay that way — it works from bytes fetched over
+   HTTP, has no `File`, and so never reaches this branch.
 
 Anything before 1995 or in the future is rejected rather than used: both happen, from
 a device with a wrong clock, from a filename whose digits merely look like a date, and
-from an `mvhd` box full of zeroes, which decodes to 1904.
+from an `mvhd` box full of zeroes, which decodes to 1904. That window is also what
+makes the two signature *scans* safe — four bytes can match by accident, but a
+coincidence then has to survive a real parse and a plausible date.
 
 The reader is split into `fromBytes` and `fromName` so the two callers can share it.
 An upload has a `File` in hand; the backfill below has only a range of bytes fetched
@@ -438,6 +454,13 @@ On an upload the answer is a suggestion, not a decision. It arrives pre-filled i
 costs one edit and no extra step, and the label says **Taken on** rather than "Uploaded
 on" because that is the question being answered.
 
+**The sheet also says where the date came from** — "read from the photo's EXIF", "read
+from the file name, which carried no time", "from the file's own timestamp — worth a
+check". The five readers do not deserve equal trust and only the rider knows which files
+came off a camera and which came through a messaging app. Naming the source turns a
+field you have to audit into one you can glance at, and it is the difference between a
+value worth checking and one that is not.
+
 The time field is optional, and emptying it is a real answer rather than a blank one: it
 says *only the day is known for this one*, which is how you throw away a reading from a
 camera with a wrong clock, and the row then shows a day with no second line. Clearing it
@@ -446,6 +469,40 @@ that survives. The same sheet edits both, reached by holding a row, and correcti
 day carries the clock reading onto the new day rather than dropping it, because the
 correction is almost always off-by-one: a file recorded at 11pm on the 26th that every
 other reader agrees is the 27th.
+
+#### An upload says which wait you are in
+
+"Uploading…" covered three different waits that fail for three different reasons, and
+one of them had nothing on screen at all. Reading the metadata happens *before* the
+notes sheet opens, so picking a 200MB video off a phone looked like a tap that did
+nothing.
+
+`startUploadPercent(phase)` takes a label, `setUploadPhase(phase, atLeast)` renames it
+at the real boundaries, and the sequence now reads:
+
+```
+Reading the file… 14%      ← only when the read takes over 200ms
+Uploading… 35%
+Saving the record… 78%     ← the bytes are in the bucket; the row is a separate failure
+Uploaded — 04 Jul 2025, 2:45 pm
+```
+
+The percentage is still paced rather than measured — `supabase-js` resolves `upload()`
+in one shot with no progress events — but the creep is now eased rather than random, so
+it never stalls on a round number, and the jumps line up with work that actually
+finished. The read phase is announced on a 200ms delay because for a photo on a laptop
+it finishes first, and a popup that appears and vanishes inside two frames is worse than
+silence. It then has to get out of the way: the popup is a modal overlay and the notes
+sheet opens underneath it, so `cancelUploadPercent()` clears both surfaces first.
+
+Two bugs came out of writing this. Both vehicle-document uploads called
+`startUploadPercent()` and then **nothing** — no finish, no error — so the interval ran
+forever, "Document added!" was overwritten by an `Uploading 87%` tick 130ms later, and
+the orange bar was left stretched across the docs grid claiming progress. And
+`finishUploadPercent()` followed by `updatePopup('success', …)` read as two steps and
+behaved as none: finish scheduled the popup's close at +700ms, so the success line the
+caller set a tick later was visible for those 700ms and then gone. `finishUploadPercent`
+and `errorUploadPercent` now take the message, so there is one call and one outcome.
 
 #### Dating the uploads that are already in the bucket
 

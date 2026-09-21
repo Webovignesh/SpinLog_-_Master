@@ -421,13 +421,98 @@ window.dkMediaDate = (function () {
     return good ? good.toISOString() : null;
   }
 
-  /** Does this source know a real clock reading, or only a day? */
+  /**
+   * Does this source know a real clock reading, or only a day?
+   *
+   * @param {Date|null} d
+   * @param {string} source One of detail()'s source strings.
+   *
+   * Matched against the marker rather than against a list of good sources, so a
+   * reader added later is trusted by default and has to opt out. The check used to be
+   * `source !== 'day-only'`, a string nothing has ever produced — it answered true for
+   * everything, including the bare-date-in-a-filename case it existed to catch.
+   */
   function hasClock(d, source) {
     if (!ok(d)) return false;
-    // A bare date in a filename ("2026-04-19", "20260320") gives midnight or the
-    // noon default, neither of which is a fact. EXIF and mvhd are to the second, and
-    // a filename that carried a time was parsed with it.
-    return source !== 'day-only';
+    return !/day only/i.test(String(source || ''));
+  }
+
+  /** Four ASCII bytes at `at`, or null. Chunk and box type tags. */
+  function fourCC(view, at) {
+    if (at < 0 || at + 4 > view.byteLength) return null;
+    let s = '';
+    for (let i = 0; i < 4; i += 1) s += String.fromCharCode(view.getUint8(at + i));
+    return s;
+  }
+
+  /**
+   * A capture time out of a TIFF header, wherever that header happens to be.
+   *
+   * SEPARATE FROM THE JPEG WALK ON PURPOSE. This used to be inlined in fromExif and
+   * therefore reachable only through a JPEG's APP1 marker — which meant a PNG whose
+   * `eXIf` chunk holds the identical bytes got nothing, and so did a WebP, a HEIC and
+   * a raw TIFF. The container and the metadata are two different questions.
+   *
+   * @param {DataView} view
+   * @param {number} tiff Offset of the byte-order mark: 'II' or 'MM'.
+   * @returns {Date|null}
+   */
+  function readExifTiff(view, tiff) {
+    if (tiff < 0 || tiff + 8 > view.byteLength) return null;
+    const order = view.getUint16(tiff);
+    if (order !== 0x4949 && order !== 0x4D4D) return null;         // not II or MM
+    const little = order === 0x4949;
+    const get16 = (o) => (o + 2 <= view.byteLength ? view.getUint16(o, little) : null);
+    const get32 = (o) => (o + 4 <= view.byteLength ? view.getUint32(o, little) : null);
+    if (get16(tiff + 2) !== 0x2A) return null;                     // the 42 magic
+
+    const readIfd = (offset, tag) => {
+      if (offset < 0 || offset + 2 > view.byteLength) return null;
+      const count = get16(offset);
+      // A real IFD has a handful of entries. Four digits of them means this is not
+      // an IFD at all, which matters because fromTiffScan guesses at the offset.
+      if (count === null || count === 0 || count > 512) return null;
+      for (let i = 0; i < count; i += 1) {
+        const entry = offset + 2 + i * 12;
+        if (entry + 12 > view.byteLength) return null;
+        if (get16(entry) === tag) return get32(entry + 8);
+      }
+      return null;
+    };
+
+    /** The 19 ASCII bytes of "YYYY:MM:DD HH:MM:SS" at a tag's value offset. */
+    const readStamp = (offset) => {
+      if (offset === null || tiff + offset + 19 > view.byteLength) return null;
+      let text = '';
+      for (let i = 0; i < 19; i += 1) {
+        const c = view.getUint8(tiff + offset + i);
+        if (!c) break;
+        text += String.fromCharCode(c);
+      }
+      const m = text.match(/^(\d{4}):(\d{2}):(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/);
+      if (!m) return null;
+      return ok(new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]));
+    };
+
+    const ifd0Rel = get32(tiff + 4);
+    if (ifd0Rel === null) return null;
+    const ifd0 = tiff + ifd0Rel;
+
+    // Three tags, in order of how much they mean:
+    //   0x9003 DateTimeOriginal   when the shutter opened
+    //   0x9004 DateTimeDigitized  when it was scanned or transferred
+    // both inside the Exif sub-IFD that 0x8769 points at, and
+    //   0x0132 DateTime           in IFD0, the file's own modification stamp
+    // The third is what an editor writes on export and what most PNG eXIf blocks
+    // carry, and it is still a real clock reading — better than lastModified, which
+    // is the only thing below it.
+    const exifPtr = readIfd(ifd0, 0x8769);
+    if (exifPtr !== null) {
+      const shot = readStamp(readIfd(tiff + exifPtr, 0x9003))
+        || readStamp(readIfd(tiff + exifPtr, 0x9004));
+      if (shot) return shot;
+    }
+    return readStamp(readIfd(ifd0, 0x0132));
   }
 
   // ── EXIF, from a JPEG's APP1 block ──────────────────────────────────
@@ -439,48 +524,112 @@ window.dkMediaDate = (function () {
       if (view.getUint8(at) !== 0xFF) { at += 1; continue; }
       const marker = view.getUint8(at + 1);
       const size = view.getUint16(at + 2);
-      if (marker === 0xE1) {
-        // APP1: "Exif\0\0" then a TIFF header.
-        const tiff = at + 10;
-        if (tiff + 8 > view.byteLength) return null;
-        const little = view.getUint16(tiff) === 0x4949;
-        const get16 = (o) => view.getUint16(o, little);
-        const get32 = (o) => view.getUint32(o, little);
-        if (get16(tiff + 2) !== 0x2A) return null;
-
-        const readIfd = (offset, tag) => {
-          if (offset + 2 > view.byteLength) return null;
-          const count = get16(offset);
-          for (let i = 0; i < count; i += 1) {
-            const entry = offset + 2 + i * 12;
-            if (entry + 12 > view.byteLength) return null;
-            if (get16(entry) === tag) return get32(entry + 8);
-          }
-          return null;
-        };
-        const ifd0 = tiff + get32(tiff + 4);
-        const exifPtr = readIfd(ifd0, 0x8769);
-        if (exifPtr === null) return null;
-        // 0x9003 DateTimeOriginal, and 0x9004 DateTimeDigitized as the runner-up.
-        const at9003 = readIfd(tiff + exifPtr, 0x9003);
-        const at9004 = readIfd(tiff + exifPtr, 0x9004);
-        const offset = at9003 !== null ? at9003 : at9004;
-        if (offset === null) return null;
-
-        // "YYYY:MM:DD HH:MM:SS", 19 ASCII bytes.
-        let text = '';
-        for (let i = 0; i < 19; i += 1) {
-          const c = view.getUint8(tiff + offset + i);
-          if (!c) break;
-          text += String.fromCharCode(c);
-        }
-        const m = text.match(/^(\d{4}):(\d{2}):(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/);
-        if (!m) return null;
-        return ok(new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]));
+      // APP1 is usually EXIF and sometimes XMP, and a file can carry both in either
+      // order — so a non-EXIF APP1 must be stepped over rather than ending the walk.
+      if (marker === 0xE1 && fourCC(view, at + 4) === 'Exif') {
+        const found = readExifTiff(view, at + 10);           // past "Exif\0\0"
+        if (found) return found;
       }
       if (marker === 0xDA) break;          // start of scan: no metadata past here
       if (size < 2) break;
       at += 2 + size;
+    }
+    return null;
+  }
+
+  // ── PNG ─────────────────────────────────────────────────────────────
+  /**
+   * PNG carries three possible answers and none of them is EXIF-in-a-JPEG.
+   *
+   *   eXIf           a whole TIFF block, same bytes a JPEG would hold (PNG 1.5+)
+   *   tEXt / iTXt    a "Creation Time" keyword, which is a free-form date string
+   *   tIME           7 bytes of last-modification time, and it is UTC
+   *
+   * SCANNED FOR THE CHUNK TYPE rather than walked from the signature, and that is
+   * deliberate. A PNG larger than the 256KB slice we hold ends a proper walk at the
+   * first IDAT — megabytes of pixels we do not have — and the tail slice this is also
+   * handed has no PNG signature at the front of it. So a walk finds nothing in
+   * exactly the two cases a walk was meant to help with.
+   *
+   * Four bytes could match by accident. Every candidate then has to survive a real
+   * parse and ok()'s 1995-to-now window, so the cost of a coincidence is one failed
+   * read rather than a wrong date.
+   */
+  function fromPng(view) {
+    let exifHit = null;
+    let textHit = null;
+    let timeHit = null;
+    for (let i = 0; i + 8 <= view.byteLength; i += 1) {
+      // Gated on the first byte before building a string, or this allocates a
+      // four-character string per byte of a 256KB slice. Every type below starts with
+      // 'e', 't' or 'i'. Same trick the mvhd scan uses with 'm'.
+      const b0 = view.getUint8(i);
+      if (b0 !== 0x65 && b0 !== 0x74 && b0 !== 0x69) continue;
+      const type = fourCC(view, i);
+      if (type === null) break;
+      // Chunk layout: length(4) type(4) data(length) crc(4). `i` is at the type, so
+      // the length is behind it and the data starts in front.
+      const data = i + 4;
+      if (!exifHit && type === 'eXIf') exifHit = readExifTiff(view, data);
+      else if (!timeHit && type === 'tIME') timeHit = readPngTime(view, data);
+      else if (!textHit && (type === 'tEXt' || type === 'iTXt')) {
+        const len = i >= 4 ? view.getUint32(i - 4) : 0;
+        textHit = readPngCreationTime(view, data, len);
+      }
+      if (exifHit) break;                  // nothing below it can be better
+    }
+    return exifHit || textHit || timeHit || null;
+  }
+
+  /** tIME: year(2) month day hour minute second, in UTC per the spec. */
+  function readPngTime(view, at) {
+    if (at + 7 > view.byteLength) return null;
+    const y = view.getUint16(at);
+    const mo = view.getUint8(at + 2);
+    const d = view.getUint8(at + 3);
+    const h = view.getUint8(at + 4);
+    const mi = view.getUint8(at + 5);
+    const s = view.getUint8(at + 6);
+    if (mo < 1 || mo > 12 || d < 1 || d > 31 || h > 23 || mi > 59 || s > 60) return null;
+    return ok(new Date(Date.UTC(y, mo - 1, d, h, mi, s)));
+  }
+
+  /**
+   * A tEXt or iTXt chunk whose keyword is "Creation Time".
+   *
+   * The value is whatever the writer felt like — RFC 1123, ISO 8601, or a local
+   * format — so it goes through Date's own parser rather than a regex, and then
+   * through ok(). iTXt has compression and language bytes between the keyword and
+   * the text; they are skipped by taking everything after the last NUL.
+   */
+  function readPngCreationTime(view, at, len) {
+    const cap = Math.min(view.byteLength, at + Math.min(len || 0, 512));
+    if (cap <= at) return null;
+    let text = '';
+    for (let i = at; i < cap; i += 1) text += String.fromCharCode(view.getUint8(i));
+    const parts = text.split('\0');
+    if (!/^creation\s*time$/i.test((parts[0] || '').trim())) return null;
+    const value = parts[parts.length - 1].trim();
+    if (!value) return null;
+    const parsed = new Date(value);
+    return ok(Number.isNaN(parsed.getTime()) ? null : parsed);
+  }
+
+  /**
+   * Last resort for a container nothing above recognises: find the TIFF header.
+   *
+   * WebP keeps EXIF in a RIFF `EXIF` chunk, HEIC in a `meta` item, and both hold the
+   * same 'II*\0' or 'MM\0*' block a JPEG does. Rather than learn two more container
+   * formats to reach identical bytes, look for the bytes.
+   */
+  function fromTiffScan(view) {
+    for (let i = 0; i + 8 <= view.byteLength; i += 1) {
+      const b0 = view.getUint8(i);
+      if (b0 !== 0x49 && b0 !== 0x4D) continue;                  // 'I' or 'M'
+      const order = view.getUint16(i);
+      if (order !== 0x4949 && order !== 0x4D4D) continue;
+      const found = readExifTiff(view, i);
+      if (found) return found;
     }
     return null;
   }
@@ -647,13 +796,29 @@ window.dkMediaDate = (function () {
 
     // Sniffed by content, not by extension, because half these filenames have been
     // through a messaging app and an `.m4a` that is really an MP4 is routine.
+    //
+    // Every reader below is accurate to the second, so anything that answers here
+    // carries a real time as well as a day.
     let found = null;
     if (view.byteLength > 3 && view.getUint16(0) === 0xFFD8) found = fromExif(view);
-    // Both of these are accurate to the second, so both carry a time.
     if (found) return { date: iso(found), at: stamp(found), source: 'exif' };
+
+    // PNG, checked by signature at the front OR by extension, because the tail slice
+    // of a large file has no signature in it and is where a late tIME chunk lives.
+    const isPng = (view.byteLength > 8 && view.getUint32(0) === 0x89504E47)
+      || /\.png$/i.test(String(name || ''));
+    if (isPng) {
+      found = fromPng(view);
+      if (found) return { date: iso(found), at: stamp(found), source: 'png' };
+    }
 
     found = fromIsoBmff(view);
     if (found) return { date: iso(found), at: stamp(found), source: 'mvhd' };
+
+    // Nothing recognised the container. The EXIF block may still be in there — WebP
+    // and HEIC both hold one — so look for the bytes rather than for the wrapper.
+    found = fromTiffScan(view);
+    if (found) return { date: iso(found), at: stamp(found), source: 'exif' };
 
     return null;
   }
@@ -691,10 +856,24 @@ window.dkMediaDate = (function () {
         };
       }
 
-      // lastModified is a real instant, but for anything copied between devices it
-      // is the copy time — so the day is worth using and the clock reading is not.
+      // lastModified, and it DOES get to supply a clock reading.
+      //
+      // It used to return at: null, on the grounds that for anything copied between
+      // devices this is the copy time rather than the capture time. That reasoning is
+      // still true and it is still the weakest source here — but refusing it meant a
+      // file with no EXIF, no mvhd and no date in its name could never show a time at
+      // all, which is most graphics and most screenshots. "Title.png" uploaded with a
+      // day and no time, and there was nowhere to say otherwise.
+      //
+      // What changed is that the answer is now editable. It lands in a Time field the
+      // rider is looking at, beside the Date field this same value already filled, and
+      // emptying it is one tap. A suggestion that can be corrected beats a blank.
+      //
+      // The BACKFILL is unaffected and must stay that way: it works from bytes fetched
+      // over HTTP, has no File and so never reaches this branch. Nothing it writes
+      // without someone reading it first is a guess of this strength.
       const mod = file.lastModified ? new Date(file.lastModified) : null;
-      if (ok(mod)) return { date: iso(mod), at: null, source: 'lastModified (day only)' };
+      if (ok(mod)) return { date: iso(mod), at: stamp(mod), source: 'lastModified' };
       return { date: null, at: null, source: 'none' };
     } catch {
       return { date: null, at: null, source: 'none' };
@@ -1469,7 +1648,31 @@ if ('serviceWorker' in navigator) {
 // The percentage is a paced estimate, not a byte count — supabase-js resolves
 // upload() in one shot with no progress events — so it climbs to 93 and waits
 // for the real answer rather than claiming 100 before the server agrees.
-let uploadPercentInterval = null;
+//
+// ── IT SAYS WHICH WAIT YOU ARE IN ───────────────────────────────────
+//
+// It used to say "Uploading..." for all of it, and "all of it" is three different
+// waits that fail for three different reasons: reading the file's metadata off the
+// disk, pushing the bytes to storage, and writing the row. A 200MB video coming out
+// of a phone's content provider spends seconds in the first one with nothing on
+// screen at all, because the read happens before the notes sheet opens — you picked
+// a file and the app appeared to do nothing.
+//
+// So the label is a parameter, setUploadPhase() renames it at the real boundaries,
+// and the creep is eased rather than random: fast while there is room, crawling near
+// the ceiling, so it never stalls on a round number. Same shape as
+// sage-autofill.js's startProgress, which was written from this and is the better
+// version of it.
+//
+// Every flow must END through finishUploadPercent, errorUploadPercent or
+// cancelUploadPercent. The two vehicle-document uploads used to call neither, which
+// left the interval running forever, the success message overwritten by a 'Uploading
+// 87%' tick 130ms later, and the orange bar stuck across the docs grid at 93%.
+const UPLOAD_CEILING = 93;
+const UPLOAD_TICK_MS = 140;
+let uploadPercentTimer = null;
+let uploadPercent = 0;
+let uploadPhase = 'Uploading';
 
 /** Paint the bar, or hide it. `null` hides. */
 function paintUploadBar(percent) {
@@ -1485,25 +1688,81 @@ function paintUploadBar(percent) {
   bar.style.width = `${percent}%`;
 }
 
-function startUploadPercent() {
-  let percent = 1;
-  showPopup('loading', `Uploading... ${percent}%`);
-  paintUploadBar(percent);
-  if (uploadPercentInterval) clearInterval(uploadPercentInterval);
-  uploadPercentInterval = setInterval(() => {
-    if (percent < 93) {
-      percent += Math.floor(Math.random() * 7) + 2;
-      if (percent > 93) percent = 93;
-      showPopup('loading', `Uploading... ${percent}%`);
-      paintUploadBar(percent);
-    }
-  }, 130);
+/** Both surfaces, one number, one label. */
+function paintUploadStep() {
+  const shown = Math.round(uploadPercent);
+  showPopup('loading', `${uploadPhase}… ${shown}%`);
+  paintUploadBar(shown);
 }
 
-function finishUploadPercent() {
-  if (uploadPercentInterval) clearInterval(uploadPercentInterval);
-  showPopup('loading', `Uploading... 100%`);
+function stopUploadTimer() {
+  if (uploadPercentTimer) clearInterval(uploadPercentTimer);
+  uploadPercentTimer = null;
+}
+
+/**
+ * @param {string} [phase] What this wait is, in words. "Uploading" if not given,
+ *   which is what the vehicle-document uploads pass.
+ */
+function startUploadPercent(phase) {
+  uploadPhase = phase || 'Uploading';
+  uploadPercent = 1;
+  stopUploadTimer();
+  paintUploadStep();
+  uploadPercentTimer = setInterval(() => {
+    const room = UPLOAD_CEILING - uploadPercent;
+    if (room <= 0.4) return;
+    uploadPercent += Math.max(0.4, room * 0.075);
+    paintUploadStep();
+  }, UPLOAD_TICK_MS);
+}
+
+/**
+ * A real phase boundary: rename the wait, and jump the number so the jump lines up
+ * with work that actually finished rather than with the clock.
+ */
+function setUploadPhase(phase, atLeast) {
+  if (!uploadPercentTimer) return;              // nothing is in flight to rename
+  if (phase) uploadPhase = phase;
+  if (Number.isFinite(atLeast) && atLeast > uploadPercent) {
+    uploadPercent = Math.min(UPLOAD_CEILING, atLeast);
+  }
+  paintUploadStep();
+}
+
+/**
+ * Stop without claiming anything happened.
+ *
+ * Used when the metadata read finishes and the notes sheet is about to open: the
+ * popup is a modal overlay at z-index 10000 and would sit on top of the sheet.
+ */
+function cancelUploadPercent() {
+  stopUploadTimer();
+  hidePopup();
+  paintUploadBar(null);
+}
+
+/**
+ * @param {string} [message] The outcome, shown straight away.
+ *
+ * Passing it replaces the old pairing of finishUploadPercent() with a following
+ * updatePopup('success', …). That read as two steps and behaved as none: finish
+ * scheduled hidePopup at +700ms, so the success line the caller set a tick later was
+ * on screen for those 700ms and then gone, while its own 3s timer closed an already
+ * closed popup.
+ */
+function finishUploadPercent(message) {
+  stopUploadTimer();
+  uploadPercent = 100;
   paintUploadBar(100);
+  if (message) {
+    showPopup('success', message);
+    // Later than the popup's own 3s dismiss would be pointless; 900ms is long enough
+    // for the bar to be seen full rather than vanishing mid-fill.
+    setTimeout(() => paintUploadBar(null), 900);
+    return;
+  }
+  showPopup('loading', `${uploadPhase}… 100%`);
   setTimeout(() => {
     hidePopup();
     // After the popup, so the bar is briefly seen full rather than vanishing
@@ -1512,9 +1771,10 @@ function finishUploadPercent() {
   }, 700);
 }
 
-function errorUploadPercent() {
-  if (uploadPercentInterval) clearInterval(uploadPercentInterval);
-  showPopup('error', 'Upload failed.');
+/** @param {string} [message] Why it failed. Said once, here, rather than twice. */
+function errorUploadPercent(message) {
+  stopUploadTimer();
+  showPopup('error', message || 'Upload failed.');
   const bar = document.getElementById('uploadProgressBar');
   if (bar) {
     // Red and full: the bar has to stop claiming progress it did not make.
@@ -2320,7 +2580,7 @@ function wireDocCard({ type, fileInput, uploadBtn, previewEl, headerDeleteBtn })
         return;
       }
 
-      startUploadPercent();
+      startUploadPercent('Uploading');
 
       const { error: uploadErr } = await supabase.storage.from(bucket).upload(fileName, file, {
         contentType,
@@ -2329,9 +2589,14 @@ function wireDocCard({ type, fileInput, uploadBtn, previewEl, headerDeleteBtn })
       });
 
       if (uploadErr) {
-        updatePopup('error', 'Upload failed');
+        // errorUploadPercent, not updatePopup: the latter leaves the paced timer
+        // running, so a moment later the failure was overwritten by "Uploading 61%"
+        // and the bar was left stretched across the grid claiming progress.
+        errorUploadPercent('Upload failed: ' + uploadErr.message);
         return;
       }
+
+      setUploadPhase('Saving the record', 78);
 
       const { error } = await supabase.from('vehicle_documents').insert([{
         file_name: fileName,
@@ -2344,12 +2609,12 @@ function wireDocCard({ type, fileInput, uploadBtn, previewEl, headerDeleteBtn })
       }]);
 
       if (error) {
-        updatePopup('error', 'DB error');
+        errorUploadPercent('DB error: ' + error.message);
         await supabase.storage.from(bucket).remove([fileName]);
         return;
       }
 
-      updatePopup('success', 'Uploaded!');
+      finishUploadPercent('Uploaded!');
       renderVehicleDocPreview(previewEl, type, fileName, file.name, uploadBtn);
       showUploadedBadge(previewEl);
       fileInput.value = '';
@@ -2473,12 +2738,14 @@ function setupDocAddFlow() {
     const contentType = file.type || 'application/octet-stream';
 
     close();
-    startUploadPercent();
+    startUploadPercent('Uploading');
 
     const { error: uploadErr } = await supabase.storage
       .from('vehicle-documents')
       .upload(storedName, file, { contentType, cacheControl: '3600', upsert: false });
-    if (uploadErr) { updatePopup('error', 'Upload failed'); return; }
+    if (uploadErr) { errorUploadPercent('Upload failed: ' + uploadErr.message); return; }
+
+    setUploadPhase('Saving the record', 78);
 
     const notes = (notesEl?.value || '').trim();
     const row = {
@@ -2499,7 +2766,7 @@ function setupDocAddFlow() {
       ({ error } = await supabase.from('vehicle_documents').insert([row]));
     }
     if (error) {
-      updatePopup('error', 'DB error');
+      errorUploadPercent('DB error: ' + error.message);
       await supabase.storage.from('vehicle-documents').remove([storedName]);
       return;
     }
@@ -2509,7 +2776,7 @@ function setupDocAddFlow() {
       renderVehicleDocPreview(descriptor.previewEl, type, storedName, file.name, descriptor.uploadBtn);
       showUploadedBadge(descriptor.previewEl);
     }
-    updatePopup('success', 'Document added!');
+    finishUploadPercent('Document added!');
     if (window.triggerRecordSavedNotif) window.triggerRecordSavedNotif();
   });
 }
@@ -2658,6 +2925,34 @@ async function updateHistoricNotes(id, notes) {
   return !error;
 }
 
+/**
+ * One sentence naming where the date and time in the sheet came from.
+ *
+ * @param {{source:string, at:string|null}|null} found A dkMediaDate.detail() result.
+ *
+ * The four readers do not deserve equal trust and the rider is the only one who knows
+ * which files came off a camera and which came through a messaging app. EXIF is the
+ * shutter opening; lastModified is whenever the file was last written, which for
+ * anything copied between devices is the copy — so that one asks to be checked and
+ * the others do not.
+ */
+function uploadDateProvenance(found) {
+  const source = found?.source || 'none';
+  const timed = !!found?.at;
+  if (source === 'exif') return 'Date and time read from the photo\u2019s EXIF.';
+  if (source === 'png') return 'Date and time read from the image\u2019s own metadata.';
+  if (source === 'mvhd') return 'Date and time read from the video\u2019s metadata.';
+  if (source.startsWith('name')) {
+    return timed
+      ? 'Date and time read from the file name.'
+      : 'Date read from the file name, which carried no time.';
+  }
+  if (source === 'lastModified') {
+    return 'Date and time from the file\u2019s own timestamp \u2014 worth a check.';
+  }
+  return 'Nothing in this file said when it is from, so today is a placeholder.';
+}
+
 // Helper: get signed URL for historic-media bucket
 async function handleHistoricUpload(file, type, dropZone) {
   // WHEN THE FILE IS FROM, offered before it is asked for.
@@ -2677,20 +2972,39 @@ async function handleHistoricUpload(file, type, dropZone) {
   // detail() rather than dkFileDate(), because the sheet asks for a DAY and the
   // table shows a TIME. Both come out of the same read; asking for only the day
   // is what used to throw the clock reading away.
+  //
+  // AND IT SAYS SO WHILE IT READS. This is the one wait in the whole flow that had
+  // nothing on screen: it happens before the notes sheet opens, so picking a 200MB
+  // video from a phone looked like a tap that did nothing. Announced on a 200ms
+  // delay rather than immediately, because for a photo on a laptop the read finishes
+  // first and a popup that appears and vanishes inside two frames is worse than
+  // silence.
+  let readingShown = false;
+  const sayReading = setTimeout(() => {
+    readingShown = true;
+    startUploadPercent('Reading the file');
+  }, 200);
   const found = await window.dkMediaDate.detail(file).catch(() => null);
+  clearTimeout(sayReading);
+  // The sheet is next, and the popup is a modal overlay that would cover it.
+  if (readingShown) cancelUploadPercent();
+
   const guessedDate = found?.date || localIsoDate();
-  // Null unless the source knew a real clock reading. EXIF and mvhd do, and so does
-  // a filename that carried one; a bare date and a lastModified do not.
+  // Null only when nothing knew a clock reading — a bare date in a filename, or a
+  // file with no usable timestamp at all.
   const guessedStamp = found?.at || '';
 
   const answer = await showHistoricNotesModal({
     title: 'Add notes for this upload',
-    help: 'Notes are required for Historic Audio & Images uploads.',
+    // WHERE THE DATE CAME FROM, in the sheet that is asking you to confirm it.
+    // "Taken on 20-03-2026" is a different proposition depending on whether it was
+    // read out of the camera's EXIF or guessed from the file's modification time, and
+    // only one of those is worth checking. Saying which turns a field you have to
+    // audit into one you can glance at.
+    help: `Notes are required. ${uploadDateProvenance(found)}`,
     initial: '',
     required: true,
     date: guessedDate,
-    // Blank for a source that only knew a day — a bare date in a filename, or a
-    // lastModified that is really a copy time. The rider can fill it in or leave it.
     time: historicClockOf(guessedStamp),
     // The File itself goes over, so she describes what is actually in it rather
     // than guessing from the name.
@@ -2728,7 +3042,7 @@ async function handleHistoricUpload(file, type, dropZone) {
   if (ext === 'avi') contentType = 'video/x-msvideo';
   if (ext === 'webm') contentType = 'video/webm';
 
-  startUploadPercent();
+  startUploadPercent('Uploading');
 
   const { error: uploadErr } = await supabase.storage.from(bucket).upload(fileName, file, {
     contentType,
@@ -2737,10 +3051,14 @@ async function handleHistoricUpload(file, type, dropZone) {
   });
 
   if (uploadErr) {
-    errorUploadPercent();
-    updatePopup('error', 'Upload failed: ' + uploadErr.message);
+    errorUploadPercent('Upload failed: ' + uploadErr.message);
     return;
   }
+
+  // The bytes are in the bucket. What is left is the row, which is a different
+  // failure with a different fix — and on a slow connection it is a wait of its own
+  // rather than the tail of the previous one.
+  setUploadPhase('Saving the record', 78);
 
   const row = {
     media_type: type,
@@ -2783,8 +3101,7 @@ async function handleHistoricUpload(file, type, dropZone) {
   }
 
   if (error) {
-    errorUploadPercent();
-    updatePopup('error', 'DB error: ' + error.message);
+    errorUploadPercent('DB error: ' + error.message);
     await supabase.storage.from(bucket).remove([fileName]);
     return;
   }
@@ -2801,8 +3118,12 @@ async function handleHistoricUpload(file, type, dropZone) {
     if (takenAt) setHistoricTakenAt(inserted.id, takenAt);
     else if (historicDate) setHistoricLocalDate(inserted.id, historicDate);
   }
-  finishUploadPercent();
-  updatePopup('success', 'Uploaded with notes!');
+  // The outcome names what was saved, because the time is the part that was in
+  // question: an upload that shows a clock reading and one that shows only a day are
+  // two different results and both are correct.
+  finishUploadPercent(takenAt
+    ? `Uploaded — ${docsFormatDate(takenAt)}, ${docsFormatTime(takenAt)}`
+    : `Uploaded — ${docsFormatDate(historicDate)}`);
   const input = dropZone?.querySelector('input[type="file"]');
   if (input) input.value = '';
   loadHistoricUploads();
