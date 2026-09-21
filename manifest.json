@@ -4,8 +4,8 @@
   "description": "Track your bike's service history, documents, and insurance with ease.",
   "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#FB6900",
-  "theme_color": "#FB6900",
+  "background_color": "#E35D01",
+  "theme_color": "#E35D01",
   "orientation": "portrait-primary",
   "icons": [
     {
@@ -19,5 +19,5 @@
       "type": "image/png"
     }
   ],
-  "_comment_background": "SPLASH IS ICON-ORANGE BY CHOICE. background_color and theme_color are #FB6900, the exact orange of the icon tile (measured off icon-512), so the splash is one unbroken orange field with the logo sitting in it. That means one visible seam remains: when the splash hands over to the app, the whole screen goes from bright orange to the near-black app, and the status bar drops from orange to the #3d1908 the theme-color meta in index.html carries. That flash is the price of an orange splash over a dark app and was accepted over the alternative (a dark splash the orange tile clashed with). icon-192's transparent rounded corners are invisible on this field, so the two icons needed no change. Do not 'fix' these back to dark to match the app — that reintroduces the clash this change removes."
+  "_comment_background": "SPLASH IS ICON-ORANGE BY CHOICE. background_color and theme_color are #E35D01 and the icon tiles were recolored to the same #E35D01, so the splash is one unbroken orange field with the logo sitting in it. (#E35D01 was picked over the original tile orange #FB6900; both icons were remapped black-to-#E35D01 preserving anti-aliasing and the 192's transparent corners.) One visible seam remains: when the splash hands over to the app, the screen goes from orange to the near-black app, and the status bar drops to the #3d1908 the theme-color meta in index.html carries. That flash is the price of an orange splash over a dark app. Do not 'fix' these back to dark to match the app — that reintroduces the clash this change removes."
 }
