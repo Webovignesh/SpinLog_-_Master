@@ -4,8 +4,8 @@
   "description": "Track your bike's service history, documents, and insurance with ease.",
   "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#180e09",
-  "theme_color": "#3d1908",
+  "background_color": "#FB6900",
+  "theme_color": "#FB6900",
   "orientation": "portrait-primary",
   "icons": [
     {
@@ -19,5 +19,5 @@
       "type": "image/png"
     }
   ],
-  "_comment_background": "THESE TWO ARE THE APP'S OWN BACKDROP, MEASURED OFF IT. They were both #fb6900, the exact orange of the icon tile — so the splash and the icon merged into one orange field, and then the app arrived and the entire screen went from bright orange to near-black in a single frame. Matching the icon was solving the wrong seam: the splash is on screen for a moment, the app for the rest of the session, so it is the app the splash has to disappear into. HOW THESE WERE PICKED, because they are not eyeballed: the page was rendered in Chromium at 412x915 with every scrap of content hidden, leaving only the backdrop the splash hands over to — html's base, the blurred bike photo, the fixed scrim and the three orange glows. background_color #180e09 is the per-channel MEDIAN of that field below the status strip, excluding the icon box; the median is the flat colour that minimises mean absolute difference, so it is the optimum rather than a good guess. Measured over 274,360 pixels it scores 19.22 against 100.0 for #fb6900, 22.44 for a neutral #050607 and 21.86 for the field's mean — the mean is worse because a quarter of the screen is bright sunset sky and it drags a flat colour up away from the three quarters that are not. theme_color #3d1908 is the median of the top 48px, the strip the status bar sits over, warm rather than neutral because two of the glows sit at the top of the viewport and the backdrop layers are position:fixed, so that strip is the same colour at every scroll position. index.html's theme-color meta carries the same #3d1908, so the status bar does not change colour between the splash and the running app either; it was #050505, a neutral near-black directly above a warm brown page. The icon stays a full-bleed #fb6900 tile. On this field it reads as a logo tile on the app's own background, which is what a splash icon is; making it dissolve into the field would mean a dark icon on the home screen as well, and the logo inside it is black."
+  "_comment_background": "SPLASH IS ICON-ORANGE BY CHOICE. background_color and theme_color are #FB6900, the exact orange of the icon tile (measured off icon-512), so the splash is one unbroken orange field with the logo sitting in it. That means one visible seam remains: when the splash hands over to the app, the whole screen goes from bright orange to the near-black app, and the status bar drops from orange to the #3d1908 the theme-color meta in index.html carries. That flash is the price of an orange splash over a dark app and was accepted over the alternative (a dark splash the orange tile clashed with). icon-192's transparent rounded corners are invisible on this field, so the two icons needed no change. Do not 'fix' these back to dark to match the app — that reintroduces the clash this change removes."
 }
