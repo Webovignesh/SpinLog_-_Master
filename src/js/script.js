@@ -3098,14 +3098,18 @@ async function handleHistoricUpload(file, type, dropZone) {
     return;
   }
 
-  // Thumb is derived from the File in hand — zero egress. Fire-and-forget so
-  // a thumb failure never blocks the record. Future list views fetch the
-  // ~5 KB thumb instead of the 5-9 MB original.
+  // Thumb is derived from the File in hand — zero egress. Started now so it
+  // uploads in parallel with the DB insert, then awaited before the list
+  // refreshes: otherwise the first render finds no thumb yet and downloads
+  // the full original once (the bug in the screenshot — old rows show a
+  // data: thumb, new rows show a full signed URL).
+  let thumbPromise = null;
   try {
     if (type === 'image' || type === 'video') {
-      generateAndUploadHistoricThumb(file, fileName, type).catch(() => {});
+      thumbPromise = generateAndUploadHistoricThumb(file, fileName, type);
+      thumbPromise.catch(() => {});
     }
-  } catch {}
+  } catch { thumbPromise = null; }
 
   // The bytes are in the bucket. What is left is the row, which is a different
   // failure with a different fix — and on a slow connection it is a wait of its own
@@ -3178,6 +3182,18 @@ async function handleHistoricUpload(file, type, dropZone) {
     : `Uploaded — ${docsFormatDate(historicDate)}`);
   const input = dropZone?.querySelector('input[type="file"]');
   if (input) input.value = '';
+  // Wait for the thumb (bounded — a thumb failure must never hang the UI),
+  // so the refresh below signs something tiny instead of the full original.
+  if (thumbPromise) {
+    try {
+      const ok = await Promise.race([thumbPromise, new Promise(r => setTimeout(() => r('timeout'), 10000))]);
+      if (ok === false) {
+        console.warn('[SpinLog] Thumb upload failed for', fileName,
+          '— check storage policy allows thumbs/ in historic-media. List will use the full file until then.');
+      }
+    }
+    catch {}
+  }
   loadHistoricUploads();
 }
 
