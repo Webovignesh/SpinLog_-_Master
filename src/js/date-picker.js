@@ -55,6 +55,10 @@
   let viewYear = 0;      // the month on screen, which is not the selection
   let viewMonth = 0;
   let cursor = null;     // the day the keyboard is on, as a Date
+  let closeTimer = null; // holds `hidden` back until the fade-out has run
+
+  /** Shared with the rest of the app, so the answer cannot differ between files. */
+  const reduceMotion = () => (window.dkReduceMotion ? window.dkReduceMotion() : false);
 
   // ── Dates, in local time ────────────────────────────────────────────
   //
@@ -331,8 +335,15 @@
 
     paint();
     const shell = input.closest('.date-shell') || input.parentElement;
+    // Cancel a pending hide from a close that is still fading out, or reopening
+    // within 150ms would be hidden by that timer a moment later.
+    clearTimeout(closeTimer);
+    closeTimer = null;
     place(shell);
     shell?.classList.add('is-picking');
+    // place() already cleared `hidden` so it could measure the panel, which means
+    // the element is rendered at its start state for one frame before this class
+    // lands — exactly the order a transition needs.
     panel.classList.add('is-open');
 
     // Focus the panel, not a day: focusing a day scrolls the page on some mobile
@@ -346,7 +357,29 @@
     const shell = openFor.closest('.date-shell') || openFor.parentElement;
     shell?.classList.remove('is-picking');
     panel.classList.remove('is-open');
-    panel.hidden = true;
+
+    // THE EXIT TRANSITION WAS ALREADY WRITTEN AND WAS BEING THROWN AWAY.
+    //
+    // `.dk-cal` has a symmetric 0.14s opacity+transform transition in styles.css,
+    // and the line below used to be `panel.hidden = true` — on the very next line
+    // after the class came off. `[hidden] { display: none !important }` then landed
+    // in the same frame, so the browser never rendered a single intermediate step
+    // and the calendar vanished instantly, every time, despite having been given a
+    // fade three revisions ago.
+    //
+    // The attribute is what makes it inert, so it still has to arrive; it just has
+    // to arrive last. Under reduced motion there is nothing to wait for.
+    clearTimeout(closeTimer);
+    if (reduceMotion()) {
+      panel.hidden = true;
+    } else {
+      closeTimer = setTimeout(() => {
+        // Only if it has not been reopened in the meantime, or this would hide a
+        // calendar the user has just asked for again.
+        if (panel && !panel.classList.contains('is-open')) panel.hidden = true;
+      }, 150);
+    }
+
     const wasFor = openFor;
     openFor = null;
     cursor = null;

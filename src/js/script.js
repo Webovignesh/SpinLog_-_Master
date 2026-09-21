@@ -1,10 +1,150 @@
 // ════════════════════════════════════════════════════════════════════════
+// SpinLog | DOES THIS DEVICE WANT MOTION?
+//
+// One answer, at true top level, because this file has several independent
+// top-level scopes and three of them need it: the section swap inside the
+// DOMContentLoaded closure, the search-jump highlight in the home-insights IIFE,
+// and the overlay helpers below. Asking matchMedia in each place is cheap, but
+// DECLARING it in each place is how you end up with two that disagree.
+//
+// Read live rather than cached. The preference can be changed while the app is
+// open — on a phone it flips with the battery saver — and a cached boolean would
+// keep animating for the rest of the session.
+//
+// It is also the reason every timer in this file that waits for a transition has
+// to check: the reduced-motion block at the top of styles.css collapses durations
+// to 0.001ms, so a 200ms setTimeout would sit there long after the CSS had
+// finished, and a dialog would appear to hang on close.
+// ════════════════════════════════════════════════════════════════════════
+window.dkReduceMotion = function dkReduceMotion() {
+  try { return !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches; }
+  catch { return false; }
+};
+
+// ════════════════════════════════════════════════════════════════════════
+// SpinLog | ANIMATING SOMETHING THAT IS HIDDEN BY THE hidden ATTRIBUTE
+//
+// `[hidden] { display: none !important }` at the top of styles.css is absolute on
+// purpose — the note above that rule lists nine elements that were silently
+// failing to hide before it existed. The cost is that no element hidden that way
+// can animate out: the attribute lands and the element is gone in the same frame.
+//
+// ── WHY THIS IS THE WEB ANIMATIONS API AND NOT A CSS TRANSITION ──────
+//
+// The first version of this added an `.is-closing` class that styles.css gave a
+// fade to, waited for it with a timer, then set `hidden`. Everything about it
+// looked right — the class landed, the computed `transition` on the element read
+// `opacity 0.12s ease-in`, reduced motion was off — and the opacity still went
+// from 1 to 0 between two frames with nothing in between.
+//
+// So did an INLINE `style.transition` + `style.opacity = 0` on the same element,
+// which rules out every question about specificity, the cascade and the `!important`
+// chains. A CSS transition simply would not start on `.dk-search-panel`, while the
+// dialogs two blocks above it transition perfectly in the same browser on the same
+// page. Rather than keep guessing at why — a `backdrop-filter` layer, the
+// absolutely-positioned subtree, the ancestor that had just finished its own
+// animation, all plausible and none provable from here — this stopped using the
+// transition machinery.
+//
+// `el.animate()` does not care. It takes the keyframes, runs them on the
+// compositor, and hands back a promise that resolves when the last frame has been
+// committed. That promise is a better signal than a `setTimeout` guess anyway: it
+// cannot drift, and it cannot fire early on a device that is dropping frames.
+//
+// Four surfaces use this — the search results, Sage's restore chooser, her four
+// settings tab panels, and the two parking panes — and they are exactly the four
+// that are hidden by the attribute rather than by a class.
+//
+// Both halves are idempotent. The running animation is parked on the element, so a
+// second call cancels the first rather than leaving two fighting over one opacity.
+// ════════════════════════════════════════════════════════════════════════
+
+/** The shape each surface moves through. `x` slides sideways, `y` vertically. */
+function dkMotionFrames(shift) {
+  const s = shift || {};
+  const x = s.x || '0px';
+  const y = s.y || '0px';
+  return [
+    { opacity: 0, transform: `translate(${x}, ${y})` },
+    { opacity: 1, transform: 'translate(0px, 0px)' },
+  ];
+}
+
+function dkCancelMotion(el) {
+  if (el && el._slAnim) {
+    try { el._slAnim.cancel(); } catch { /* already finished */ }
+    el._slAnim = null;
+  }
+}
+// Exported for the one caller that shows an element WITHOUT animating it here,
+// because CSS already owns its entrance: showTab() in sage-ui.js, where
+// sagePanelIn plays the arrival. It still has to clear a forwards-filled exit
+// from the previous tab switch, or the panel comes back at opacity 0.
+window.dkCancelMotionFor = dkCancelMotion;
+
+/**
+ * Hide `el`, playing it out first.
+ *
+ * @param {Element} el
+ * @param {number} [ms]        Duration. 150 unless the surface wants otherwise.
+ * @param {object} [shift]     {x, y} — where it leaves to. Fade only if omitted.
+ * @param {Function} [after]   Run once it is actually hidden.
+ */
+window.dkSlideShut = function dkSlideShut(el, ms = 150, shift, after) {
+  if (!el) return;
+  dkCancelMotion(el);
+  const done = () => {
+    el.hidden = true;
+    el._slAnim = null;
+    if (typeof after === 'function') after();
+  };
+  // Nothing to play: already gone, no motion wanted, or no support for it.
+  if (el.hidden || window.dkReduceMotion() || typeof el.animate !== 'function') {
+    done();
+    return;
+  }
+  const anim = el.animate(dkMotionFrames(shift).slice().reverse(), {
+    duration: ms,
+    easing: 'ease-in',
+    fill: 'forwards',
+  });
+  el._slAnim = anim;
+  anim.finished
+    .then(() => {
+      // A newer call may have cancelled this one and started an open; if so the
+      // element is not ours to hide any more.
+      if (el._slAnim !== anim) return;
+      done();
+      // The forwards fill has to come off, or the element stays at opacity 0 the
+      // next time it is shown.
+      try { anim.cancel(); } catch { /* fine */ }
+    })
+    .catch(() => { /* cancelled by a newer call, which owns the element now */ });
+};
+
+/**
+ * Show `el`, playing it in.
+ *
+ * @param {Element} el
+ * @param {number} [ms]
+ * @param {object} [shift]  {x, y} — where it arrives from.
+ */
+window.dkSlideOpen = function dkSlideOpen(el, ms = 190, shift) {
+  if (!el) return;
+  dkCancelMotion(el);
+  el.hidden = false;
+  if (window.dkReduceMotion() || typeof el.animate !== 'function') return;
+  const anim = el.animate(dkMotionFrames(shift), { duration: ms, easing: 'ease-out' });
+  el._slAnim = anim;
+  anim.finished.then(() => { if (el._slAnim === anim) el._slAnim = null; }).catch(() => {});
+};
+
+// ════════════════════════════════════════════════════════════════════════
 // SpinLog | APP VERSION
 //
 // One literal, in the <meta name="version"> tag, painted into every element
-// carrying [data-app-version]. Two of those exist today — a chip beside the
-// database status on Home and a line in the foot of Sage's settings — and a
-// third needs markup only, no code.
+// carrying [data-app-version]. One of those exists today — a chip at the foot of
+// Home — and a second needs markup only, no code.
 //
 // Top level, outside the DOMContentLoaded closure below, because the version
 // is also useful to anything that wants to stamp a log or a bug report.
@@ -2124,26 +2264,81 @@ window._delHistoricUpload = async function(id, fileName, btn) {
     try { target.focus({ preventScroll: true }); } catch { target.focus(); }
   }
 
+  /** Matches slSectionOut in styles.css. Change both or neither. */
+  const SECTION_OUT_MS = 130;
+  /** Guards against a second navigation landing mid-swap. */
+  let sectionSwapToken = 0;
+  let sectionSwapTimer = null;
+
+  /**
+   * TWO VIEWS, IN ORDER, RATHER THAN A CUT.
+   *
+   * This used to remove `.active` from every section and add it to the incoming one
+   * in a single frame. `section` without `.active` is `display: none`, so the view
+   * you were looking at did not leave — it stopped existing — and the `fadeIn` on
+   * the arriving one was a fade up from a page that had already gone. There was
+   * never a frame with both on screen, which is the only thing that can read as a
+   * transition.
+   *
+   * So the outgoing view is held for the length of its exit animation and hidden
+   * after it, and only then does the incoming one appear. Sequential, not
+   * overlapping: overlapping would mean taking one out of flow, and an absolutely
+   * positioned section mid-swap gives you a page height that jumps and a scrollbar
+   * that flickers.
+   *
+   * Everything with a side effect — the scroll, the shader, focus, the data fetch,
+   * the history entry — happens at the SWAP, not when the gesture starts. Firing
+   * them early would scroll the page while the old view was still visible, which is
+   * the exact judder this is meant to remove.
+   *
+   * Three things this has to survive:
+   *   · A second tap mid-swap. `sectionSwapToken` makes the pending callback a
+   *     no-op, and the timer is cleared, so the last navigation wins rather than
+   *     both running.
+   *   · Reduced motion. There is nothing to wait for, so it swaps in place.
+   *   · Being called with the section already showing. The command-centre search
+   *     does that when the record it found is on the current page; it must not
+   *     animate, and it must not steal focus.
+   */
   function setActiveSection(section, mode) {
     if (!isKnownSection(section)) return;
     const incoming = document.getElementById(section);
-    // A section change that is not really a change must not steal focus — the
-    // command-centre search calls this with the section you are already on when
-    // the hit it found is on this page.
     const wasActive = incoming.classList.contains('active');
+    const outgoing = document.querySelector('main section.active');
+    const token = ++sectionSwapToken;
 
-    sections.forEach(sec => sec.classList.remove('active'));
-    incoming.classList.add('active');
-    // Instant, not smooth: animating a long scroll while the incoming section
-    // is doing its first layout is what made navigation feel sluggish.
-    window.scrollTo({ top: 0, behavior: 'auto' });
-    // The backdrop stays on screen everywhere, but it only needs to ANIMATE on
-    // home. Off home it is a static image behind a long scrolling list, and a
-    // full-viewport shader redrawing per frame is pure scroll cost.
-    window.SpinLog3D?.setAnimating?.(section === 'home');
-    if (!wasActive) focusSectionHeading(incoming);
-    ensureSectionData(section);
-    rememberSection(section, mode);
+    const swap = () => {
+      if (token !== sectionSwapToken) return;
+      sections.forEach(sec => {
+        sec.classList.remove('active');
+        sec.classList.remove('is-leaving');
+      });
+      incoming.classList.add('active');
+      // Instant, and now harmless: the outgoing view is already gone, so there is
+      // no smooth scroll for this to interrupt and nothing on screen to judder.
+      window.scrollTo({ top: 0, behavior: 'auto' });
+      // The backdrop stays on screen everywhere, but it only needs to ANIMATE on
+      // home. Off home it is a static image behind a long scrolling list, and a
+      // full-viewport shader redrawing per frame is pure scroll cost.
+      window.SpinLog3D?.setAnimating?.(section === 'home');
+      if (!wasActive) focusSectionHeading(incoming);
+      ensureSectionData(section);
+      rememberSection(section, mode);
+    };
+
+    clearTimeout(sectionSwapTimer);
+    sectionSwapTimer = null;
+
+    // Nothing to animate away from: first paint, the same section again, or a user
+    // who asked for no motion.
+    if (!outgoing || outgoing === incoming || window.dkReduceMotion()) {
+      if (outgoing) outgoing.classList.remove('is-leaving');
+      swap();
+      return;
+    }
+
+    outgoing.classList.add('is-leaving');
+    sectionSwapTimer = setTimeout(swap, SECTION_OUT_MS);
   }
   // Exposed so the v1.7 command-center search can navigate between sections.
   window.dkNavigate = setActiveSection;
@@ -5152,8 +5347,11 @@ async function getBillFileUrl(fileName) {
     pickedPhoto = null;
     clearInterval(walkTimer);
     walkTimer = null;
-    $('parkListPane')?.removeAttribute('hidden');
-    $('parkEditPane')?.setAttribute('hidden', '');
+    // The two panes slide past each other rather than being swapped between
+    // frames: the detail leaves to the right, the list comes back from the left.
+    // That is what makes the back arrow in the header mean something.
+    window.dkSlideShut($('parkEditPane'), 140, { x: '14%' });
+    window.dkSlideOpen($('parkListPane'), 200, { x: '-14%' });
     $('parkBack')?.setAttribute('hidden', '');
     const label = $('parkSheetLabel');
     if (label) label.textContent = 'Parking';
@@ -5250,8 +5448,8 @@ async function getBillFileUrl(fileName) {
     openAt = spot.at;
     pickedPhoto = null;
 
-    $('parkListPane')?.setAttribute('hidden', '');
-    $('parkEditPane')?.removeAttribute('hidden');
+    window.dkSlideShut($('parkListPane'), 140, { x: '-14%' });
+    window.dkSlideOpen($('parkEditPane'), 200, { x: '14%' });
     $('parkBack')?.removeAttribute('hidden');
     const label = $('parkSheetLabel');
     if (label) label.textContent = spot.label || 'This spot';
@@ -7415,6 +7613,10 @@ window.setupCoverDateEditing = function() {
    * animate at all and the class is dropped on a fallback timeout instead.
    */
   const FOUND_CLASS = 'dk-found';
+  /** Three pulses at 0.7s each. Keep in step with .dk-found in styles.css. */
+  const FOUND_MS = 2100;
+
+  const reduceMotion = window.dkReduceMotion;
 
   function markFound(el) {
     if (!el) return;
@@ -7424,14 +7626,67 @@ window.setupCoverDateEditing = function() {
     void el.offsetWidth;
     el.classList.add(FOUND_CLASS);
     const done = () => el.classList.remove(FOUND_CLASS);
+    // animationend fires once, after the LAST of the three iterations.
     el.addEventListener('animationend', done, { once: true });
-    setTimeout(done, 2600);
+    // Fallback for reduced motion, where there is no animation to end.
+    setTimeout(done, FOUND_MS + 400);
   }
 
+  /**
+   * Carry the page to an element, smoothly, and then light it up.
+   *
+   * WHY THIS IS NOT JUST scrollIntoView({ behavior: 'smooth' }).
+   *
+   * It was, and it juddered. Two reasons, both about timing rather than easing:
+   *
+   *   · A jump out of search navigates first, and setActiveSection() ends with
+   *     `window.scrollTo({ top: 0, behavior: 'auto' })`. flashWhenReady() then calls
+   *     this SYNCHRONOUSLY on its first poll when the target already exists, so an
+   *     instant scroll to the top and a smooth scroll to the middle of the page were
+   *     being issued in the same frame. The browser is entitled to run the second
+   *     from wherever the first had got to, and the result was a lurch.
+   *
+   *   · The incoming section had just gone from display:none to rendered, so its
+   *     layout was not final. scrollIntoView resolves its target position once, up
+   *     front — and the rows of a service table landing mid-flight moved that
+   *     position out from under the animation, so it finished somewhere else and
+   *     snapped.
+   *
+   * Two frames of delay fixes both. The first lets the instant scroll commit; the
+   * second lets the new section finish its first layout. Only then is the target
+   * measured, which is also why scrollIntoView is still the call — it honours the
+   * scroll-margin-top on .dk-found, which is what keeps a marked row from landing
+   * underneath the sticky header.
+   *
+   * THE MARK STARTS WITH THE SCROLL, NOT AFTER IT.
+   *
+   * It waited for `scrollend` for a while, on the reasoning that three pulses over
+   * 2.1s should not be spent travelling. That was right about the old single 2.2s
+   * fade, which had nothing left by the time it arrived, and wrong about this one:
+   * a 400ms scroll costs the first half of the first pulse and the other two land
+   * with the row already still.
+   *
+   * What it did cost was the thing the whole feature is for. Waiting for scrollend,
+   * with a timer behind it for engines that do not fire one, put roughly 800ms
+   * between clicking a search result and seeing which row it found — and a jump out
+   * of search also waits on the section swap before any of this starts. Two
+   * animations queued behind each other read as the app thinking about it.
+   *
+   * So the highlight is lit as soon as the scroll is under way. Click to feedback is
+   * now about 165ms.
+   */
   function flash(el, mark) {
     if (!el) return;
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    if (mark) markFound(el);
+    const instant = reduceMotion();
+
+    const arrive = () => {
+      if (!el.isConnected) return;
+      el.scrollIntoView({ behavior: instant ? 'auto' : 'smooth', block: 'center' });
+      if (mark) markFound(el);
+    };
+
+    if (instant) { arrive(); return; }
+    requestAnimationFrame(() => requestAnimationFrame(arrive));
   }
 
   /**
@@ -7451,7 +7706,19 @@ window.setupCoverDateEditing = function() {
     let revealed = false;
     const tick = () => {
       const el = document.querySelector(selector);
-      if (el) { flash(el, mark); return; }
+      // RENDERED, not merely present. `offsetParent` is null for anything inside a
+      // `display: none` subtree, which is exactly what a section that has not become
+      // active yet is.
+      //
+      // This used to test `if (el)` alone, and it was correct until the section swap
+      // grew a 130ms exit animation. A jump out of search navigates first, so for
+      // those 130ms the incoming view is still hidden while its rows are already in
+      // the DOM from an earlier visit — so the first poll found the row, called
+      // scrollIntoView on an element with no layout box, which does nothing, and then
+      // the swap scrolled the page to the top. The row was marked and pulsing
+      // somewhere below the fold, which is the one outcome this whole path exists to
+      // prevent.
+      if (el && el.offsetParent) { flash(el, mark); return; }
       if (!revealed && n === 2 && typeof reveal === 'function') {
         revealed = true;
         reveal();
@@ -7567,7 +7834,10 @@ window.setupCoverDateEditing = function() {
     const results = () => Array.from(panel.querySelectorAll('.dk-search-item'));
 
     function closePanel() {
-      panel.hidden = true;
+      // Lifts back toward the field it dropped out of. The aria state flips
+      // immediately — a screen reader should be told the listbox is closed now,
+      // not in 120ms.
+      window.dkSlideShut(panel, 120, { y: '-8px' });
       input.setAttribute('aria-expanded', 'false');
       activeResult = -1;
     }
@@ -7627,7 +7897,7 @@ window.setupCoverDateEditing = function() {
         });
       }
 
-      panel.hidden = false;
+      window.dkSlideOpen(panel, 170, { y: '-8px' });
       input.setAttribute('aria-expanded', 'true');
       activeResult = -1;
     }

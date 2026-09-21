@@ -145,7 +145,8 @@ header {
   background: var(--orange);
   z-index: 1000;
   box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-}.logo {
+}
+.logo {
   font-size: 1.8rem;
   font-weight: bold;
   color: var(--black);
@@ -161,121 +162,28 @@ header {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
-/* Desktop Navigation */
-.desktop-nav {
-  display: flex;
-  gap: 8px;
-  list-style: none;
-  background: rgba(0,0,0,0.2);
-  border-radius: 50px;
-  padding: 6px;
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255,255,255,0.1);
-}
-.desktop-nav li {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 0.9rem;
-  color: rgba(0,0,0,0.7);
-  cursor: pointer;
-  padding: 10px 18px;
-  border-radius: 40px;
-  background: transparent;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  font-weight: 500;
-  position: relative;
-  white-space: nowrap;
-}
-.desktop-nav li.active {
-  background: var(--white);
-  color: var(--orange);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-  transform: translateY(-1px);
-}
-.desktop-nav li:not(.active):hover {
-  background: rgba(255,255,255,0.8);
-  color: var(--orange);
-  transform: translateY(-1px);
-}
-.desktop-nav li i {
-  font-size: 1rem;
-  transition: transform var(--transition-speed);
-}
-.desktop-nav li:hover i {
-  transform: scale(1.1);
-}
-/* Desktop nav button accessibility */
-.desktop-nav li button,
-.mobile-nav-list li button {
-  background: none;
-  border: none;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-  width: 100%;
-  height: 100%;
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  padding: 0;
-  outline: none;
-}
-.desktop-nav li button:focus,
-.mobile-nav-list li button:focus {
-  outline: 2px solid var(--orange);
-  outline-offset: 2px;
-}.mobile-nav-toggle.active span:nth-child(1) {
-  transform: rotate(45deg) translate(4px, 4px);
-}
-.mobile-nav-toggle.active span:nth-child(2) { opacity: 0; }
-.mobile-nav-toggle.active span:nth-child(3) {
-  transform: rotate(-45deg) translate(4px, -4px);
-}.mobile-nav-overlay.show { display: block; opacity: 1; }.mobile-nav-menu.show { left: 0; }
-.mobile-nav-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  list-style: none;
-  padding: 0 20px;
-}
-.mobile-nav-list li {
-  background: transparent;
-  color: var(--black);
-  border-radius: 12px;
-  padding: 18px 20px;
-  font-size: 1.1rem;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  position: relative;
-  border: 2px solid transparent;
-}
-.mobile-nav-list li.active {
-  background: var(--white);
-  color: var(--orange);
-  border-color: rgba(0,0,0,0.1);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-}
-.mobile-nav-list li:not(.active):hover {
-  background: rgba(255,255,255,0.2);
-  transform: translateX(6px);
-}
-.mobile-nav-list li i {
-  width: 24px;
-  text-align: center;
-  font-size: 1.3rem;
-  transition: transform 0.3s ease;
-}
-.mobile-nav-list li:hover i {
-  transform: scale(1.1);
-}
+/* THE OLD NAVIGATION WAS HERE, and it is gone: ~115 lines across twenty rules for
+   .desktop-nav, .mobile-nav-list, .mobile-nav-toggle, .mobile-nav-overlay and
+   .mobile-nav-menu. None of those five classes has been in index.html for several
+   versions — navigation is [data-home-section] buttons and the hash — and the JS
+   that drove them was removed in the same pass as this.
+
+   Worth knowing why the automated sweep did not take them. Rules are only dropped
+   when EVERY selector in them is entirely dead, and:
+     · `.mobile-nav-toggle.active` and `.mobile-nav-overlay.show` compound a dead
+       class with a live one, and `.active` and `.show` are used all over the app
+     · the group at the bottom of this file pairs four dead classes with `header`,
+       an element selector that really does hide any banner
+     · and `.desktop-nav` / `.mobile-nav-list` read as live because the comment in
+       script.js explaining their removal NAMES them. Documenting a deletion kept
+       the CSS for it alive, which is a good joke and a real lesson: a
+       literal-search liveness test cannot tell a selector from prose about a
+       selector.
+   Removed by hand for that reason. */
+
 /* Responsive Design */
 @media (max-width: 768px) {
-  .desktop-nav { display: none; }.logo { font-size: 1.6rem; }
+  .logo { font-size: 1.6rem; }
 }
 @media (max-width: 480px) {  .logo { font-size: 1.4rem; }}
 main {
@@ -384,7 +292,8 @@ h3 {
   font-size: 3.2rem;
   color: var(--orange);
   opacity: 0.93;
-}.service-management-desc {
+}
+.service-management-desc {
   font-size: 1.15rem;
   color: var(--white);
   opacity: 0.85;
@@ -567,7 +476,8 @@ h3 {
     gap: 14px;
   }
   .service-title { font-size: 1.4rem; }
-  .service-placeholder-icon i { font-size: 2.1rem; }  .service-management-desc { font-size: 0.99rem; }
+  .service-placeholder-icon i { font-size: 2.1rem; }
+.service-management-desc { font-size: 0.99rem; }
   .service-table th, .service-table td { padding: 8px 3px; font-size: 0.95rem; }
   .drawer-submit { font-size: 0.99rem; padding: 10px 7vw;}
 }
@@ -579,11 +489,6 @@ h3 {
   main {
     padding: 16px;
   }}
-.desktop-nav li button:focus,
-.mobile-nav-list li button:focus {
-  outline: none !important;
-  box-shadow: none !important;
-}
 
 /* Custom Popup Styles */
 .popup-overlay {
@@ -1080,7 +985,8 @@ audio::-webkit-media-controls-panel,
 video::-webkit-media-controls-panel {
   
   border-radius: 8px !important;
-}body {
+}
+body {
   background-color: #000;
   color: #fff;
 }
@@ -1088,7 +994,8 @@ video::-webkit-media-controls-panel {
 body {
   background-color: #000;
   color: #fff;
-}.filename-display.selected {
+}
+.filename-display.selected {
   color: #0f0;
   font-weight: 500;
 }
@@ -1196,18 +1103,6 @@ body {
   .logo i {
     animation: spin 3.2s linear infinite !important;
     font-size: 1.8rem;
-  }.mobile-nav-list li {
-    color: var(--white);
-    border-radius: 18px;
-    padding: 16px 18px;
-    border-color: rgba(255,255,255,0.08);
-    background: rgba(255,255,255,0.04);
-  }
-
-  .mobile-nav-list li.active {
-    background: var(--orange);
-    color: var(--black);
-    border-color: var(--orange);
   }
 
   main {
@@ -1516,7 +1411,8 @@ body {
 .logo i {
   animation: spin 4s linear infinite !important;
   will-change: transform;
-}.history-clear-btn {
+}
+.history-clear-btn {
   min-height: 48px;
   padding: 0 16px;
   display: inline-flex;
@@ -1585,7 +1481,8 @@ body {
 .bill-preview-link.bill-pdf i,
 .bill-preview-missing i {
   color: #ff5f57;
-}.history-empty-row td {
+}
+.history-empty-row td {
   padding: 24px !important;
   text-align: center !important;
   color: rgba(255,255,255,0.54) !important;
@@ -1736,7 +1633,8 @@ body {
 .history-reset-btn:disabled {
   opacity: 0.42;
   cursor: not-allowed;
-}.history-type-mods-updates {
+}
+.history-type-mods-updates {
   border-color: rgba(26, 209, 165, 0.34);
   background: rgba(26, 209, 165, 0.1);
 }
@@ -6637,7 +6535,8 @@ body {
   object-fit: cover;
   border: 1px solid rgba(251,105,0,0.28);
 }
-#docs .doc-preview a { text-decoration: none; color: var(--orange); }#docs .historic-upload-grid {
+#docs .doc-preview a { text-decoration: none; color: var(--orange); }
+#docs .historic-upload-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
   margin: 8px 0 0;
@@ -7062,7 +6961,8 @@ body {
   color: rgba(255,255,255,0.56);
   font-size: .72rem;
   line-height: 1.25;
-}#docs .doc-open-pill {
+}
+#docs .doc-open-pill {
   min-height: 40px;
   width: 100%;
   border-radius: 999px;
@@ -7078,7 +6978,8 @@ body {
   font-weight: 800;
   letter-spacing: .06em;
   text-transform: uppercase;
-}#docs .upload-btn.angled-btn {
+}
+#docs .upload-btn.angled-btn {
   margin-top: 0;
   min-height: 42px;
 }
@@ -7230,7 +7131,8 @@ body {
   width: 100% !important;
   max-width: 100% !important;
   box-sizing: border-box !important;
-}#docs .doc-empty-state {
+}
+#docs .doc-empty-state {
   min-height: 62px !important;
   padding: 11px !important;
 }
@@ -7501,7 +7403,8 @@ body {
   margin-top: 28px !important;
   padding-top: 26px !important;
   border-top: 1px solid rgba(251, 105, 0, .35) !important;
-}#docs .docs-history-wrap {
+}
+#docs .docs-history-wrap {
   margin-top: 0 !important;
 }
 #docs .docs-action-stack {
@@ -7673,7 +7576,8 @@ body {
   padding: 0 10px !important;
   font-size: .78rem !important;
   white-space: nowrap !important;
-}@media (max-width: 760px) {
+}
+@media (max-width: 760px) {
   #docs .historic-upload-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     gap: 10px !important;
@@ -7920,7 +7824,8 @@ body {
 #home {
   padding: 0;
   background: transparent;
-}.home-cover-card .status {
+}
+.home-cover-card .status {
   width: 100%;
   margin: 0;
   text-align: center;
@@ -7964,11 +7869,13 @@ body::before {
   background-size: 34px 34px;
   mask-image: radial-gradient(circle at center, #000 0%, transparent 82%);
 }
-header,
-.mobile-nav-overlay,
-.mobile-nav-menu,
-.desktop-nav-wrap,
-.mobile-nav-toggle {
+/* `header` only. The four nav classes that used to be listed alongside it are gone
+   from the markup, so this was hiding nothing.
+   The element selector stays, and it is load-bearing in a way that catches people:
+   it is UNSCOPED, so any <header> anywhere in the document disappears. That is why
+   index.html deliberately contains no banner element — see the note at the top of
+   the home section. */
+header {
   display: none !important;
 }
 .container {
@@ -8350,7 +8257,8 @@ section {
     padding: 9px 11px;
     border-radius: 16px;
     background: rgba(0,0,0,0.44);
-  }  #dbStatusText {
+  }
+#dbStatusText {
     font-size: 0.95rem;
   }
 }
@@ -8530,7 +8438,8 @@ section {
     transform: translate(-50%, -50%) scale(3);
     opacity: 0;
   }
-}.park-hint {
+}
+.park-hint {
   display: block;
   font-size: 0.53rem;
   color: rgba(255,255,255,0.50);
@@ -10026,20 +9935,6 @@ select.sage-set-input option { background: #181818; color: #fff; }
   padding: 0 18px 13px;
 }
 .sage-set-status--footer:empty { display: none; }
-
-/* The build number, at the very bottom of the dialog and deliberately the quietest
-   thing in it — present for a bug report, not competing with the save button. */
-.sage-set-version {
-  flex: 0 0 auto;
-  margin: 0;
-  padding: 0 18px 12px;
-  color: rgba(255, 255, 255, 0.50);
-  font-size: 0.68rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-}
 
 /* ══ MEMORY PANEL ══════════════════════════════════════════════════════ */
 
@@ -16747,8 +16642,19 @@ body {
    desktop table the rows are flush against the wrapper's rounded edge, and an outline
    drawn outward gets clipped on the right-hand side.
 
-   The animation ends by itself; script removes the class on animationend and on a
-   2.6s fallback for the reduced-motion case, where there is no animation to end. */
+   THREE PULSES, NOT ONE LONG FADE.
+   This was a single 2.2s sawtooth: bright, then a slow sink to nothing. On a table of
+   twenty near-identical rows that reads as one of them being slightly warmer than the
+   others for two seconds, which is not a signal — a fade has no beat, so there is no
+   moment your eye is drawn to. Three distinct 0.7s strikes do, and they are still over
+   inside the same 2.1s.
+
+   Each iteration restarts at full strength and falls to nothing, so `forwards` leaves
+   the row clean without needing a separate end state. The count is what makes it read
+   as deliberate rather than as a rendering glitch; two looks like a stutter and four
+   starts to nag. script.js removes the class on animationend, which fires after the
+   LAST iteration, with a timer behind it for the reduced-motion case where there is no
+   animation to end. FOUND_MS there and the total here have to agree. */
 @keyframes dkFoundPulse {
   0% {
     background-color: rgba(251, 105, 0, 0.30);
@@ -16773,16 +16679,19 @@ body {
   outline: 2px solid rgba(251, 105, 0, 0.95);
   outline-offset: -2px;
   border-radius: inherit;
-  animation: dkFoundPulse 2.2s ease-out forwards;
+  animation: dkFoundPulse 0.7s ease-out 3 forwards;
   /* A row lit up behind the sticky section header is a row you cannot see. */
   scroll-margin-top: 96px;
   scroll-margin-bottom: 96px;
 }
 
 /* A table row cannot carry a background in every engine once its cells have their
-   own, so the wash goes on the cells too. The ring stays on the row. */
+   own, so the wash goes on the cells too. The ring stays on the row.
+   The count and duration are restated rather than inherited: these are separate
+   elements with their own animation, and a row pulsing three times over cells
+   pulsing once would tear. */
 .dk-found > td {
-  animation: dkFoundPulse 2.2s ease-out forwards;
+  animation: dkFoundPulse 0.7s ease-out 3 forwards;
   outline: 0;
 }
 
@@ -17880,19 +17789,487 @@ body {
    the letters, which is what makes a version number read as one token.
 
    The glyph is a branch, because that is what a version is a point on. aria-hidden, so
-   a screen reader says "SpinLog v1.9.0" and is not told there is a small drawing next
-   to it. See .dk-build in home.css for the home-screen copy of this.
+   a screen reader says "SpinLog v1.9.1" and is not told there is a small drawing next
+   to it.
+
+   The .sage-set-version rules that used to follow this note are gone with the element.
+   There was a second copy of the build number under the save button in Sage's settings,
+   which is a panel for her memory, her keys and quiet hours — a version string was the
+   one line in it that could not be acted on. It is shown in one place now: .dk-build,
+   at the foot of the home screen, in home.css. Everything above still applies to that
+   copy, which is why the note stays.
    ════════════════════════════════════════════════════════════════════════ */
-.sage-set-version {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  font-family: 'Blender Pro', 'Oswald', Arial, sans-serif;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+
+/* ════════════════════════════════════════════════════════════════════════
+   MOTION — EVERY SURFACE THAT OPENS ALSO CLOSES
+   ════════════════════════════════════════════════════════════════════════
+   Appended last, deliberately, for the reason the two blocks above it give: the
+   rules being corrected here are spread across the file, several of them carry
+   `!important`, and at equal specificity source order is the only thing that
+   decides. A media query carries no extra weight either.
+
+   ── THE PROBLEM THIS SOLVES ─────────────────────────────────────────
+   Fourteen surfaces in this app opened and closed. Exactly two of them animated
+   on the way out: .popup-overlay and .sl-slide-overlay. Every other one was
+   hidden with `display: none`, and `display` is not an animatable property — so
+   the exit could not run no matter what transition was declared. Five of them had
+   an entrance keyframe and no exit at all, which is worse than having neither: the
+   thing eases in over 220ms and then vanishes between two frames.
+
+   The .dk-cal date picker was the clearest case. It HAS a symmetric 0.14s exit
+   transition, written and correct, and date-picker.js set `hidden` on the line
+   after removing the class — so `display: none` landed in the same frame and the
+   fade it had been given was thrown away every time.
+
+   ── THE FIX, AND WHY IT IS visibility AND NOT display ───────────────
+   `visibility` is a discretely-animated property, which sounds useless and is the
+   whole trick: it flips at the END of its transition rather than the start. So
+   `visibility: hidden` + a duration holds the element visible for exactly as long
+   as the opacity takes to reach zero, and then removes it from rendering and from
+   hit-testing. No JS, no timers, no transitionend listener, and the exit is the
+   entrance played backwards for free.
+
+   This is not a new pattern here. .popup-overlay has worked this way since it was
+   written — `opacity` + `visibility` + `transition: all 0.3s` — and it is the one
+   overlay in the app nobody has ever complained about. This block extends what
+   that rule already proves to the surfaces that were never given it.
+
+   Three consequences worth knowing:
+     · A closed overlay is `display: flex` now, not `display: none`. It costs
+       nothing: `visibility: hidden` means it is not painted, not hit-tested and
+       not in the accessibility tree, and the backdrop-filter on
+       .sl-modal-overlay::before is not composited while its ancestor is hidden.
+     · pointer-events is pinned off as well. Belt and braces — visibility alone
+       already stops hit-testing, but these are full-viewport layers and a mistake
+       here means an invisible sheet swallowing every tap on the page.
+     · The transform now lives on the CARD and is driven by the OVERLAY's state
+       class, so it reverses. The old `animation: slModalIn` could only ever play
+       forwards.
+
+   Durations: 240ms in, 180ms out. Out is faster than in on purpose — a dialog
+   arriving wants to be followed, a dialog leaving is already decided and waiting
+   for it feels like lag. Both sit under the 300ms where a transition stops reading
+   as motion and starts reading as a delay.
+
+   The global reduced-motion reset at the top of this file collapses every duration
+   below to 0.001ms, so all of this becomes an instant swap for anyone who asked
+   for that. Nothing here needs its own reduced-motion block.
+   ════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  --sl-in: 240ms;
+  --sl-out: 180ms;
+  /* Decelerating, with no overshoot. An overlay that bounces reads as playful,
+     and four of the five dialogs this drives are asking about data. */
+  --sl-ease: cubic-bezier(0.22, 0.68, 0.32, 1);
+  /* For things that slide rather than fade — a shade quicker, because travel
+     already reads as time. */
+  --sl-ease-out: cubic-bezier(0.32, 0.72, 0, 1);
 }
-.sage-set-version i {
-  font-size: 0.62rem;
-  color: rgba(251, 105, 0, 0.6);
+
+/* ══ 1. THE SHARED SHEET DIALOG ════════════════════════════════════════
+   Five surfaces ride this: the add-a-document modal, the service-record editor,
+   the parking sheet, the cover-date editor and Sage's settings. All five were
+   `display: none` ↔ `display: flex` with a one-way entrance on the card. */
+.sl-modal-overlay {
+  /* Was `display: none`. Kept flex at all times so the close can animate; the
+     two properties below are what actually hide it. */
+  display: flex !important;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity var(--sl-out) ease-in,
+    visibility var(--sl-out) step-end;
+}
+.sl-modal-overlay.sl-modal--open {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+  transition:
+    opacity var(--sl-in) var(--sl-ease),
+    /* step-start, so the element is visible for the whole of the fade IN. With
+       the default step-end it would stay hidden until the opacity finished and
+       the entrance would never be seen. */
+    visibility var(--sl-in) step-start;
+}
+
+/* The card. `animation: slModalIn` is replaced by a transition off the parent's
+   state class, which is the only way it can play in both directions.
+   On a phone the sheet is bottom-anchored (align-items: flex-end), so it rises
+   from the edge it is attached to; from 520px up it is centred and scales. */
+.sl-modal-card {
+  animation: none !important;
+  transform: translateY(26px);
+  opacity: 0;
+  transition:
+    transform var(--sl-out) ease-in,
+    opacity var(--sl-out) ease-in;
+  /* Hint the compositor for the two properties that move, and nothing else. */
+  will-change: transform, opacity;
+}
+.sl-modal--open .sl-modal-card {
+  transform: none;
+  opacity: 1;
+  transition:
+    transform var(--sl-in) var(--sl-ease),
+    opacity var(--sl-in) var(--sl-ease);
+}
+@media (min-width: 520px) {
+  .sl-modal-card { transform: translateY(12px) scale(0.97); }
+  .sl-modal--open .sl-modal-card { transform: none; }
+}
+
+/* ══ 2. THE NOTES SHEET ════════════════════════════════════════════════ */
+#docs .docs-modal {
+  display: flex !important;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--sl-out) ease-in, visibility var(--sl-out) step-end;
+}
+#docs .docs-modal.show {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+  transition: opacity var(--sl-in) var(--sl-ease), visibility var(--sl-in) step-start;
+}
+#docs .docs-modal-card {
+  transform: translateY(20px) scale(0.98);
+  opacity: 0;
+  transition: transform var(--sl-out) ease-in, opacity var(--sl-out) ease-in;
+}
+#docs .docs-modal.show .docs-modal-card {
+  transform: none;
+  opacity: 1;
+  transition: transform var(--sl-in) var(--sl-ease), opacity var(--sl-in) var(--sl-ease);
+}
+
+/* ══ 3. THE MEDIA VIEWER ═══════════════════════════════════════════════
+   This one had NO animation in either direction — a full-screen black layer
+   appearing and disappearing between two frames, which is the harshest cut in the
+   app. It is also the one surface whose content script.js empties on close
+   (`stage.innerHTML = ''`), so the exit has to be carried by the container: the
+   backdrop fades and the whole viewer settles back a little, and the emptied
+   stage inside it is never seen because it goes with the opacity. */
+.docs-player {
+  display: flex !important;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--sl-out) ease-in, visibility var(--sl-out) step-end;
+}
+.docs-player.is-open {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+  transition: opacity var(--sl-in) var(--sl-ease), visibility var(--sl-in) step-start;
+}
+/* The bar and the foot come in from the edges they are pinned to, so the chrome
+   assembles around the file rather than the whole rectangle sliding as one piece. */
+.docs-player-bar { transform: translateY(-14px); transition: transform var(--sl-out) ease-in; }
+.docs-player-foot { transform: translateY(14px); transition: transform var(--sl-out) ease-in; }
+.docs-player.is-open .docs-player-bar,
+.docs-player.is-open .docs-player-foot {
+  transform: none;
+  transition: transform var(--sl-in) var(--sl-ease);
+}
+/* The stage scales up from just under full size. Small: this is a viewer opening
+   over the row you tapped, not a card flying in. */
+.docs-player-body {
+  transform: scale(0.97);
+  opacity: 0;
+  transition: transform var(--sl-out) ease-in, opacity var(--sl-out) ease-in;
+}
+.docs-player.is-open .docs-player-body {
+  transform: none;
+  opacity: 1;
+  transition: transform var(--sl-in) var(--sl-ease), opacity var(--sl-in) var(--sl-ease);
+}
+
+/* ══ 4. THE TWO DROPDOWN MENUS ═════════════════════════════════════════
+   Both are position:absolute, so keeping them rendered costs no layout. The
+   service-entry one had no animation at all; the history one had an entrance
+   (historyMenuDrop) and no exit.
+
+   transform-origin: top centre, so they unfold from the button rather than
+   sliding past it. 140ms in and 110ms out: a menu is the one surface where
+   waiting is felt immediately, because the next tap is already on its way. */
+#service #serviceEntryForm .entry-select-menu,
+.history-select-menu,
+#service .history-select-menu,
+#docs .history-select-menu {
+  display: block !important;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-6px) scale(0.98);
+  transform-origin: top center;
+  animation: none !important;
+  transition:
+    opacity 110ms ease-in,
+    transform 110ms ease-in,
+    visibility 110ms step-end;
+}
+#service #serviceEntryForm .custom-entry-select.is-open .entry-select-menu,
+.custom-history-select.is-open .history-select-menu,
+#service .custom-history-select.is-open .history-select-menu,
+#docs .custom-history-select.is-open .history-select-menu {
+  display: block !important;
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+  transition:
+    opacity 140ms var(--sl-ease),
+    transform 140ms var(--sl-ease),
+    visibility 140ms step-start;
+}
+/* The history menu lays its options out as a grid; the entry menu stacks them.
+   Restated because the rule above forces `display: block` on both. */
+.custom-history-select.is-open .history-select-menu,
+#service .custom-history-select.is-open .history-select-menu,
+#docs .custom-history-select.is-open .history-select-menu {
+  display: grid !important;
+  gap: 4px;
+}
+
+/* ══ 5. THE FILTER PANELS ══════════════════════════════════════════════
+   These are the one set that AFFECTS LAYOUT — they push the table down — so
+   visibility alone is not enough: the space has to open and close too, or the
+   content below jumps while the panel fades.
+
+   `grid-template-rows: 0fr → 1fr` is the honest way to do that, and it needs the
+   panel to be a grid with one row and the real content in a child. That is not
+   this markup. So: max-height, with a value chosen to clear the tallest the panel
+   gets (four stacked controls on a 320px screen is ~320px; 640 is double that and
+   costs nothing, because max-height only clamps).
+
+   The trade with max-height is that the easing is slightly wrong at the end when
+   the content is much shorter than the cap. Hidden here by fading the opacity out
+   over the first 60% of the collapse, so the panel is invisible before the height
+   finishes settling and nobody can see the curve. */
+#service .history-tools,
+#docs .history-tools,
+#service #serviceHistoryFilters,
+#docs #docsHistoryFilters {
+  display: grid !important;
+  overflow: hidden !important;
+  max-height: 0 !important;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  transition:
+    max-height 200ms ease-in,
+    opacity 120ms ease-in,
+    padding 200ms ease-in,
+    margin 200ms ease-in,
+    visibility 200ms step-end;
+}
+#service .history-tools.is-open,
+#docs .history-tools.is-open,
+#service #serviceHistoryFilters.is-open,
+#docs #docsHistoryFilters.is-open {
+  max-height: 640px !important;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition:
+    max-height 260ms var(--sl-ease),
+    opacity 200ms var(--sl-ease) 40ms,
+    padding 260ms var(--sl-ease),
+    margin 260ms var(--sl-ease),
+    visibility 260ms step-start;
+}
+
+/* From 769px up the filters are permanent furniture, not a disclosure. The
+   existing min-width:769px block already pins them open with !important; this
+   restates the parts that block does not mention, so the collapse above cannot
+   leak onto a desktop. */
+@media (min-width: 769px) {
+  #service .history-tools,
+  #docs .history-tools,
+  #service #serviceHistoryFilters,
+  #docs #docsHistoryFilters {
+    max-height: none !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
+    overflow: visible !important;
+    transition: none !important;
+  }
+}
+
+/* ══ 6. THE SURFACES HIDDEN BY THE hidden ATTRIBUTE ════════════════════
+   Four of them: the command-centre search results, Sage's restore chooser, her
+   four settings tab panels, and the two parking panes.
+
+   THERE ARE NO RULES FOR THEM HERE, AND THAT IS THE FINDING.
+
+   `[hidden] { display: none !important }` near the top of this file is absolute by
+   design — the note above it lists nine elements that were silently failing to
+   hide before it existed — so an element hidden that way cannot animate out from
+   CSS. The obvious answer is to delay the attribute: add a class, let a transition
+   run, set `hidden` after. That was written, and on `.dk-search-panel` the
+   transition would not start. Not a specificity problem and not the cascade: an
+   inline `style.transition` with an inline `style.opacity = 0` on the same element
+   jumped as well, while the dialogs in section 1 above transitioned correctly in
+   the same browser on the same page.
+
+   So these four are animated from JavaScript instead, with `el.animate()` —
+   see dkSlideOpen / dkSlideShut at the top of script.js, which also explains the
+   reasoning at length. The keyframes and the direction of travel live at each call
+   site, because the direction is the thing that differs: the parking panes slide
+   sideways in the direction the back arrow implies, and the rest fade back toward
+   the control that opened them.
+
+   The one thing CSS still has to not do is fight it. Nothing below targets these
+   four, and nothing should: a `transition` on the same properties would run
+   against the animation and produce a double ease.
+
+   ── The date picker ──
+   Also hidden by the attribute, and NOT in that group: its transition was already
+   written, already correct, and works. All it needed was for close() in
+   date-picker.js to stop setting `hidden` on the line after removing the class,
+   which threw the fade away in the same frame every time. */
+
+/* ══ 7. THE NOTIFICATION BANNER ════════════════════════════════════════
+   Everything about this element is in a style attribute in index.html, including
+   `animation: slModalIn`. The entrance therefore works and the exit was
+   `style.display = 'none'`. The inline `animation` has to be beaten with
+   !important; the class is added by the two dismiss paths. */
+#sageNotifBanner {
+  transition:
+    opacity 180ms ease-in,
+    transform 220ms var(--sl-ease-out);
+}
+#sageNotifBanner.is-closing {
+  animation: none !important;
+  opacity: 0;
+  /* Down and out through the bottom edge it came from. translateX(-50%) is in the
+     inline style and centres it, so it has to be restated or the banner jumps to
+     the right as it leaves. */
+  transform: translateX(-50%) translateY(18px) scale(0.96);
+  pointer-events: none;
+}
+
+/* ══ 8. SOFTENING THE REST ═════════════════════════════════════════════
+   Not open/close states — just the places where something changed instantly under
+   the cursor and did not need to.
+
+   Scoped lists rather than a blanket `*`, on purpose. A universal transition
+   catches things that must not have one: a scroll-snap carousel, a drag thumb
+   mid-gesture, and every table row on a 200-row redraw. */
+
+/* Rows, tiles and cards that respond to a pointer. */
+.doc-card,
+.dk-fact,
+.park-history-item,
+.sage-mem-item,
+.dk-search-item,
+.docs-media-row,
+.service-record-row,
+.history-select-option,
+.entry-select-option,
+.dk-pager-num,
+.dk-pager-step,
+.sage-key-tile,
+.docs-file-meta {
+  transition:
+    background-color 160ms var(--sl-ease),
+    border-color 160ms var(--sl-ease),
+    color 160ms var(--sl-ease),
+    box-shadow 160ms var(--sl-ease),
+    transform 160ms var(--sl-ease);
+}
+
+/* Every button and field that had no transition of its own. `:where()` keeps the
+   specificity at zero so nothing here can outrank a component's own rule — this
+   is a floor, not an override. */
+:where(button, .dk-btn, .sage-btn, .docs-primary-btn, .docs-secondary-btn,
+       .history-clear-btn, .history-filter-toggle, .upload-btn, .doc-open-pill,
+       .doc-delete-btn, .docs-trash-btn, .sl-modal-close, .docs-modal-close,
+       input, select, textarea) {
+  transition:
+    background-color 150ms var(--sl-ease),
+    border-color 150ms var(--sl-ease),
+    color 150ms var(--sl-ease),
+    box-shadow 150ms var(--sl-ease),
+    opacity 150ms var(--sl-ease),
+    transform 150ms var(--sl-ease);
+}
+
+/* The status pills and badges that change colour when data lands, rather than on
+   hover — a cover card going from green to red should not snap. */
+.dk-cover-status,
+.status,
+.history-type-badge,
+.docs-type-badge,
+.sage-health-verdict,
+.dk-db-chip,
+.db-status-dot {
+  transition:
+    background-color 220ms var(--sl-ease),
+    border-color 220ms var(--sl-ease),
+    color 220ms var(--sl-ease);
+}
+
+/* Progress and meters, so a value arriving animates to its width instead of
+   appearing at it. */
+.dk-next-bar > span,
+.sage-meter-bar > span,
+#uploadProgressBar,
+.dk-tl-track > span {
+  transition: width 320ms var(--sl-ease), background-color 220ms var(--sl-ease);
+}
+
+/* ══ 9. THE SECTION SWAP ═══════════════════════════════════════════════
+   The routed views. This is the one the whole app is judged on, because it is the
+   movement that happens most.
+
+   It was `fadeIn 0.3s` on the incoming section and nothing on the outgoing one:
+   the old view was `display: none`'d in the same frame the new one appeared, so
+   what actually rendered was a hard cut followed by a fade UP FROM a page that had
+   already gone. Two views were never on screen together, so there was nothing to
+   read as a transition.
+
+   Both halves exist now. script.js holds the outgoing section for the length of
+   `sectionOut` before it swaps, so the old view leaves and the new one arrives —
+   in that order, without ever overlapping in the layout. Overlapping them would
+   mean taking one out of flow, and a `position: absolute` section mid-swap is how
+   you get a scrollbar that flickers and a page height that jumps.
+
+   130ms out, 300ms in. Asymmetric because leaving is not interesting and arriving
+   is: the eye needs the shorter half to be over before it starts following the
+   longer one, or the whole thing reads as one long lag. The total is 430ms, which
+   is at the top of what still feels instant.
+
+   translateY only, no scale. A scaling section re-rasterises every glyph inside it
+   for the length of the animation, and these views contain a 20-row table. */
+@keyframes slSectionOut {
+  from { opacity: 1; transform: none; }
+  to   { opacity: 0; transform: translateY(-10px); }
+}
+@keyframes slSectionIn {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: none; }
+}
+
+main section.active {
+  animation: slSectionIn 300ms var(--sl-ease);
+}
+
+/* The outgoing view. `display: block` is restated because `section` without
+   `.active` is `display: none` in the block near the top of this file, and this
+   class is on the element for the 130ms AFTER .active comes off.
+   `forwards` holds the last keyframe so it does not flash back to full opacity in
+   the frame before script.js hides it. */
+main section.is-leaving {
+  display: block !important;
+  animation: slSectionOut 130ms ease-in forwards;
+  /* Nothing in a section that is on its way out should be clickable. */
+  pointer-events: none;
 }

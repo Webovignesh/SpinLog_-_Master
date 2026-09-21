@@ -301,7 +301,20 @@
       const button = e.tabs?.querySelector(`[data-sage-tab="${tab}"]`);
       const on = tab === wanted;
       if (panel) {
-        panel.hidden = !on;
+        // The outgoing panel lifts out while the incoming one drops in, so the two
+        // read as a pair moving past each other rather than one blinking off and the
+        // next blinking on. sagePanelIn was already doing the arrival half.
+        if (on) {
+          // sagePanelIn in styles.css already plays the arrival, so this only has
+          // to make the element present — animating it here as well would run two
+          // things over each other.
+          if (window.dkCancelMotionFor) window.dkCancelMotionFor(panel);
+          panel.hidden = false;
+        } else if (window.dkSlideShut && !panel.hidden) {
+          window.dkSlideShut(panel, 120, { y: '-6px' });
+        } else {
+          panel.hidden = true;
+        }
         panel.classList.toggle('is-on', on);
       }
       if (button) {
@@ -1117,7 +1130,14 @@
 
   function closeMemPick() {
     const e = cache();
-    if (e.memPick) e.memPick.hidden = true;
+    // Fades and lifts out rather than blinking off. sagePickIn already handled the
+    // arrival; `hidden` landing in the same frame as the class removal is what left
+    // it with no departure. The state below is cleared immediately either way —
+    // reopening to find a stale selection waiting is how you delete the wrong thing.
+    if (e.memPick) {
+      if (window.dkSlideShut) window.dkSlideShut(e.memPick, 130, { y: '-6px' });
+      else e.memPick.hidden = true;
+    }
     pickChosen = new Set();
     pickRows = { restorable: [], forgotten: [] };
   }

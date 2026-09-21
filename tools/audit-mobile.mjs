@@ -437,16 +437,35 @@ for (const size of SIZES) {
   // panel open and made Filters a button that did nothing. Geometry alone could not
   // see it — the panel measured fine, it was simply always there.
   {
-    const cycle = await page.evaluate(() => {
+    const cycle = await page.evaluate(async () => {
       const t = document.getElementById('serviceHistoryFilterToggle');
       const p = document.getElementById('serviceHistoryFilters');
       if (!t || !p) return null;
-      const show = () => getComputedStyle(p).display !== 'none';
+      // A BEAT AFTER EACH CLICK, because the panel animates now.
+      //
+      // The three clicks used to be read back synchronously, which was correct while
+      // the panel switched `display` — that lands in the same frame. It collapses its
+      // height over 260ms instead, so reading immediately after the click measures the
+      // state it is leaving and every sample came back "open".
+      const settle = () => new Promise(r => setTimeout(r, 340));
+      // MEASURED, NOT INFERRED FROM `display`.
+      //
+      // This used to be `getComputedStyle(p).display !== 'none'`, which was the
+      // right test for exactly as long as `display` was the mechanism. The panel
+      // collapses its height now, so that it can animate open and shut instead of
+      // snapping — it is `display: grid` at all times and hidden with max-height 0,
+      // visibility and opacity. The old check read that as permanently open.
+      //
+      // offsetHeight cannot go stale the same way: it is 0 for `display: none`, 0
+      // for a max-height:0 collapse, and non-zero only when the panel is genuinely
+      // taking up space. The visibility test catches a panel that has height but is
+      // not painted.
+      const show = () => p.offsetHeight > 2 && getComputedStyle(p).visibility !== 'hidden';
       const seen = [];
       // It was opened during setup, so this first click should shut it.
-      t.click(); seen.push(show());
-      t.click(); seen.push(show());
-      t.click(); seen.push(show());
+      t.click(); await settle(); seen.push(show());
+      t.click(); await settle(); seen.push(show());
+      t.click(); await settle(); seen.push(show());
       return { seen, expanded: t.getAttribute('aria-expanded') };
     });
     ok(at('the Filters button opens and shuts the panel'),
@@ -1091,10 +1110,17 @@ for (const size of SIZES) {
       const b = document.getElementById('docsHistoryFilterToggle');
       if (b) b.click();
     });
-    await page.waitForTimeout(280);
+    // Longer than the 260ms collapse, so the height being measured below is the one
+    // the panel has settled at rather than the one it is leaving.
+    await page.waitForTimeout(400);
+    // Same measured test as the service panel above, and for the same reason: the
+    // panel collapses its height rather than switching `display` off, so that it can
+    // animate. See the note beside the service-side check.
     ok(at('docs filters: the button shuts the panel again'),
-      await page.evaluate(() =>
-        getComputedStyle(document.getElementById('docsHistoryFilters')).display === 'none'),
+      await page.evaluate(() => {
+        const p = document.getElementById('docsHistoryFilters');
+        return !p || p.offsetHeight <= 2 || getComputedStyle(p).visibility === 'hidden';
+      }),
       'panel stayed open');
 
     // ── THE PAGE STRIP HAS TO FIT A PHONE ──
@@ -2264,21 +2290,16 @@ for (const size of SIZES) {
             })(),
           };
         })(),
-        // And the same treatment in the Sage settings dialog, which is the app's nearest
-        // thing to an About screen.
-        sageVersion: (() => {
-          const p = document.querySelector('.sage-set-version');
-          if (!p) return null;
-          return {
-            family: getComputedStyle(p).fontFamily,
-            caps: getComputedStyle(p).textTransform,
-            hasGlyph: !!p.querySelector('i.fa-code-branch'),
-          };
-        })(),
+        // There must be no SECOND copy. One lived under the save button in Sage's
+        // settings, on the theory that the dialog was the app's nearest thing to an
+        // About screen. It is not — that panel is her memory, her keys and quiet
+        // hours, and a build number was the only line in it that could not be acted
+        // on. The foot of Home is where you go to look something up.
+        sageVersion: !!document.querySelector('.sage-set-version'),
       };
     });
     ok(at('the app version is shown, from one source'),
-      ver.meta && ver.global === ver.meta && ver.slots >= 2
+      ver.meta && ver.global === ver.meta && ver.slots === 1
         && ver.texts.every(t => t === `v${ver.meta}`),
       JSON.stringify(ver));
     ok(at('and it sits at the foot of Home, not in the hero'),
@@ -2295,10 +2316,8 @@ for (const size of SIZES) {
         && /Font Awesome 6 Free/.test(ver.glyph.family) && ver.glyph.weight === '900'
         && ver.glyph.hidden === 'true' && ver.glyph.inline === true,
       JSON.stringify(ver.glyph));
-    ok(at('and the About line in her settings matches it'),
-      ver.sageVersion && /Blender/i.test(ver.sageVersion.family)
-        && ver.sageVersion.caps === 'uppercase' && ver.sageVersion.hasGlyph === true,
-      JSON.stringify(ver.sageVersion));
+    ok(at('and it is not repeated in her settings dialog'),
+      ver.sageVersion === false, 'a second copy is back');
   }
 
   // ══ SEARCH JUMPS TO A RECORD AND MARKS IT ══════════════════════════════
@@ -2350,7 +2369,12 @@ for (const size of SIZES) {
       el.click();
       return title;
     });
-    await page.waitForTimeout(600);
+    // Long enough for all three stages of the jump: the 130ms section swap, then two
+    // frames while the incoming view lays out, then the smooth scroll to the row. It
+    // was 600ms, from before the section change had a transition of its own, and
+    // `inView` was being read while the page was still travelling. The mark itself
+    // lands at ~165ms and lasts 2.1s, so it is still up when this reads it.
+    await page.waitForTimeout(1100);
 
     const landed = await page.evaluate(() => {
       const row = document.querySelector('.service-record-row.dk-found');

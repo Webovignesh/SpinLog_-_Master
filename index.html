@@ -13,7 +13,7 @@
        needs no JS change. Keep the version segment of CACHE_NAME in service-worker.js
        in step with this — that file cannot read a meta tag, and a mismatch means the
        number on screen is not the number that is actually cached. -->
-  <meta name="version" content="1.9.1"/>
+  <meta name="version" content="1.9.2"/>
   <title>SpinLog</title>
   <!-- Not decoration. This is what an install prompt, a shared link and a
        browser's own history entry show underneath the title, and without it they
@@ -1940,14 +1940,12 @@
           </div>
           <p class="sage-set-status sage-set-status--footer" id="sageSettingsStatus"
              role="status" aria-live="polite"></p>
-
-          <!-- The second place, because this dialog is the nearest thing the app has to
-               an About screen and a version is the first thing anyone reports with a
-               bug. Same [data-app-version] hook as the home chip. -->
-          <p class="sage-set-version">
-            <i class="fas fa-code-branch" aria-hidden="true"></i>
-            <span>SpinLog <span data-app-version>&mdash;</span></span>
-          </p>
+          <!-- A build number used to sit here, on the theory that this dialog is the
+               nearest thing to an About screen. It is not: this is the panel for her
+               memory, her keys and quiet hours, and a version string under the save
+               button was the one line in it that could not be acted on. The home
+               screen already carries it, at the foot of the page, which is where you
+               go to look something up. One [data-app-version] target now. -->
         </div>
       </div>
 
@@ -2024,7 +2022,7 @@
           // permanently destroyed the only automatic path to granting it, and
           // this app has no other prompt. The flag is now only written once the
           // question has actually been answered.
-          document.getElementById('sageNotifBanner').style.display = 'none';
+          hideNotifBanner();
 
           if (window.requestNotifPermission) await window.requestNotifPermission();
 
@@ -2033,8 +2031,27 @@
           }
         };
 
+        // Down and out through the edge it came from, rather than blinking off.
+        // Everything about this element is inline, including `animation: slModalIn`
+        // for the entrance, so the exit is a class that styles.css matches and the
+        // display write waits for it. dkSlideShut is not used here because this one
+        // is hidden by `style.display` rather than the `hidden` attribute.
+        function hideNotifBanner() {
+          const b = document.getElementById('sageNotifBanner');
+          if (!b || b.style.display === 'none') return;
+          if (window.dkReduceMotion && window.dkReduceMotion()) {
+            b.style.display = 'none';
+            return;
+          }
+          b.classList.add('is-closing');
+          setTimeout(() => {
+            b.style.display = 'none';
+            b.classList.remove('is-closing');
+          }, 220);
+        }
+
         window._sageDismissNotif = function() {
-          document.getElementById('sageNotifBanner').style.display = 'none';
+          hideNotifBanner();
           localStorage.setItem(BANNER_DISMISSED_KEY, '1');
         };
 

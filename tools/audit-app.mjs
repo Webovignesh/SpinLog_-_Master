@@ -79,6 +79,42 @@ const BASE = `http://127.0.0.1:${server.address().port}/`;
 
 const SECTIONS = ['home', 'service', 'docs', 'sage'];
 
+/**
+ * "Is this element actually on the screen right now", as a string of JS to inject.
+ *
+ * `offsetParent !== null` was the whole test, and it was enough for exactly as long
+ * as everything closed in this app closed with `display: none`. The overlays hide
+ * with `visibility: hidden` now — that is what lets them animate out — and
+ * visibility does not affect layout, so `offsetParent` is still a live element and
+ * every control inside a shut dialog started looking measurable.
+ *
+ * It produced two very convincing false failures: the notes sheet's Save button
+ * reported 1.04:1 because the sheet was not painted, so the pixel sampler read the
+ * page behind it and compared that against the button's own dark label; and five
+ * controls inside the closed sheet and the closed media viewer reported no focus
+ * state, which says nothing about them either way while they cannot be reached.
+ *
+ * Checking `visibility` on the element covers the ancestors for free — it inherits,
+ * and a child of a hidden parent computes to hidden unless it explicitly opts back
+ * in. `opacity` is walked separately because it does NOT inherit, and a
+ * fully-transparent ancestor is just as unmeasurable.
+ */
+const IS_SHOWN = `(el => {
+  if (!el.offsetParent && getComputedStyle(el).position !== 'fixed') return false;
+  const cs = getComputedStyle(el);
+  if (cs.visibility === 'hidden' || cs.visibility === 'collapse') return false;
+  if (cs.display === 'none') return false;
+  if (cs.contentVisibility === 'hidden') return false;
+  for (let n = el; n && n !== document.documentElement; n = n.parentElement) {
+    const p = getComputedStyle(n);
+    if (p.display === 'none' || p.visibility === 'hidden') return false;
+    if (parseFloat(p.opacity) === 0) return false;
+    if (n.hasAttribute('hidden')) return false;
+    if (n.getAttribute('aria-hidden') === 'true' && n !== el) return false;
+  }
+  return true;
+})`;
+
 let pass = 0;
 let fail = 0;
 function ok(label, good, extra) {
@@ -426,12 +462,13 @@ const browser = await chromium.launch();
     await goToSection(page, sec);
 
     // Every run of its own text, in document coordinates.
-    const targets = await page.evaluate(section => {
+    const targets = await page.evaluate(([section, isShownSrc]) => {
+      const isShown = eval(isShownSrc);
       const out = [];
       const root = document.getElementById(section);
       if (!root) return out;
       for (const el of root.querySelectorAll('p,span,strong,small,b,em,dd,dt,td,th,li,label,button,a,time,h1,h2,h3,h4,h5,h6')) {
-        if (!el.offsetParent) continue;
+        if (!isShown(el)) continue;
         // Own text only, so a wrapper is not judged on its children's colour.
         const own = [...el.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent.trim()).join('');
         if (own.length < 2) continue;
@@ -457,7 +494,7 @@ const browser = await chromium.launch();
         });
       }
       return out;
-    }, sec);
+    }, [sec, IS_SHOWN]);
 
     if (!targets.length) continue;
 
@@ -549,7 +586,8 @@ const browser = await chromium.launch();
   // ════════════════════════════════════════════════════════════════════
   // 5  FOCUS IS ALWAYS VISIBLE
   // ════════════════════════════════════════════════════════════════════
-  const focus = await page.evaluate(async sections => {
+  const focus = await page.evaluate(async ([sections, isShownSrc]) => {
+    const isShown = eval(isShownSrc);
     /**
      * Split a selector list on its TOP-LEVEL commas only.
      *
@@ -616,7 +654,7 @@ const browser = await chromium.launch();
       const root = document.getElementById(sec);
       if (!root) continue;
       for (const el of root.querySelectorAll('button, a[href], input:not([type=hidden]), select, textarea, [role=button], [tabindex="0"]')) {
-        if (!el.offsetParent) continue;
+        if (!isShown(el)) continue;
         const key = el.tagName.toLowerCase() + '.' + (el.className.toString().trim().split(/\s+/)[0] || '·');
         if (seen.has(key)) continue;
         seen.add(key);
@@ -628,7 +666,7 @@ const browser = await chromium.launch();
       }
     }
     return { uncovered, checked, rules: selectors.length };
-  }, SECTIONS);
+  }, [SECTIONS, IS_SHOWN]);
 
   ok(`the stylesheet has focus rules at all`, focus.rules > 40, `${focus.rules} found`);
   ok(`all ${focus.checked} focusable controls have a visible focus state`,
@@ -656,7 +694,8 @@ const browser = await chromium.launch();
   await page.goto(BASE, { waitUntil: 'load' });
   await settle(page, 4200);
 
-  const motion = await page.evaluate(async sections => {
+  const motion = await page.evaluate(async ([sections, isShownSrc]) => {
+    const isShown = eval(isShownSrc);
     const moving = [];
     let checked = 0;
     for (const sec of sections) {
@@ -665,7 +704,7 @@ const browser = await chromium.launch();
       const root = document.getElementById(sec);
       if (!root) continue;
       for (const el of root.querySelectorAll('*')) {
-        if (!el.offsetParent) continue;
+        if (!isShown(el)) continue;
         const cs = getComputedStyle(el);
         checked += 1;
         const dur = parseFloat(cs.animationDuration) || 0;
@@ -695,7 +734,7 @@ const browser = await chromium.launch();
       scroll: getComputedStyle(document.documentElement).scrollBehavior,
       honoured: matchMedia('(prefers-reduced-motion: reduce)').matches,
     };
-  }, SECTIONS);
+  }, [SECTIONS, IS_SHOWN]);
 
   ok('the browser is actually reporting reduced motion', motion.honoured === true);
   ok(`all ${motion.checked} rendered elements stop animating under reduced motion`,
