@@ -4,8 +4,8 @@
   "description": "Track your bike's service history, documents, and insurance with ease.",
   "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#e35d01",
-  "theme_color": "#e35d01",
+  "background_color": "#fb6900",
+  "theme_color": "#fb6900",
   "orientation": "portrait-primary",
   "icons": [
     {
@@ -18,5 +18,6 @@
       "sizes": "512x512",
       "type": "image/png"
     }
-  ]
+  ],
+  "_comment_background": "background_color and theme_color are #fb6900 because that is the exact orange of the icon's own background, sampled from assets/icons/icon-512.png. They were #e35d01, a darker orange, so the splash screen showed the logo tile sitting on a visibly different field. The dark #050505 theme-color meta in index.html is deliberate and separate: it tints the status bar while the app is RUNNING, and the app is dark. This pair is only the splash."
 }

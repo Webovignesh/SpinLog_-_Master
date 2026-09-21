@@ -1,4 +1,308 @@
 // ════════════════════════════════════════════════════════════════════════
+// SpinLog | APP VERSION
+//
+// One literal, in the <meta name="version"> tag, painted into every element
+// carrying [data-app-version]. Two of those exist today — a chip beside the
+// database status on Home and a line in the foot of Sage's settings — and a
+// third needs markup only, no code.
+//
+// Top level, outside the DOMContentLoaded closure below, because the version
+// is also useful to anything that wants to stamp a log or a bug report.
+// ════════════════════════════════════════════════════════════════════════
+window.dkAppVersion = (function () {
+  'use strict';
+
+  const meta = document.querySelector('meta[name="version"]');
+  const version = (meta?.getAttribute('content') || '').trim();
+
+  function paint() {
+    // Nothing shown at all is better than the word "undefined" on the home
+    // screen, so an empty meta leaves the em dash that is already in the markup.
+    if (!version) return;
+    for (const el of document.querySelectorAll('[data-app-version]')) {
+      el.textContent = `v${version}`;
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', paint);
+  } else {
+    paint();
+  }
+
+  return version;
+})();
+
+// ════════════════════════════════════════════════════════════════════════
+// PAGE CONTROLS
+//
+// Both Record History tables rendered every row they had. Twenty-four uploads was
+// twenty-four rows and the only route to the oldest one was past every newer one;
+// the service table has no ceiling at all and grows for the life of the bike.
+//
+// One controller for both, because they are the same control — a rows-per-page
+// select, a "showing 1–10 of 24" line, and a numbered strip — even though what sits
+// behind them could not be less alike. The documents table is rendered once and
+// filtered by toggling a class on the DOM, so paging it means hiding rows. The
+// service table is rebuilt from an array on every keystroke, so paging it means
+// slicing that array and never building the rest. This module knows nothing about
+// either: it owns the arithmetic and the footer, and hands back a {from, to}.
+//
+// Deliberately outside the DOMContentLoaded closure. The docs table is driven by a
+// top-level IIFE further down this file and the service table from inside that
+// closure, and neither can see the other's scope.
+// ════════════════════════════════════════════════════════════════════════
+window.dkPager = function dkPager(config) {
+  'use strict';
+
+  const ids = config.ids || {};
+  const noun = config.noun || ['record', 'records'];
+  // 'All' is 0, which is why every comparison below is `per > 0` rather than a
+  // truthiness check on a number that is legitimately allowed to be zero.
+  const ALLOWED = [10, 25, 50, 0];
+  const STORE_KEY = config.key ? `spinlogPerPage.${config.key}` : null;
+  // Seven slots. Past that the strip is wider than the count beside it and the
+  // ellipsis is doing more work than the numbers.
+  const SLOTS = 7;
+
+  let page = 1;
+  let per = readPer();
+  let total = 0;
+  let wired = false;
+
+  function el(id) { return id ? document.getElementById(id) : null; }
+
+  function readPer() {
+    if (!STORE_KEY) return 10;
+    let saved = null;
+    try { saved = localStorage.getItem(STORE_KEY); } catch { /* private mode */ }
+    // The emptiness check is separate and comes FIRST, because Number(null) and
+    // Number('') are both 0 — and 0 is a legitimate stored value here, the one that
+    // means "All". Without this line a first run reads as "the user chose All" and the
+    // page controls arrive switched off, which is exactly how this shipped once.
+    if (saved === null || saved === '') return 10;
+    const n = Number(saved);
+    return ALLOWED.includes(n) ? n : 10;
+  }
+
+  function writePer(value) {
+    if (!STORE_KEY) return;
+    try { localStorage.setItem(STORE_KEY, String(value)); } catch { /* private mode */ }
+  }
+
+  function pageCount() {
+    if (per <= 0) return 1;
+    return Math.max(1, Math.ceil(total / per));
+  }
+
+  function clamp() {
+    const last = pageCount();
+    if (page > last) page = last;
+    if (page < 1) page = 1;
+  }
+
+  /** The half-open range of item indexes this page covers. */
+  function slice() {
+    clamp();
+    if (per <= 0) return { from: 0, to: total };
+    const from = (page - 1) * per;
+    return { from, to: Math.min(total, from + per) };
+  }
+
+  /**
+   * How wide the strip is allowed to be, which is a question about the screen.
+   *
+   * Measured at 320: five numbers plus two ellipses plus the two arrows comes to 316px
+   * inside 296 of usable width, so the wide strip simply does not fit on the narrowest
+   * phone still in use. Dropping the current page's NEIGHBOURS rather than shrinking the
+   * buttons is the right trade — 34px is already the floor for something a thumb has to
+   * hit, and "1 … 6 … 12" answers the same question as "1 … 5 6 7 … 12" in five slots
+   * instead of seven.
+   *
+   * `slots` is also the threshold below which every page gets a button of its own.
+   */
+  function stripShape() {
+    const w = typeof window !== 'undefined' ? window.innerWidth : 1024;
+    // Measured, not guessed. The strip gets the footer's width minus the two arrows and
+    // the gaps around them, and a button plus its gap is 38px on a phone:
+    //
+    //   320px viewport -> 136px for the strip -> 3 buttons
+    //   360px          -> 176px               -> 4
+    //   412px          -> 228px               -> 5
+    //
+    // `slots` is also the count below which every page gets a button of its own, so it has
+    // to be the number that FITS, not the number that would be nice. Below 360 the two
+    // ellipses are hidden in CSS as well — at 3 slots the jump between 1, 4 and 12 is
+    // self-evident, and they are aria-hidden decoration either way.
+    if (w < 360) return { slots: 3, around: 0 };
+    if (w < 400) return { slots: 4, around: 0 };
+    if (w < 460) return { slots: 5, around: 0 };
+    return { slots: SLOTS, around: 1 };
+  }
+
+  /**
+   * Which numbers the strip shows: always the first and the last, always the current
+   * one and (where there is room) its neighbours, and an ellipsis wherever that skips
+   * something.
+   */
+  function strip() {
+    const last = pageCount();
+    const { slots, around } = stripShape();
+    if (last <= slots) {
+      return Array.from({ length: last }, (_, i) => i + 1);
+    }
+    const wanted = new Set([1, last, page]);
+    for (let i = 1; i <= around; i += 1) {
+      wanted.add(page - i);
+      wanted.add(page + i);
+    }
+    // Pad toward whichever end has room, so the strip is always the same width and the
+    // buttons under the cursor do not move as you page through.
+    let n = around + 1;
+    while (wanted.size < slots - 2 && n < last) {
+      if (page < last / 2) wanted.add(page + n);
+      else wanted.add(page - n);
+      n += 1;
+    }
+    const list = [...wanted].filter(v => v >= 1 && v <= last).sort((a, b) => a - b);
+    const out = [];
+    list.forEach((v, i) => {
+      if (i && v - list[i - 1] > 1) out.push(null);
+      out.push(v);
+    });
+    return out;
+  }
+
+  function announce() {
+    const node = el(ids.count);
+    if (!node) return;
+    if (!total) { node.textContent = ''; return; }
+    const { from, to } = slice();
+    const word = total === 1 ? noun[0] : noun[1];
+    // An en dash, not a hyphen: this is a range, and the two characters mean different
+    // things to anything reading it aloud.
+    node.textContent = `Showing ${from + 1}\u2013${to} of ${total} ${word}`;
+  }
+
+  function paint() {
+    clamp();
+    const root = el(ids.root);
+    if (!root) return;
+
+    // An empty table has nothing to say about how much of it you are looking at, and
+    // the two empty states below already say so in the table itself.
+    root.hidden = total === 0;
+
+    announce();
+
+    const select = el(ids.per);
+    if (select && String(select.value) !== String(per)) select.value = String(per);
+
+    const last = pageCount();
+    const prev = el(ids.prev);
+    const next = el(ids.next);
+    if (prev) prev.disabled = page <= 1;
+    if (next) next.disabled = page >= last;
+
+    // THE NAV STAYS, EVEN ON ONE PAGE.
+    //
+    // It used to be hidden there, on the reasoning that a lone "1" between two dead arrows
+    // is three controls saying there is nowhere to go. That reasoning was wrong about what
+    // a reader does with it: the strip is where you look to find out where you are, so an
+    // empty right-hand side reads as a control that has broken rather than as a list that
+    // fits on one page. It also meant the footer changed shape the moment an eleventh file
+    // arrived. Disabled arrows say "nowhere to go" perfectly well while the "1" still says
+    // where you are.
+    const nav = el(ids.nav);
+    if (nav) nav.hidden = false;
+
+    const pages = el(ids.pages);
+    if (pages) {
+      pages.innerHTML = strip().map(n => (n === null
+        ? '<span class="dk-pager-gap" aria-hidden="true">&hellip;</span>'
+        : `<button type="button" class="dk-pager-num${n === page ? ' is-current' : ''}"`
+          + ` data-page="${n}"${n === page ? ' aria-current="page"' : ''}`
+          + ` aria-label="Page ${n}">${n}</button>`)).join('');
+    }
+  }
+
+  function goTo(next, { quiet = false } = {}) {
+    const last = pageCount();
+    const target = Math.min(Math.max(1, Number(next) || 1), last);
+    if (target === page) { paint(); return false; }
+    page = target;
+    paint();
+    if (!quiet) config.onChange?.();
+    return true;
+  }
+
+  /** Move to whichever page holds item `index` of the current list. */
+  function showIndex(index) {
+    if (per <= 0) return false;
+    const i = Number(index);
+    if (!Number.isFinite(i) || i < 0) return false;
+    return goTo(Math.floor(i / per) + 1, { quiet: true });
+  }
+
+  function wire() {
+    if (wired) return;
+    const root = el(ids.root);
+    if (!root) return;
+    wired = true;
+
+    el(ids.per)?.addEventListener('change', event => {
+      const value = Number(event.target.value);
+      per = ALLOWED.includes(value) ? value : 10;
+      writePer(per);
+      // Back to the top of the list. Page 3 of ten-at-a-time and page 3 of fifty-at-a-
+      // time are different places, and keeping the number means landing somewhere you
+      // did not ask for.
+      page = 1;
+      paint();
+      config.onChange?.();
+    });
+
+    el(ids.prev)?.addEventListener('click', () => goTo(page - 1));
+    el(ids.next)?.addEventListener('click', () => goTo(page + 1));
+
+    // Delegated, because the strip is rewritten on every paint.
+    el(ids.pages)?.addEventListener('click', event => {
+      const btn = event.target.closest('.dk-pager-num');
+      if (btn) goTo(Number(btn.dataset.page));
+    });
+
+    // The strip drops the current page's neighbours below 400px, so crossing that line —
+    // by rotating a phone, or by dragging a window — has to redraw it. Debounced, because
+    // a drag fires this continuously and repainting the strip mid-drag is pure churn.
+    let resizeTimer = null;
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(paint, 180);
+    }, { passive: true });
+  }
+
+  wire();
+
+  return {
+    /** @returns {boolean} whether the page had to move to stay in range. */
+    setTotal(next) {
+      total = Math.max(0, Number(next) || 0);
+      const before = page;
+      clamp();
+      return before !== page;
+    },
+    slice,
+    paint,
+    goTo,
+    showIndex,
+    reset() { page = 1; },
+    page: () => page,
+    per: () => per,
+    wire,
+  };
+};
+
+// ════════════════════════════════════════════════════════════════════════
 // SpinLog | VEHICLE IDENTITY
 //
 // The bike's own facts had no single owner. The purchase date in particular
@@ -171,16 +475,51 @@ if ('serviceWorker' in navigator) {
   });
 }
 
+// ── ONE UPLOAD PROGRESS INDICATOR, IN TWO PLACES ──────────────────────
+//
+// There used to be two of these. showProgressBar/finishProgressBar/
+// errorProgressBar drove #uploadProgressBar — the 8px gradient bar that spans
+// the drop-zone grid — and startUploadPercent/finishUploadPercent/
+// errorUploadPercent drove a percentage in the loading popup. Only the second
+// set was ever called, so the bar in the markup never moved: a styled,
+// precached element that existed solely because the grid's
+// `:last-child:nth-child(odd)` arithmetic counts it as a fourth child.
+//
+// Deleting it was the wrong fix, because that arithmetic is real and
+// audit-mobile asserts it. So the two sets are one set, and the bar shows the
+// same number the popup does. The popup is modal and centred; the bar is in the
+// grid you just dropped a file on, which is where you are looking.
+//
+// The percentage is a paced estimate, not a byte count — supabase-js resolves
+// upload() in one shot with no progress events — so it climbs to 93 and waits
+// for the real answer rather than claiming 100 before the server agrees.
 let uploadPercentInterval = null;
+
+/** Paint the bar, or hide it. `null` hides. */
+function paintUploadBar(percent) {
+  const bar = document.getElementById('uploadProgressBar');
+  if (!bar) return;
+  if (percent === null) {
+    bar.style.display = 'none';
+    bar.style.width = '0%';
+    bar.style.background = '';
+    return;
+  }
+  bar.style.display = 'block';
+  bar.style.width = `${percent}%`;
+}
+
 function startUploadPercent() {
   let percent = 1;
   showPopup('loading', `Uploading... ${percent}%`);
+  paintUploadBar(percent);
   if (uploadPercentInterval) clearInterval(uploadPercentInterval);
   uploadPercentInterval = setInterval(() => {
     if (percent < 93) {
       percent += Math.floor(Math.random() * 7) + 2;
       if (percent > 93) percent = 93;
       showPopup('loading', `Uploading... ${percent}%`);
+      paintUploadBar(percent);
     }
   }, 130);
 }
@@ -188,69 +527,40 @@ function startUploadPercent() {
 function finishUploadPercent() {
   if (uploadPercentInterval) clearInterval(uploadPercentInterval);
   showPopup('loading', `Uploading... 100%`);
+  paintUploadBar(100);
   setTimeout(() => {
     hidePopup();
+    // After the popup, so the bar is briefly seen full rather than vanishing
+    // at the same moment the success message does.
+    paintUploadBar(null);
   }, 700);
 }
 
 function errorUploadPercent() {
   if (uploadPercentInterval) clearInterval(uploadPercentInterval);
   showPopup('error', 'Upload failed.');
-}
-
-
-function showProgressBar() {
   const bar = document.getElementById('uploadProgressBar');
-  if (!bar) return;
-  bar.style.display = 'block';
-  bar.style.width = '1%';
-  let progress = 1;
-  bar._timer = setInterval(() => {
-    // Animate progress to simulate real upload
-    if (progress < 92) { // don't reach 100% until done
-      progress += Math.random() * 5 + 1;
-      bar.style.width = Math.min(progress, 92) + '%';
-    }
-  }, 130);
-}
-
-function finishProgressBar() {
-  const bar = document.getElementById('uploadProgressBar');
-  if (!bar) return;
-  clearInterval(bar._timer);
-  bar.style.width = '100%';
-  setTimeout(() => {
-    bar.style.display = 'none';
-    bar.style.width = '0%';
-  }, 550);
-}
-
-function errorProgressBar() {
-  const bar = document.getElementById('uploadProgressBar');
-  if (!bar) return;
-  clearInterval(bar._timer);
-  bar.style.background = '#b52222';
-  bar.style.width = '100%';
-  setTimeout(() => {
-    bar.style.display = 'none';
-    bar.style.width = '0%';
-    bar.style.background = 'linear-gradient(90deg, #fb6900 60%, #fba600 100%)';
-  }, 1200);
+  if (bar) {
+    // Red and full: the bar has to stop claiming progress it did not make.
+    bar.style.display = 'block';
+    bar.style.width = '100%';
+    bar.style.background = '#b52222';
+  }
+  setTimeout(() => paintUploadBar(null), 1200);
 }
 
 
-// --- PDF modal preview function (global) ---
-function showPdfModal(signedUrl) {
-  const modal = document.getElementById('pdfPreviewModal');
-  const frame = document.getElementById('fullPreviewPdf');
-  if (!modal || !frame) return;
-  frame.src = signedUrl + "#toolbar=1";
-  modal.style.display = 'flex';
-  modal.onclick = function() {
-    modal.style.display = 'none';
-    frame.src = '';
-  };
-}
+// showPdfModal() and showImageModal() used to live here, driving
+// #pdfPreviewModal and #imagePreviewModal. Both are gone, along with that
+// markup: a vehicle document opens in a new tab through _openVehicleDoc(), and
+// every historic upload opens in the Record History media player, which handles
+// images, PDFs, audio and video in one swipeable viewer. Neither function had a
+// caller left.
+//
+// Deleted rather than left unused, for the reason the note below gives about
+// confirmDeleteWithHold: a top-level function in this file becomes a window
+// property, and an unused one is a loaded gun pointed at the next person
+// wiring up a button.
 
 // confirmDeleteWithHold() used to live here as a press-and-hold button injected
 // into #customPopup. It now comes from src/js/sage-confirm.js, which loads before
@@ -610,6 +920,54 @@ function docsFormatDate(value) {
   return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
+/** True for a bare YYYY-MM-DD, which is how an EDITED upload date comes back. */
+function docsIsDateOnly(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || '').trim());
+}
+
+/**
+ * The clock reading under the date, or nothing.
+ *
+ * A date the user corrected by hand is stored as YYYY-MM-DD, and rendering that as
+ * "12:00 AM" would be inventing a fact — the row would claim a precision it does
+ * not have. So an absent time is absent, and the cell is one line.
+ */
+function docsFormatTime(value) {
+  if (!value || docsIsDateOnly(value)) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleTimeString('en-GB', { hour: 'numeric', minute: '2-digit', hour12: true });
+}
+
+/**
+ * Sortable epoch for an upload date, whatever shape it arrived in.
+ *
+ * Noon rather than midnight for a date-only value: parsing 'YYYY-MM-DD' as a bare
+ * date makes it UTC midnight, which is the previous day anywhere west of Greenwich
+ * — the same off-by-a-day the filter used to have before it stopped going through
+ * toISOString().
+ */
+function docsWhenMs(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return 0;
+  const date = new Date(docsIsDateOnly(raw) ? `${raw}T12:00:00` : raw);
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+}
+
+/**
+ * The upload's LOCAL calendar day as YYYY-MM-DD.
+ *
+ * Put on the row so the From/To filter can compare strings instead of parsing the
+ * rendered "19 Apr 2026" back into a date — which worked, but only for as long as
+ * nobody changed how that cell is formatted. It now has two lines in it.
+ */
+function docsIsoDay(value) {
+  const ms = docsWhenMs(value);
+  if (!ms) return '';
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function docsIconForType(type, fileName = '') {
   const ext = String(fileName).split('.').pop().toLowerCase();
   if (type === 'audio') return 'fa-wave-square';
@@ -617,6 +975,33 @@ function docsIconForType(type, fileName = '') {
   if (type === 'image') return 'fa-image';
   if (ext === 'pdf') return 'fa-file-pdf';
   return 'fa-file-lines';
+}
+
+/**
+ * The TYPE column's badge.
+ *
+ * The column it replaced held an eye button that opened the file — the job the
+ * thumbnail now does — so the width went to the one fact the row could not state
+ * anywhere but inside the grey line under the filename, where you cannot scan it.
+ */
+function docsTypeBadge(type) {
+  const kind = String(type || '').toLowerCase();
+  const KINDS = {
+    image: { icon: 'fa-image', label: 'Image' },
+    audio: { icon: 'fa-wave-square', label: 'Audio' },
+    video: { icon: 'fa-video', label: 'Video' },
+  };
+  const shape = KINDS[kind] || { icon: 'fa-file-lines', label: type ? String(type) : 'File' };
+  // THE LABEL IS AN ELEMENT, not a bare text node.
+  //
+  // The badge is an inline-flex box with `gap`, and a bare text node inside one becomes an
+  // anonymous flex item. Chromium does not put the gap before an anonymous item here, so
+  // the glyph sat hard against the first letter — "◼VIDEO" — however wide the gap was set.
+  // Measured: computed column-gap 9px, drawn distance 0. A real span is a real flex item
+  // and the gap applies to it.
+  return `<span class="docs-type-badge is-${docsEscapeAttr(kind || 'other')}">`
+    + `<i class="fas ${shape.icon}" aria-hidden="true"></i>`
+    + `<span class="docs-type-label">${docsEscapeHtml(shape.label)}</span></span>`;
 }
 
 // Notes and dates on historic uploads.
@@ -655,8 +1040,12 @@ function getHistoricLocalDate(id) {
  *   ({fileName, mediaType, uploadedOn}). Handed to Sage's autofill so her
  *   "draft it" button knows what it is writing about; without it that button
  *   stays hidden rather than inventing something.
+ * @param {string|null} [options.date] Pass an ISO date to also edit the uploaded
+ *   date in this same sheet. When given, the promise resolves
+ *   `{ notes, date }` instead of a bare notes string — the upload flow has no date
+ *   to correct yet, so it keeps the old shape and the old return value.
  */
-function showHistoricNotesModal({ title = 'Add upload notes', help = 'Write what this file is about. Notes are required.', initial = '', required = true, context = null } = {}) {
+function showHistoricNotesModal({ title = 'Add upload notes', help = 'Write what this file is about. Notes are required.', initial = '', required = true, context = null, date = null } = {}) {
   return new Promise(resolve => {
     const modal = document.getElementById('historicNotesModal');
     const titleEl = document.getElementById('historicNotesTitle');
@@ -665,11 +1054,15 @@ function showHistoricNotesModal({ title = 'Add upload notes', help = 'Write what
     const saveBtn = document.getElementById('historicNotesSave');
     const cancelBtn = document.getElementById('historicNotesSkip');
     const closeBtn = document.getElementById('historicNotesCancel');
+    const dateField = document.getElementById('historicNotesDateField');
+    const dateInput = document.getElementById('historicNotesDate');
+    const wantsDate = date !== null && !!dateField && !!dateInput;
 
     if (!modal || !input || !saveBtn || !cancelBtn || !closeBtn) {
       const fallback = prompt(title, initial || '');
       const value = (fallback || '').trim();
-      resolve(required && !value ? null : value);
+      const bare = required && !value ? null : value;
+      resolve(wantsDate && bare !== null ? { notes: bare, date } : bare);
       return;
     }
 
@@ -677,6 +1070,15 @@ function showHistoricNotesModal({ title = 'Add upload notes', help = 'Write what
     helpEl.textContent = help;
     helpEl.classList.remove('is-bad');
     input.value = initial || '';
+    if (dateField && dateInput) {
+      if (wantsDate) {
+        dateInput.value = String(date).slice(0, 10);
+        dateField.removeAttribute('hidden');
+      } else {
+        dateInput.value = '';
+        dateField.setAttribute('hidden', '');
+      }
+    }
     // Reveals (or hides) the "let Sage draft it" button for this upload.
     window.SageAutofill?.setMediaContext(context);
     modal.classList.add('show');
@@ -684,6 +1086,16 @@ function showHistoricNotesModal({ title = 'Add upload notes', help = 'Write what
     setTimeout(() => input.focus(), 50);
 
     const clean = () => {
+      // Focus leaves BEFORE aria-hidden goes on.
+      //
+      // Chrome refuses to hide a subtree that still contains the focused element and
+      // logs it: "Blocked aria-hidden on an element because its descendant retained
+      // focus." Closing this sheet with its own Cancel button did exactly that — the
+      // button kept focus while its ancestor was marked hidden, which leaves a
+      // screen-reader user focused on something that has been declared not to exist.
+      if (modal.contains(document.activeElement)) {
+        try { document.activeElement.blur(); } catch { /* not focusable */ }
+      }
       modal.classList.remove('show');
       modal.setAttribute('aria-hidden', 'true');
       window.SageAutofill?.setMediaContext(null);
@@ -703,8 +1115,14 @@ function showHistoricNotesModal({ title = 'Add upload notes', help = 'Write what
         return;
       }
       input.style.borderColor = '';
+      if (wantsDate && !dateInput.value) {
+        dateInput.focus();
+        helpEl.textContent = 'That upload needs a date.';
+        helpEl.classList.add('is-bad');
+        return;
+      }
       clean();
-      resolve(notes);
+      resolve(wantsDate ? { notes, date: dateInput.value } : notes);
     };
     const onKey = (e) => {
       if (e.key === 'Escape') cancel();
@@ -727,11 +1145,11 @@ function renderVehicleDocPreview(previewEl, type, fileName, origName, uploadBtn)
   const headerDeleteBtn = card.querySelector('.doc-delete-btn');
   window._vehicleDocRows.set(type, { fileName, origName });
 
-  previewEl.innerHTML = `<button class="doc-open-pill" type="button" onclick="window._openVehicleDoc && window._openVehicleDoc('${docsEscapeAttr(type)}')"><i class="fas fa-arrow-up-right-from-square"></i> View</button>`;
+  previewEl.innerHTML = `<button class="doc-open-pill" type="button" onclick="window._openVehicleDoc && window._openVehicleDoc('${docsEscapeAttr(type)}')"><i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i> View</button>`;
 
   if (headerDeleteBtn) headerDeleteBtn.style.display = 'inline-flex';
   uploadBtn.style.display = 'none';
-  uploadBtn.innerHTML = '<i class="fas fa-cloud-arrow-up"></i> Upload document';
+  uploadBtn.innerHTML = '<i class="fas fa-cloud-arrow-up" aria-hidden="true"></i> Upload document';
 }
 
 window._openVehicleDoc = async function(type) {
@@ -750,42 +1168,12 @@ window._openVehicleDoc = async function(type) {
   window.open(signedUrl, '_blank', 'noopener');
 };
 
-// Async: load most recent doc for a type (on startup)
-async function loadVehicleDoc(type, previewEl, uploadBtn) {
-  const { data, error } = await supabase
-    .from('vehicle_documents')
-    .select('*')
-    .eq('document_type', type)
-    .order('upload_date', { ascending: false })
-    .limit(1);
-
-  const card = uploadBtn.closest('.doc-card');
-  const headerDeleteBtn = card.querySelector('.doc-delete-btn');
-
-  if (error || !data || !data.length) {
-    previewEl.innerHTML = '';
-    uploadBtn.style.display = 'inline-flex';
-    uploadBtn.innerHTML = '<i class="fas fa-cloud-arrow-up"></i> Upload document';
-    if (headerDeleteBtn) headerDeleteBtn.style.display = 'none';
-    return;
-  }
-
-  const fileRow = data[0];
-  await renderVehicleDocPreview(previewEl, type, fileRow.file_name, fileRow.original_name, uploadBtn);
-}
-
-// Helper function to show image modal
-function showImageModal(src) {
-  const modal = document.getElementById('imagePreviewModal');
-  const img = document.getElementById('fullPreviewImg');
-  if (!modal || !img) return;
-  img.src = src;
-  modal.style.display = 'flex';
-  modal.onclick = () => {
-    modal.style.display = 'none';
-    img.src = '';
-  };
-}
+// loadVehicleDoc(type, previewEl, uploadBtn) used to sit here: one card, one
+// query, called once per card at boot. loadVehicleDocsFast() below replaced it
+// with a single ordered query covering every type at once — five round trips
+// became one, and user-added cards became discoverable in the same read — and
+// nothing has called the per-card version since. Removed rather than kept as a
+// convenience, because the two would drift and the slow one would get picked.
 
 // Helper function to get current file info for deletion
 async function getCurrentFileForDelete(type, deleteBtn, previewEl, uploadBtn) {
@@ -808,9 +1196,9 @@ async function getCurrentFileForDelete(type, deleteBtn, previewEl, uploadBtn) {
       showPopup('loading', 'Deleting...');
       await supabase.from('vehicle_documents').delete().eq('file_name', fileRow.file_name).eq('document_type', type);
       await supabase.storage.from('vehicle-documents').remove([fileRow.file_name]);
-      previewEl.innerHTML = '<span class="doc-empty-state"><i class="fas fa-cloud-arrow-up"></i><strong>No document uploaded</strong><small>Upload once to store this file in the vault.</small></span>';
+      previewEl.innerHTML = '<span class="doc-empty-state"><i class="fas fa-cloud-arrow-up" aria-hidden="true"></i><strong>No document uploaded</strong><small>Upload once to store this file in the vault.</small></span>';
       uploadBtn.style.display = 'inline-flex';
-      uploadBtn.innerHTML = '<i class="fas fa-cloud-arrow-up"></i> Upload document';
+      uploadBtn.innerHTML = '<i class="fas fa-cloud-arrow-up" aria-hidden="true"></i> Upload document';
       deleteBtn.style.display = 'none';
       updatePopup('success', 'Deleted!');
     },
@@ -951,16 +1339,16 @@ function createCustomDocCard(type, notes) {
   card.dataset.type = type;
   card.innerHTML = `
     <div class="doc-card-top">
-      <div class="doc-icon"><i class="fas fa-file-lines"></i></div>
+      <div class="doc-icon"><i class="fas fa-file-lines" aria-hidden="true"></i></div>
       <button class="doc-delete-btn" title="Delete ${docsEscapeAttr(type)}" aria-label="Delete ${docsEscapeAttr(type)}">
-        <i class="fas fa-trash"></i>
+        <i class="fas fa-trash" aria-hidden="true"></i>
       </button>
     </div>
     <h4>${docsEscapeHtml(type)}</h4>
     ${notes ? `<span class="doc-note">${docsEscapeHtml(notes)}</span>` : '<p>Added by you.</p>'}
     <span class="doc-status-chip">Custom</span>
     <input type="file" accept="image/*,.pdf" hidden />
-    <button class="upload-btn angled-btn" type="button"><i class="fas fa-cloud-arrow-up"></i> Upload Document</button>
+    <button class="upload-btn angled-btn" type="button"><i class="fas fa-cloud-arrow-up" aria-hidden="true"></i> Upload Document</button>
     <div class="doc-preview"></div>`;
 
   // keep the add tile last
@@ -1163,7 +1551,7 @@ async function loadVehicleDocsFast(cards) {
     } else {
       previewEl.innerHTML = '';
       uploadBtn.style.display = 'inline-flex';
-      uploadBtn.innerHTML = '<i class="fas fa-cloud-arrow-up"></i> Upload document';
+      uploadBtn.innerHTML = '<i class="fas fa-cloud-arrow-up" aria-hidden="true"></i> Upload document';
       if (headerDeleteBtn) headerDeleteBtn.style.display = 'none';
     }
   });
@@ -1360,34 +1748,59 @@ async function getHistoricMediaUrl(fileName) {
 // it returns expires in an hour.
 window.dkGetHistoricMediaUrl = getHistoricMediaUrl;
 
+/**
+ * Sign a whole page of files in ONE round trip.
+ *
+ * getHistoricMediaUrl() above signs one path per call, which is right for the player —
+ * it opens one file. The thumbnail strip wants ten at once, and ten separate
+ * createSignedUrl() calls is ten HTTPS round trips: on a phone that was most of the
+ * wait before any picture appeared, and it happened again on every page turn.
+ *
+ * createSignedUrls (plural) is one request for the lot. It is also newer than the
+ * pinned-to-latest client this app loads from a CDN, so the single-call path is kept as
+ * a fallback rather than assumed away.
+ *
+ * @param {string[]} names Storage object names.
+ * @returns {Promise<Map<string, string>>} name -> signed URL, missing for any that failed.
+ */
+async function signHistoricMediaBatch(names) {
+  const out = new Map();
+  const wanted = [...new Set((names || []).filter(Boolean))];
+  if (!wanted.length) return out;
+
+  const bucket = supabase.storage.from('historic-media');
+
+  if (typeof bucket.createSignedUrls === 'function') {
+    try {
+      const { data, error } = await bucket.createSignedUrls(wanted, 60 * 60);
+      if (!error && Array.isArray(data)) {
+        for (const row of data) {
+          // Each entry carries its own error — one unreadable object must not lose the
+          // other nine.
+          if (row?.signedUrl && !row.error) out.set(row.path, row.signedUrl);
+        }
+        if (out.size) return out;
+      }
+    } catch (err) {
+      console.warn('Batch signing failed, falling back to one call per file:', err);
+    }
+  }
+
+  const signed = await Promise.all(wanted.map(name => getHistoricMediaUrl(name)));
+  wanted.forEach((name, i) => { if (signed[i]) out.set(name, signed[i]); });
+  return out;
+}
+window.dkSignHistoricMediaBatch = signHistoricMediaBatch;
+
 window._historicMediaRows = new Map();
 const spinlogLazyState = { docsSetup: false, docsLoaded: false, serviceLoaded: false };
 
 
-function buildHistoricPreview(row) {
-  const icon = docsIconForType(row.media_type, row.original_name);
-  const label = row.media_type === 'audio' || row.media_type === 'video' ? 'Play' : row.media_type === 'image' ? 'View' : 'Open';
-  return `<button class="docs-preview-pill media-preview-btn" type="button" onclick="window._previewHistoricUpload && window._previewHistoricUpload(${row.id})"><i class="fas ${icon}"></i> ${label}</button>`;
-}
-
-window._previewHistoricUpload = async function(id) {
-  const row = window._historicMediaRows?.get(Number(id));
-  if (!row) {
-    updatePopup('error', 'Could not find this upload. Refresh and try again.');
-    return;
-  }
-  showPopup('loading', 'Opening preview...');
-  const url = await getHistoricMediaUrl(row.file_name);
-  hidePopup();
-  if (!url) {
-    updatePopup('error', 'Could not create preview link.');
-    return;
-  }
-  if (row.media_type === 'audio') return window._showAudioPreview && window._showAudioPreview(url, row.original_name);
-  if (row.media_type === 'video') return window._showVideoPreview && window._showVideoPreview(url, row.original_name);
-  if (row.media_type === 'image') return window._showImagePreview && window._showImagePreview(url);
-  window.open(url, '_blank', 'noopener');
-};
+// _previewHistoricUpload lived here, plus _showAudioPreview / _showVideoPreview /
+// _showImagePreview and two full-screen modals for them. All four opened on ONE file
+// and closed back to the list. The media player further down replaces the set with a
+// single carousel over the whole of Record History, so they are gone rather than left
+// sitting unreachable.
 
 // Load all media uploads and render table. Fast path: do NOT create signed URLs during list load.
 async function fetchHistoricRowsForList() {
@@ -1411,18 +1824,20 @@ async function fetchHistoricRowsForList() {
 async function loadHistoricUploads() {
   const table = document.querySelector('#mediaRecordTable tbody');
   if (!table) return;
-  table.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#777;">Loading...</td></tr>';
+  // colspan 6, not 4: Type and Size joined the header. A short colspan leaves the
+  // placeholder ending mid-table with two empty cells beside it.
+  table.innerHTML = '<tr class="docs-history-note"><td colspan="6" style="text-align:center;color:#777;">Loading...</td></tr>';
 
   const { data, error } = await fetchHistoricRowsForList();
 
   if (error || !data) {
     console.warn('Historic uploads load failed:', error);
-    table.innerHTML = `<tr><td colspan="5" style="text-align:center;color:#b44;">Could not load uploads${error?.message ? ': ' + docsEscapeHtml(error.message) : ''}</td></tr>`;
+    table.innerHTML = `<tr class="docs-history-note"><td colspan="6" style="text-align:center;color:#b44;">Could not load uploads${error?.message ? ': ' + docsEscapeHtml(error.message) : ''}</td></tr>`;
     return;
   }
   if (!data.length) {
     window._historicMediaRows = new Map();
-    table.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#777;">No uploads yet</td></tr>';
+    table.innerHTML = '<tr class="docs-history-note"><td colspan="6" style="text-align:center;color:#777;">No uploads yet</td></tr>';
     return;
   }
 
@@ -1431,46 +1846,117 @@ async function loadHistoricUploads() {
   const fragment = document.createDocumentFragment();
   for (const row of data) {
     const notes = row.notes || getHistoricLocalNote(row.id) || 'No notes saved';
+    const kind = String(row.media_type || '').toLowerCase();
+    const when = getHistoricLocalDate(row.id) || row.upload_date;
+    const time = docsFormatTime(when);
+    // Only a picture or a video HAS a frame to show. Audio gets its waveform glyph and
+    // costs nothing, which is most of why thumbnails are affordable at all.
+    const thumbable = kind === 'image' || kind === 'video';
     const tr = document.createElement('tr');
+    tr.className = 'docs-media-row';
+    tr.dataset.mediaId = String(row.id);
+    // Read by the filter and by the sort button, so neither has to parse the rendered
+    // date back into one. `day` is the LOCAL calendar day; `when` is the epoch.
+    tr.dataset.kind = kind;
+    tr.dataset.when = String(docsWhenMs(when));
+    tr.dataset.day = docsIsoDay(when);
+    // The thumbnail IS the open control, at every width.
+    //
+    // Before this there were two: a type glyph that opened the file on a phone, and an
+    // eye button in a column of its own that did the same thing for a mouse — because
+    // nothing about a file-type glyph reads as pressable when there is no hold gesture
+    // to discover. A frame of the actual video does. So the second control goes, the
+    // column it lived in becomes TYPE, and this one button answers both widths.
+    //
+    // The <img>/<video> is NOT here: signing a URL per row is what "do not create
+    // signed URLs during list load" exists to avoid. data-thumb names the object and an
+    // observer fills it in for the rows you can actually see.
     tr.innerHTML = `
       <td data-label="File">
         <div class="docs-file-cell">
-          <span class="docs-file-icon"><i class="fas ${docsIconForType(row.media_type, row.original_name)}"></i></span>
+          <button class="docs-file-icon docs-file-open docs-thumb${thumbable ? ' is-' + kind : ''}"
+                  type="button" data-media-open="${row.id}"
+                  ${thumbable ? `data-thumb="${docsEscapeAttr(row.file_name)}" data-thumb-kind="${docsEscapeAttr(kind)}"` : ''}
+                  aria-label="Open ${docsEscapeAttr(row.original_name)}"
+                  title="Open ${docsEscapeAttr(row.original_name)}">
+            <i class="fas ${docsIconForType(row.media_type, row.original_name)}" aria-hidden="true"></i>
+          </button>
+          <!-- THE BADGE IS IN HERE AS WELL AS IN THE TYPE COLUMN, and that is deliberate.
+               A card has no columns to read down, so the type has to sit under the
+               filename where the eye already is — and the plain grey "audio · 1.9 MB"
+               line that used to do it said the same thing in a form you cannot scan.
+               Same trick the size already uses: one fact, rendered twice, with exactly
+               one of the two drawn at any width. -->
           <span class="docs-file-meta">
             <strong title="${docsEscapeAttr(row.original_name)}">${docsEscapeHtml(row.original_name)}</strong>
-            <span>${docsEscapeHtml(row.media_type)} · ${docsFormatBytes(row.file_size)}</span>
+            <span class="docs-file-tags">
+              ${docsTypeBadge(row.media_type)}
+              <span class="docs-file-size">${docsFormatBytes(row.file_size)}</span>
+            </span>
           </span>
         </div>
       </td>
-      <td data-label="Notes"><div class="docs-notes-cell">${docsEscapeHtml(notes)}</div></td>
-      <td data-label="Preview">${buildHistoricPreview(row)}</td>
+      <!-- Desktop-only columns; both are display:none on a phone, where the grey line
+           under the filename already says "VIDEO · 1.6 MB". -->
+      <td data-label="Type" class="docs-col-type">${docsTypeBadge(row.media_type)}</td>
+      <td data-label="Size" class="docs-col-size">${docsFormatBytes(row.file_size)}</td>
+      <!-- title as well as the text: the cell clamps to two lines on a desktop, so a
+           long note needs somewhere to be read in full without opening the sheet. -->
+      <td data-label="Notes"><div class="docs-notes-cell" title="${docsEscapeAttr(notes)}">${docsEscapeHtml(notes)}</div></td>
       <td data-label="Uploaded">
         <div class="docs-date-cell">
-          <span>${docsFormatDate(getHistoricLocalDate(row.id) || row.upload_date)}</span>
-          <button class="docs-date-edit-btn" type="button" title="Edit uploaded date" aria-label="Edit uploaded date" onclick="window._editHistoricDate && window._editHistoricDate(${row.id}, '${docsEscapeAttr(getHistoricLocalDate(row.id) || row.upload_date || '')}', this)"><i class="fas fa-pen"></i></button>
+          <span class="docs-date-day">${docsFormatDate(when)}</span>
+          ${time ? `<span class="docs-date-time">${docsEscapeHtml(time)}</span>` : ''}
         </div>
       </td>
-      <td data-label="Action">
+      <td data-label="Actions">
         <div class="docs-action-stack">
-          <button class="docs-mini-btn" type="button" onclick="window._editHistoricNotes && window._editHistoricNotes(${row.id}, this)"><i class="fas fa-pen"></i> Notes</button>
-          <button class="docs-action-btn delete-btn" type="button" title="Delete" onclick="window._delHistoricUpload && window._delHistoricUpload(${row.id}, '${docsEscapeAttr(row.file_name)}', this)"><i class="fas fa-xmark"></i> Delete</button>
+          <button class="docs-trash-btn" type="button" title="Delete ${docsEscapeAttr(row.original_name)}"
+                  aria-label="Delete ${docsEscapeAttr(row.original_name)}"
+                  onclick="window._delHistoricUpload && window._delHistoricUpload(${row.id}, '${docsEscapeAttr(row.file_name)}', this)"><i class="fas fa-trash" aria-hidden="true"></i></button>
         </div>
       </td>`;
     fragment.appendChild(tr);
   }
   table.appendChild(fragment);
+
+  // Re-apply whatever sort, filter and page were in force before the reload, then let
+  // the thumbnail observer pick up the new rows. Order matters: sorting moves rows, the
+  // filter decides which of them count, and the pager slices what is left.
+  window.dkDocsSortApply?.();
+  window.dkDocsFilterApply?.();
+  window.dkDocsPager?.refresh({ keepPage: true });
+  window.dkDocsThumbs?.scan();
 }
 
-window._editHistoricNotes = async function(id, btn) {
-  const rowEl = btn.closest('tr');
-  const current = rowEl?.querySelector('.docs-notes-cell')?.textContent?.trim() || getHistoricLocalNote(id) || '';
+/**
+ * Edit one historic upload — note and date together, in one sheet.
+ *
+ * Reached by HOLDING the row, which is the gesture the service records already use
+ * for the same job. It replaces two pencil buttons that sat in two different cells:
+ * one to change the note, one to change the date. Two icons for two halves of the
+ * same correction, and on a phone they were 28px targets wedged beside the text
+ * they belonged to.
+ *
+ * Both writes are reported separately, because they can fail separately: the note
+ * goes through the cloud store, the date needs an UPDATE policy on media_files and
+ * falls back to this device alone without one.
+ */
+window._editHistoricMedia = async function(id) {
+  const rowEl = document.querySelector(`#mediaRecordTable tbody tr[data-media-id="${id}"]`);
+  const current = rowEl?.querySelector('.docs-notes-cell')?.textContent?.trim()
+    || getHistoricLocalNote(id) || '';
   // The stored row is what tells Sage which file this note belongs to.
   const row = window._historicMediaRows?.get(Number(id)) || null;
-  const notes = await showHistoricNotesModal({
-    title: 'Edit upload notes',
-    help: 'Update the context for this historic upload.',
+  const currentDate = String(getHistoricLocalDate(id) || row?.upload_date || '').slice(0, 10)
+    || localIsoDate();
+
+  const result = await showHistoricNotesModal({
+    title: 'Edit this upload',
+    help: 'Change the note or the date it is from.',
     initial: current === 'No notes saved' ? '' : current,
     required: true,
+    date: currentDate,
     // storageName lets her pull the file back out of the vault and look at it;
     // sizeBytes lets her skip that when it is too big to send.
     context: row ? {
@@ -1478,13 +1964,29 @@ window._editHistoricNotes = async function(id, btn) {
       fileName: row.original_name,
       mediaType: row.media_type,
       sizeBytes: row.file_size,
-      uploadedOn: String(getHistoricLocalDate(id) || row.upload_date || '').slice(0, 10),
+      uploadedOn: currentDate,
     } : null
   });
-  if (!notes) return;
-  showPopup('loading', 'Saving notes...');
+  if (!result) return;
+
+  const notes = typeof result === 'string' ? result : result.notes;
+  const nextDate = typeof result === 'string' ? null : result.date;
+
+  showPopup('loading', 'Saving…');
   await updateHistoricNotes(id, notes);
-  updatePopup('success', 'Notes updated!');
+
+  let dateWarning = null;
+  if (nextDate && nextDate !== currentDate) {
+    const saved = await persistHistoricDateToDatabase(id, nextDate);
+    setHistoricLocalDate(saved.id || id, saved.value);
+    if (!saved.ok) {
+      dateWarning = 'Note saved. The date is on this device only — add an UPDATE '
+        + 'policy for media_files to sync it.';
+    }
+  }
+
+  if (dateWarning) updatePopup('error', dateWarning);
+  else updatePopup('success', nextDate && nextDate !== currentDate ? 'Note and date updated!' : 'Note updated!');
   loadHistoricUploads();
 };
 
@@ -1511,78 +2013,6 @@ async function persistHistoricDateToDatabase(id, selectedDate) {
   return { ok: true, id: data.id || id, value: data.upload_date, mode: 'update' };
 }
 
-window._editHistoricDate = function(id, currentDate, btn) {
-  const currentIso = currentDate ? String(currentDate).slice(0, 10) : localIsoDate();
-  const popup = document.getElementById('customPopup');
-  const spinner = document.getElementById('popupSpinner');
-  const success = document.getElementById('popupSuccess');
-  const errorIcon = document.getElementById('popupError');
-  const messageEl = document.getElementById('popupMessage');
-  if (!popup || !messageEl) return;
-
-  popup.classList.add('docs-date-popup');
-  if (spinner) spinner.style.display = 'none';
-  if (success) success.style.display = 'none';
-  if (errorIcon) errorIcon.style.display = 'none';
-
-  messageEl.innerHTML = `
-    <div class="docs-inline-editor docs-date-editor-box">
-      <strong><i class="fas fa-pen"></i> Edit uploaded date</strong>
-      <p>Pick the correct date for this historic record.</p>
-      <label class="docs-date-editor-field" for="historicDateEditor">
-        <i class="fas fa-calendar-days"></i>
-        <input id="historicDateEditor" type="date" value="${docsEscapeAttr(currentIso)}" />
-      </label>
-      <div class="docs-inline-editor-actions">
-        <button type="button" id="historicDateCancel" class="docs-secondary-btn"><i class="fas fa-xmark"></i> Cancel</button>
-        <button type="button" id="historicDateSave" class="docs-primary-btn"><i class="fas fa-check"></i> Save</button>
-      </div>
-    </div>
-  `;
-  popup.classList.add('show');
-  popup.onclick = function(e) {
-    if (e.target === popup) {
-      popup.classList.remove('docs-date-popup');
-      hidePopup();
-    }
-  };
-  messageEl.onclick = e => e.stopPropagation();
-
-  requestAnimationFrame(() => {
-    const input = document.getElementById('historicDateEditor');
-    const cancel = document.getElementById('historicDateCancel');
-    const save = document.getElementById('historicDateSave');
-    cancel?.addEventListener('click', () => {
-      popup.classList.remove('docs-date-popup');
-      hidePopup();
-    });
-    input?.addEventListener('click', () => {
-      if (typeof input.showPicker === 'function') input.showPicker();
-    });
-    save?.addEventListener('click', async () => {
-      const selected = input?.value;
-      if (!selected) {
-        input?.focus();
-        input?.classList.add('field-error');
-        return;
-      }
-      const nextIso = `${selected}T12:00:00.000Z`;
-      save.disabled = true;
-      save.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Saving';
-      const result = await persistHistoricDateToDatabase(id, selected);
-      popup.classList.remove('docs-date-popup');
-      if (result.ok) {
-        setHistoricLocalDate(result.id, result.value);
-        updatePopup('success', 'Date updated in database!');
-      } else {
-        updatePopup('error', 'Date saved only on this device. Add an UPDATE policy for media_files to sync it to Supabase.');
-      }
-      await loadHistoricUploads();
-    });
-    input?.focus();
-  });
-};
-
 // Delete handler: attach to window so inline HTML can call it
 window._delHistoricUpload = async function(id, fileName, btn) {
   confirmDeleteWithHold(
@@ -1605,6 +2035,14 @@ window._delHistoricUpload = async function(id, fileName, btn) {
       // local copy so the table does not redraw them.
       cloudStore()?.forgetUpload(id);
       btn.closest('tr')?.remove();
+      // The row is gone from the DOM, so the counts and the page buttons are now wrong
+      // — and deleting the last row on the last page has to move you back a page rather
+      // than leave you looking at an empty table.
+      window._historicMediaRows?.delete(Number(id));
+      // And its cached thumbnail, or a later upload that reuses the name would show the
+      // deleted file's picture.
+      window.dkDocsThumbs?.forget(fileName);
+      window.dkDocsPager?.refresh({ keepPage: true });
       updatePopup('success', 'Deleted!');
       setTimeout(() => { hidePopup(); }, 1200);
     },
@@ -1614,84 +2052,12 @@ window._delHistoricUpload = async function(id, fileName, btn) {
 
 
 
-// Audio preview popup
-window._showAudioPreview = function(url, name) {
-  const modal = document.getElementById('audioPreviewModal');
-  const player = document.getElementById('fullPreviewAudio');
-  player.src = url;
-  player.setAttribute('aria-label', 'Audio: ' + (name || ''));
-  modal.style.display = 'flex';
-  player.focus();
-  modal.onclick = function(e) {
-    // Only close if click outside player
-    if (e.target === modal) {
-      modal.style.display = 'none';
-      player.pause();
-      player.src = '';
-    }
-  }
-  document.onkeydown = function(e) {
-    if (e.key === 'Escape') {
-      modal.style.display = 'none';
-      player.pause();
-      player.src = '';
-    }
-  }
-}
+// The audio, video and image preview popups that used to be here are replaced by
+// the Record History media player — see the carousel below the docs filters.
 
-// Video preview popup
-window._showVideoPreview = function(url, name) {
-  const modal = document.getElementById('videoPreviewModal');
-  const player = document.getElementById('fullPreviewVideo');
-  player.src = url;
-  player.setAttribute('aria-label', 'Video: ' + (name || ''));
-  modal.style.display = 'flex';
-  player.play();
-  player.focus();
-  modal.onclick = function(e) {
-    if (e.target === modal) {
-      modal.style.display = 'none';
-      player.pause();
-      player.src = '';
-    }
-  }
-  document.onkeydown = function(e) {
-    if (e.key === 'Escape') {
-      modal.style.display = 'none';
-      player.pause();
-      player.src = '';
-    }
-  }
-}
-
-// Image preview (reuse your existing logic)
-window._showImagePreview = function(url) {
-  const modal = document.getElementById('imagePreviewModal');
-  const img = document.getElementById('fullPreviewImg');
-  img.src = url;
-  modal.style.display = 'flex';
-  img.focus();
-  modal.onclick = function(e) {
-    if (e.target === modal) {
-      modal.style.display = 'none';
-      img.src = '';
-    }
-  }
-  document.onkeydown = function(e) {
-    if (e.key === 'Escape') {
-      modal.style.display = 'none';
-      img.src = '';
-    }
-  }
-}
-
-  // Navigation
-  const navButtons = document.querySelectorAll('.desktop-nav li button, .mobile-nav-list li button');
-  const navItems = document.querySelectorAll('.desktop-nav li, .mobile-nav-list li');
+  // Navigation. `main section` is the whole router — see the note in index.html
+  // about why no view is allowed to nest a <section> inside itself.
   const sections = document.querySelectorAll('main section');
-  const mobileToggle = document.getElementById('mobileToggle');
-  const mobileMenu = document.getElementById('mobileMenu');
-  const mobileOverlay = document.getElementById('mobileOverlay');
 
   // ── Which page you were on, remembered across refreshes ──────────────
   const SECTION_KEY = 'spinlogActiveSection';
@@ -1702,24 +2068,72 @@ window._showImagePreview = function(url) {
       && document.getElementById(name).matches('main section');
   }
 
-  function rememberSection(section) {
+  /**
+   * @param {string} section
+   * @param {'push'|'replace'} [mode] 'replace' when the section change came FROM
+   *   history (a back gesture, or the restore on load). Anything the user actually
+   *   navigated to pushes.
+   *
+   * PUSH, NOT REPLACE, AND THAT IS THE POINT.
+   *
+   * This only ever replaced, so the history stack held exactly one entry no matter
+   * how far into the app you had gone — and a back gesture on a phone had nothing to
+   * go back to, so it closed the app. In an installed PWA that reads as "swiping
+   * left or right exits", because on Android the back gesture IS an edge swipe.
+   *
+   * The comment that used to sit here said browser back and forward move between
+   * sections rather than leaving the page. That is now true.
+   */
+  function rememberSection(section, mode) {
     try { localStorage.setItem(SECTION_KEY, section); } catch { /* private mode */ }
-    // Best effort only. On a file:// origin some browsers refuse replaceState,
-    // and localStorage above is the part that actually has to work.
-    try { history.replaceState(null, '', `#${section}`); } catch { /* ignore */ }
+    // Best effort only. On a file:// origin some browsers refuse both calls, and
+    // localStorage above is the part that actually has to work.
+    try {
+      // Re-selecting the section you are already on must not stack up entries you
+      // then have to press back through.
+      const same = location.hash === `#${section}`;
+      if (mode === 'replace' || same) history.replaceState(null, '', `#${section}`);
+      else history.pushState(null, '', `#${section}`);
+    } catch { /* ignore */ }
   }
 
-  function setActiveSection(section) {
+  /**
+   * WHERE FOCUS GOES WHEN THE PAGE CHANGES, AND WHY IT HAS TO GO ANYWHERE.
+   *
+   * Routing here is `display: none` on the outgoing section. The button you just
+   * pressed lives INSIDE that section — the three hero actions are in #home, the
+   * Home pill is in #service / #docs / #sage — so the moment the class moves, the
+   * element holding focus stops being rendered and the browser drops focus to
+   * <body>. The next Tab then restarts from the top of the document, above the
+   * section you just asked for. Every keyboard navigation cost you one blind
+   * traversal of the whole page.
+   *
+   * Sending focus to the incoming section's own heading fixes both halves of it:
+   * Tab continues from where the eye already is, and a screen reader announces
+   * the heading, which is the only signal that anything happened at all — there
+   * is no page load and no route announcement in a single-document app.
+   *
+   * `preventScroll`, because scrollTo({top: 0}) above is the deliberate scroll
+   * position and focus() would otherwise fight it. tabindex="-1" is set here
+   * rather than in the markup so the heading never becomes a Tab stop of its own.
+   */
+  function focusSectionHeading(sectionEl) {
+    const heading = sectionEl.querySelector('h2, h3, [role="heading"]');
+    const target = heading || sectionEl;
+    if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
+    try { target.focus({ preventScroll: true }); } catch { target.focus(); }
+  }
+
+  function setActiveSection(section, mode) {
     if (!isKnownSection(section)) return;
-    navItems.forEach(nav => nav.classList.remove('active'));
-    navButtons.forEach(btn => btn.removeAttribute('aria-current'));
-    document.querySelectorAll(`[data-section="${section}"]`).forEach(nav => {
-      nav.classList.add('active');
-      const btn = nav.querySelector('button');
-      if (btn) btn.setAttribute('aria-current', 'page');
-    });
+    const incoming = document.getElementById(section);
+    // A section change that is not really a change must not steal focus — the
+    // command-centre search calls this with the section you are already on when
+    // the hit it found is on this page.
+    const wasActive = incoming.classList.contains('active');
+
     sections.forEach(sec => sec.classList.remove('active'));
-    document.getElementById(section).classList.add('active');
+    incoming.classList.add('active');
     // Instant, not smooth: animating a long scroll while the incoming section
     // is doing its first layout is what made navigation feel sluggish.
     window.scrollTo({ top: 0, behavior: 'auto' });
@@ -1727,63 +2141,27 @@ window._showImagePreview = function(url) {
     // home. Off home it is a static image behind a long scrolling list, and a
     // full-viewport shader redrawing per frame is pure scroll cost.
     window.SpinLog3D?.setAnimating?.(section === 'home');
-    closeMobileMenu();
+    if (!wasActive) focusSectionHeading(incoming);
     ensureSectionData(section);
-    rememberSection(section);
+    rememberSection(section, mode);
   }
   // Exposed so the v1.7 command-center search can navigate between sections.
   window.dkNavigate = setActiveSection;
-  navButtons.forEach(button => {
-    button.addEventListener('click', e => {
-      e.preventDefault();
-      setActiveSection(button.closest('li').dataset.section);
-    });
-    button.addEventListener('keydown', e => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        setActiveSection(button.closest('li').dataset.section);
-      }
-    });
-  });
 
+  // The only navigation mechanism. A hamburger menu, a desktop nav list and a
+  // full-screen mobile overlay used to be wired up above this: three ids
+  // (#mobileToggle, #mobileMenu, #mobileOverlay), two selectors (.desktop-nav li
+  // button, .mobile-nav-list li button) and a document-level Escape listener, none
+  // of which have existed in index.html for several versions. openMobileMenu() and
+  // closeMobileMenu() returned on their first guard, the two NodeLists were always
+  // empty, and setActiveSection() was painting aria-current onto [data-section]
+  // elements that are not in the document either. All of it is gone; navigation is
+  // [data-home-section] buttons and the hash.
   document.querySelectorAll('[data-home-section]').forEach(button => {
     button.addEventListener('click', () => {
       const target = button.getAttribute('data-home-section');
       if (target && document.getElementById(target)) setActiveSection(target);
     });
-  });
-  function openMobileMenu() {
-    if (!mobileToggle || !mobileMenu || !mobileOverlay) return;
-    mobileToggle.classList.add('active');
-    mobileToggle.setAttribute('aria-expanded', 'true');
-    mobileMenu.classList.add('show');
-    mobileOverlay.classList.add('show');
-    document.body.style.overflow = 'hidden';
-  }
-  function closeMobileMenu() {
-    if (!mobileToggle || !mobileMenu || !mobileOverlay) return;
-    mobileToggle.classList.remove('active');
-    mobileToggle.setAttribute('aria-expanded', 'false');
-    mobileMenu.classList.remove('show');
-    mobileOverlay.classList.remove('show');
-    document.body.style.overflow = '';
-  }
-  if (mobileToggle && mobileMenu) {
-    mobileToggle.addEventListener('click', e => {
-      e.preventDefault();
-      mobileMenu.classList.contains('show') ? closeMobileMenu() : openMobileMenu();
-    });
-  }
-  if (mobileOverlay) {
-    mobileOverlay.addEventListener('click', e => {
-      e.preventDefault();
-      closeMobileMenu();
-    });
-  }
-  document.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && mobileMenu && mobileMenu.classList.contains('show')) {
-      closeMobileMenu();
-    }
   });
 
   function formatDateUIValue(value) {
@@ -1831,6 +2209,15 @@ window._showImagePreview = function(url) {
       try { input.click(); } catch (_) {}
     }
 
+    // Our own calendar, when it is loaded. It takes the field over completely —
+    // the input becomes a value holder and the shell becomes the button — so the
+    // native-picker plumbing below must NOT also run, or two click handlers fight
+    // over one field and the browser's grey panel appears on top of ours.
+    //
+    // updateDateUI is still what paints the visible text; the picker fires `input`
+    // and `change` on the field, so the listeners attached here do the rest.
+    const ourCalendar = window.dkDatePicker;
+
     document.querySelectorAll('input[type="date"][data-date-ui]').forEach(input => {
       if (input.dataset.dateUiReady === 'true') return;
       input.dataset.dateUiReady = 'true';
@@ -1839,6 +2226,12 @@ window._showImagePreview = function(url) {
       input.addEventListener('input', () => updateDateUI(input));
       input.addEventListener('change', () => updateDateUI(input));
       input.addEventListener('blur', () => updateDateUI(input));
+
+      if (ourCalendar) {
+        ourCalendar.attach(input);
+        return;
+      }
+
       input.addEventListener('click', event => {
         // Let the transparent native date input receive the real user click.
         // This keeps iOS/Android/desktop pickers reliable and avoids the custom shell cancelling the picker.
@@ -2050,6 +2443,41 @@ window._showImagePreview = function(url) {
   let serviceRenderRun = 0;
   let serviceFilterTimer = null;
 
+  /**
+   * The page controls under the service table.
+   *
+   * Built on first use rather than at module scope: this closure runs on
+   * DOMContentLoaded, and dkPager() wires listeners to elements by id the moment it is
+   * called, so constructing it before the section exists would bind nothing. Every
+   * route into the table goes through renderServiceTable(), so that is where it is
+   * asked for.
+   *
+   * Unlike the documents table this one PAGES BY SLICING. The rows for other pages are
+   * never built: each one awaits buildBillPreview() to sign its bill, so rendering
+   * twenty-four of them to show ten was twenty-four round trips for fourteen rows
+   * nobody was looking at.
+   */
+  let servicePagerInstance = null;
+  function servicePager() {
+    if (!servicePagerInstance) {
+      servicePagerInstance = window.dkPager({
+        key: 'serviceHistory',
+        noun: ['record', 'records'],
+        ids: {
+          root: 'serviceHistoryPager',
+          per: 'serviceHistoryPerPage',
+          count: 'serviceHistoryRange',
+          nav: 'serviceHistoryNav',
+          prev: 'serviceHistoryPrev',
+          next: 'serviceHistoryNext',
+          pages: 'serviceHistoryPages',
+        },
+        onChange: () => renderServiceTable(),
+      });
+    }
+    return servicePagerInstance;
+  }
+
   function escapeHTML(value) {
     return String(value ?? '').replace(/[&<>"']/g, ch => ({
       '&': '&amp;',
@@ -2255,16 +2683,23 @@ window._showImagePreview = function(url) {
     const controls = getServiceHistoryControls();
     if (!controls.search || controls.search.dataset.ready === 'true') return;
 
+    // Back to page one whenever the FILTER moves. Page three of a four-page list is
+    // nowhere once the list is two pages long — the pager would clamp you to the last
+    // page, which is a stranger place to land than the first.
     const delayedRender = () => {
       window.clearTimeout(serviceFilterTimer);
       serviceFilterTimer = window.setTimeout(() => {
+        servicePager().reset();
         renderServiceTable();
       }, 140);
     };
 
     controls.search.addEventListener('input', delayedRender);
     [controls.type, controls.from, controls.to].forEach(control => {
-      control?.addEventListener('change', () => renderServiceTable());
+      control?.addEventListener('change', () => {
+        servicePager().reset();
+        renderServiceTable();
+      });
     });
 
     controls.toggle?.addEventListener('click', () => {
@@ -2301,7 +2736,17 @@ window._showImagePreview = function(url) {
       if (event.key === 'Escape') closeServiceTypeDropdown();
     });
 
-    controls.clear?.addEventListener('click', () => {
+    // Lifted out of the click handler so the command-centre search can call it.
+    //
+    // A filtered service table does not hide the rows it excludes, it never renders
+    // them — so jumping to a record from search while a filter was set landed on a
+    // table that did not contain it, and the highlight silently never happened. The
+    // search clears the filters first. `focus` is the one thing the button does that
+    // this must not: taking focus mid-navigation scrolls the page back to the field.
+    function clearServiceFilters() {
+      if (!controls.search) return false;
+      const had = Boolean(controls.search.value || controls.type.value
+        || controls.from.value || controls.to.value);
       controls.search.value = '';
       controls.type.value = '';
       controls.from.value = '';
@@ -2309,7 +2754,37 @@ window._showImagePreview = function(url) {
       updateDateUI(controls.from);
       updateDateUI(controls.to);
       syncServiceTypeDropdown('');
+      servicePager().reset();
       renderServiceTable();
+      return had;
+    }
+    window.dkClearServiceFilters = clearServiceFilters;
+
+    /**
+     * Put one record on screen, wherever it is in the list.
+     *
+     * The command-centre search jumps to a row by selector and lights it up, and it
+     * already had to drop any filter first because a filtered table does not render the
+     * rows it excludes. Paging is the second way a record can be missing while still
+     * existing — record twenty of twenty-four is not in the DOM at all on page one — and
+     * the symptom is identical: the poll times out and nothing happens.
+     *
+     * @returns {boolean} False when there is no such record, so the caller can tell
+     *   "not on this page" from "not in the database".
+     */
+    window.dkShowServiceRecord = function showServiceRecord(id) {
+      clearServiceFilters();
+      // Filters are cleared, so the filtered list IS serviceEntries and an index into
+      // one is an index into the other.
+      const index = serviceEntries.findIndex(entry => String(entry.id) === String(id));
+      if (index < 0) return false;
+      servicePager().showIndex(index);
+      renderServiceTable();
+      return true;
+    };
+
+    controls.clear?.addEventListener('click', () => {
+      clearServiceFilters();
       controls.search.focus();
     });
 
@@ -2473,8 +2948,15 @@ window._showImagePreview = function(url) {
     const renderId = ++serviceRenderRun;
     const filters = getServiceHistoryFilters();
     const filteredEntries = getFilteredServiceEntries();
+    // The spend strip and the "showing 3 of 24" line still describe the WHOLE filtered
+    // set, not the page. Totalling one page of costs would be a figure that means
+    // nothing, and it would change as you paged.
     updateServiceHistoryMeta(filteredEntries.length, serviceEntries.length, filters);
     updateServiceSpendSummary(filteredEntries, filters);
+
+    const pager = servicePager();
+    pager.setTotal(filteredEntries.length);
+    pager.paint();
 
     if (!serviceEntries.length) {
       tbody.innerHTML = renderServiceEmptyState('No service records found', 'fa-folder-open');
@@ -2488,8 +2970,9 @@ window._showImagePreview = function(url) {
       return;
     }
 
+    const { from, to } = pager.slice();
     const rows = [];
-    for (const entry of filteredEntries) {
+    for (const entry of filteredEntries.slice(from, to)) {
       const billLink = buildBillPreview(entry);
       if (renderId !== serviceRenderRun) return;
 
@@ -2543,8 +3026,12 @@ window._showImagePreview = function(url) {
     }
   }
 
-  // Form submission
-  document.getElementById('serviceEntryForm').addEventListener('submit', async function(e) {
+  // Form submission. Guarded like every other lookup in this file: an unguarded
+  // .addEventListener() on a getElementById() result throws during evaluation, and
+  // this handler sits inside the big DOMContentLoaded closure — so a throw here
+  // takes out every section of the closure below it and presents as an app stuck
+  // mid-boot. It was the only unguarded one left.
+  document.getElementById('serviceEntryForm')?.addEventListener('submit', async function(e) {
   e.preventDefault();
   const form = e.target;
   const data = new FormData(form);
@@ -2570,7 +3057,7 @@ window._showImagePreview = function(url) {
   const btn = form.querySelector('button[type="submit"].drawer-submit');
   const original = btn.innerHTML;
   btn.disabled = true;
-  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Saving...';
   
   // Show loading popup
   showPopup('loading', 'Saving service entry...');
@@ -2633,6 +3120,13 @@ window._showImagePreview = function(url) {
     await renderServiceTable();
     form.reset();
     document.getElementById('nextDueLabel').style.display = '';
+    // The whole bill area goes back to empty with the rest of the form: the pill,
+    // the dropzone's filled border, the page count and the merge line. form.reset()
+    // clears the input's value and nothing else, which is why a green "2 files
+    // merged into 3 pages" outlived the entry it belonged to.
+    if (typeof window.dkClearBillArea === 'function') window.dkClearBillArea();
+    else document.getElementById('customFileButton')
+      ?.closest('.service-upload-field')?.classList.remove('has-file');
     const info = document.getElementById('fileInfo');
     if (info) info.innerHTML = '';
     updatePopup('success', 'Service entry saved successfully!');
@@ -2741,16 +3235,165 @@ async function getBillFileUrl(fileName) {
 
   button.addEventListener('click', () => fileInput.click());
 
-  fileInput.addEventListener('change', () => {
+  // The dropzone's filled state. The field kept its empty "put something here"
+  // look with a file inside it, so the only evidence of an attached bill was a
+  // pill of text below — the one state on the panel worth seeing at a glance.
+  const zone = button.closest('.service-upload-field');
+  const markFilled = on => zone?.classList.toggle('has-file', !!on);
+
+  const mergeState = document.getElementById('billMergeState');
+
+  /**
+   * Say where the merge is up to, always.
+   *
+   * Merging four photos of an invoice takes a few seconds on a phone — decode,
+   * downscale, re-encode, write — and half a megabyte of PDF tool may have to be
+   * fetched first. A wait with nothing on screen is indistinguishable from a broken
+   * form, so every phase is named and so is every outcome. Nothing here finishes
+   * quietly.
+   */
+  function showMerge(text, tone, pct) {
+    if (!mergeState) return;
+    mergeState.hidden = !text;
+    mergeState.className = `bill-merge-state${tone ? ` is-${tone}` : ''}`;
+    if (!text) { mergeState.textContent = ''; return; }
+    mergeState.innerHTML = Number.isFinite(pct)
+      ? `<span class="bill-merge-bar"><span style="width:${Math.max(4, Math.min(100, pct))}%"></span></span>`
+        + `<span class="bill-merge-text"></span>`
+      : '<span class="bill-merge-text"></span>';
+    mergeState.querySelector('.bill-merge-text').textContent = text;
+  }
+
+  /**
+   * Put one file back into the input, so the rest of the app sees what it expects.
+   *
+   * DataTransfer is the only way to write to input.files. Without it the merged PDF
+   * would have to be carried in a variable beside the input, and every existing
+   * reader — the submit handler, Sage's autofill, the validator — would have to
+   * learn about it. One file in the input keeps all of them unchanged.
+   */
+  function setInputFile(file) {
+    try {
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      fileInput.files = dt.files;
+      return fileInput.files.length === 1;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  let mergeToken = 0;
+  // How many pages the attached PDF ended up with, when it came from a merge. Shown
+  // on the file pill rather than in a banner of its own.
+  let mergedPages = null;
+
+  /**
+   * Put the bill area back to empty.
+   *
+   * Called on reset AND after a successful save. `form.reset()` clears the input's
+   * value but knows nothing about the pill, the dropzone's filled border or the
+   * merge line — which is why "2 files merged into 3 pages" was still sitting there
+   * under an empty form after the entry had been logged.
+   */
+  function clearBillArea() {
+    mergedPages = null;
+    fileInfo.innerHTML = '';
+    markFilled(false);
+    showMerge('');
+  }
+  // Exposed so the submit handler can call it without reaching into this closure.
+  window.dkClearBillArea = clearBillArea;
+
+  fileInput.addEventListener('change', async () => {
+    const picked = [...fileInput.files];
+
+    if (!picked.length) {
+      fileInfo.innerHTML = '';
+      markFilled(false);
+      showMerge('');
+      return;
+    }
+
+    // More than one: merge first, and nothing downstream runs until it is one file.
+    if (picked.length > 1) {
+      const token = ++mergeToken;
+      const merger = window.dkBillMerge;
+      if (!merger) {
+        showMerge('Several files were picked but the merger is not loaded. '
+          + 'Pick one file, or reload the page.', 'bad');
+        fileInput.value = '';
+        fileInfo.innerHTML = '';
+        markFilled(false);
+        return;
+      }
+
+      button.disabled = true;
+      showMerge(`Merging ${picked.length} files…`, 'busy', 4);
+
+      let result;
+      try {
+        result = await merger.merge(picked, state => {
+          // A second pick while the first is still merging wins; the older run must
+          // not keep writing over the newer one's status line.
+          if (token !== mergeToken) return;
+          showMerge(state.text, 'busy', state.pct);
+        });
+      } catch (err) {
+        result = { ok: false, error: (err && err.message) || 'The merge failed.' };
+      }
+      button.disabled = false;
+      if (token !== mergeToken) return;
+
+      if (!result.ok) {
+        showMerge(result.error || 'Those files could not be merged.', 'bad');
+        fileInput.value = '';
+        fileInfo.innerHTML = '';
+        markFilled(false);
+        // Told again through the normal channel, so a failure is not only visible
+        // in one small line he may have scrolled past.
+        updatePopup('error', result.error || 'Those files could not be merged.');
+        return;
+      }
+
+      if (!setInputFile(result.file)) {
+        showMerge('This browser will not let the merged file be attached. '
+          + 'Pick a single file instead.', 'bad');
+        fileInput.value = '';
+        markFilled(false);
+        return;
+      }
+      // Success is NOT a banner of its own. It used to be: a green bar above the
+      // dropzone, the dropzone, then a green "SELECTED: …" pill below it — three
+      // stacked elements and two separate greens saying one thing between them.
+      // The page count belongs on the pill that names the file, so there is one
+      // line of state and it sits with what it describes.
+      mergedPages = result.pages;
+      showMerge('');
+    } else {
+      mergedPages = null;
+      showMerge('');
+    }
+
     const file = fileInput.files[0];
     if (!file) {
       fileInfo.innerHTML = '';
+      markFilled(false);
       return;
     }
     if (!validateFileUpload(file)) {
       fileInput.value = '';
       fileInfo.innerHTML = '';
+      markFilled(false);
+      showMerge('');
       return;
+    }
+    markFilled(true);
+    // The autofill listens for `change` too, and its own handler ran before the
+    // merge finished — on the multi-file list, which it cannot read. Fire once more
+    // now that the input holds exactly the file she will be given.
+    if (picked.length > 1) {
+      fileInput.dispatchEvent(new CustomEvent('dk-bill-ready', { bubbles: true }));
     }
     const size = file.size < 1024 * 1024
       ? `${(file.size / 1024).toFixed(1)} KB`
@@ -2759,19 +3402,31 @@ async function getBillFileUrl(fileName) {
     let icon = '📄';
     if (['jpg','jpeg','png','gif','webp','bmp','tiff','svg','heic','heif'].includes(ext)) icon = '🖼️';
     else if (ext === 'pdf') icon = '📋';
-    fileInfo.innerHTML = `<div class="selected-file-pill">
-      <span aria-hidden="true">${icon}</span><span>Selected: <strong>${file.name}</strong></span><small>${size}</small>
+    // The filename, mid-truncated rather than shouted. "SELECTED:
+    // WHATSAPP-IMAGE-2026-09-20-AT-6-36-41-PM-PLUS-1.PDF" in caps was most of the
+    // width of a phone and unreadable at either end; the tail is the part that says
+    // what kind of file it is, so both ends survive and the middle gives way. The
+    // full name stays in the title.
+    const pages = mergedPages ? `<span class="file-pill-pages">${mergedPages} pages</span>` : '';
+    fileInfo.innerHTML = `<div class="selected-file-pill" title="${escapeAttr(file.name)}">
+      <span class="file-pill-icon" aria-hidden="true">${icon}</span>
+      <span class="file-pill-name">${escapeHTML(file.name)}</span>
+      ${pages}<small>${size}</small>
+      <button type="button" class="file-pill-drop" aria-label="Remove ${escapeAttr(file.name)}">&times;</button>
     </div>`;
+    fileInfo.querySelector('.file-pill-drop')?.addEventListener('click', () => {
+      fileInput.value = '';
+      clearBillArea();
+      // So her button goes dormant again and the autofill hint clears.
+      fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+    });
   });
 }
 
-function createFileInfoElement() {
-    const input = document.querySelector('input[name="bill"]');
-    const div = document.createElement('div');
-    div.id = 'fileInfo';
-    input.parentNode.insertBefore(div, input.nextSibling);
-    return div;
-  }
+// createFileInfoElement() built a #fileInfo div next to the bill input. That
+  // element ships in index.html now and the live code reads it directly, so the
+  // builder had no caller and would have produced a duplicate id if it ever got
+  // one.
 
   window.deleteServiceRecord = async function(id, billFileName, btnElement) {
   console.log('🗑️ Deleting service record:', { id, billFileName });
@@ -3302,9 +3957,15 @@ function createFileInfoElement() {
       return {
         ok: true,
         total: history.length,
+        // The place, the level and the note are given to her too. A rider asking
+        // "where did I leave it at the mall?" is asking about the label he typed,
+        // not the coordinates, and she could not see it before.
         parked: history.map(p => ({
           when: new Date(p.at).toISOString(), address: p.address || null,
           lat: p.lat, lng: p.lng, accuracyM: p.accuracy || null,
+          place: p.label || null, level: p.level || null, note: p.notes || null,
+          hasPhoto: !!p.photo,
+          moveBy: p.until ? new Date(p.until).toISOString() : null,
         })),
       };
     },
@@ -3993,13 +4654,16 @@ function createFileInfoElement() {
       : (isKnownSection(stored) ? stored : null);
     // Home is already the markup default, so there is nothing to switch to.
     if (!target || target === 'home') return;
-    setActiveSection(target);
+    // 'replace': landing where you left off is not a navigation you can go back from.
+    setActiveSection(target, 'replace');
   }
 
   // Browser back and forward move between sections rather than leaving the page.
   window.addEventListener('hashchange', () => {
     const name = (location.hash || '').replace(/^#/, '');
-    if (isKnownSection(name)) setActiveSection(name);
+    // 'replace', or answering a back press would push a fresh entry and the stack
+    // would never empty — back would appear to do nothing at all.
+    if (isKnownSection(name)) setActiveSection(name, 'replace');
   });
 
   // ── Service worker messaging ────────────────────────────────────────
@@ -4019,7 +4683,10 @@ function createFileInfoElement() {
       return false;
     }
   }
-  window.dkPostToSW = postToSW;
+  // Not exported. window.dkPostToSW was here and had no caller — the worker takes
+  // exactly one message shape and syncNotifDataToSW() below is the thing that
+  // builds it. A public raw-postMessage hook is an invitation to send the worker a
+  // payload it does not merge.
 
   // ── Sync notification-relevant data to service worker for background checks ──
   function syncNotifDataToSW() {
@@ -4112,7 +4779,32 @@ function createFileInfoElement() {
 // LAST PARKED LOCATION
 // ════════════════════════════════════════════════════════════
 (function() {
-  const PARK_MAX = 5;
+  // ── How hard to try for a sharp fix ──
+  //
+  // This was a single getCurrentPosition, and on a phone that is a coin flip: the
+  // first thing the OS hands back is often a cell-tower or wifi estimate good to
+  // ±1500m, which points at the wrong end of the street. enableHighAccuracy asks
+  // for GPS, it does not wait for it.
+  //
+  // So watch instead of ask, keep the best reading, and stop as soon as it is good
+  // enough or the budget runs out. A basement never reaches the target, which is
+  // exactly why the budget exists and why the best-so-far is still saved.
+  const FIX_TARGET_M = 20;      // close enough to walk straight to
+  const FIX_BUDGET_MS = 14000;  // then take the best we have seen
+  const FIX_VAGUE_M = 250;      // above this, say so rather than pretend
+
+  // A time limit is worth warning about before it runs out, not after.
+  const LIMIT_LEAD_MS = 15 * 60000;
+
+  const esc = v => (typeof docsEscapeHtml === 'function'
+    ? docsEscapeHtml(v)
+    : String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])));
+
+  // Which spot the detail pane is showing, as a parked-at epoch. Null means the
+  // list is showing.
+  let openAt = null;
+  let pickedPhoto = null;   // a File chosen but not uploaded yet
+  let walkTimer = null;
 
   // In the cloud: where you left the bike is exactly the thing you want to look up
   // on the phone after saving it on the laptop.
@@ -4125,10 +4817,17 @@ function createFileInfoElement() {
     if (!store) return [];
     return store.parkHistory().map(p => ({
       timestamp: new Date(p.at).toISOString(),
+      at: p.at,
       lat: p.lat,
       lng: p.lng,
       accuracy: p.accuracy,
       address: p.address || undefined,
+      label: p.label || null,
+      level: p.level || null,
+      notes: p.notes || null,
+      photo: p.photo || null,
+      until: p.until || null,
+      remindedAt: p.remindedAt || null,
     }));
   }
 
@@ -4142,10 +4841,11 @@ function createFileInfoElement() {
     cloudStore()?.setParkAddress(timestamp, address);
   }
 
-  /** Forget one spot, by its position in the list. */
-  function dropPark(index) {
-    cloudStore()?.removePark(index);
-  }
+  // dropPark(index) was a one-line pass-through to cloudStore().removePark().
+  // Nothing called it — forgetting a spot goes through the slide dialog in
+  // showSpot() and calls removePark() directly — and a second name for a
+  // destructive operation is exactly the kind of thing that gets wired to the
+  // wrong button.
 
   function timeAgo(iso) {
     const diff = Date.now() - new Date(iso).getTime();
@@ -4156,12 +4856,133 @@ function createFileInfoElement() {
     return `${d}d ago`;
   }
 
+  /** "in 25m" / "in 3h 10m" / "12m ago". Signed, because both directions matter. */
+  function untilText(ms) {
+    const diff = Number(ms) - Date.now();
+    const mins = Math.round(Math.abs(diff) / 60000);
+    const h = Math.floor(mins / 60);
+    const body = h ? `${h}h${mins % 60 ? ` ${mins % 60}m` : ''}` : `${mins}m`;
+    if (diff <= 0) return `${body} over`;
+    return `in ${body}`;
+  }
+
+  function niceDistance(m) {
+    if (!Number.isFinite(m)) return null;
+    if (m < 1000) return `${Math.round(m / 5) * 5} m`;
+    return `${(m / 1000).toFixed(m < 10000 ? 1 : 0)} km`;
+  }
+
+  /** Straight-line metres. Walking distance is longer; this is the honest floor. */
+  function metresBetween(a, b) {
+    const R = 6371000;
+    const rad = d => d * Math.PI / 180;
+    const dLat = rad(b.lat - a.lat);
+    const dLng = rad(b.lng - a.lng);
+    const h = Math.sin(dLat / 2) ** 2
+      + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+  }
+
+  function compassFrom(a, b) {
+    const rad = d => d * Math.PI / 180;
+    const dLng = rad(b.lng - a.lng);
+    const y = Math.sin(dLng) * Math.cos(rad(b.lat));
+    const x = Math.cos(rad(a.lat)) * Math.sin(rad(b.lat))
+      - Math.sin(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.cos(dLng);
+    const deg = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+    return ['north', 'north-east', 'east', 'south-east',
+      'south', 'south-west', 'west', 'north-west'][Math.round(deg / 45) % 8];
+  }
+
+  const mapsLink = s => `https://www.google.com/maps?q=${s.lat},${s.lng}`;
+  const walkLink = s => 'https://www.google.com/maps/dir/?api=1&destination='
+    + `${s.lat},${s.lng}&travelmode=walking`;
+
+  /**
+   * Watch for a position and keep the sharpest one.
+   *
+   * Resolves with the best fix seen, plus whether it ever got under the target, so
+   * the caller can say "±8m" or "±600m, best it could manage" instead of implying
+   * both are the same thing.
+   */
+  function bestFix({ targetM = FIX_TARGET_M, budgetMs = FIX_BUDGET_MS, onProgress } = {}) {
+    return new Promise(resolve => {
+      if (!navigator.geolocation) {
+        resolve({ ok: false, error: 'This device has no location access.' });
+        return;
+      }
+      let best = null;
+      let watch = null;
+      let done = false;
+
+      const finish = (extra = {}) => {
+        if (done) return;
+        done = true;
+        if (watch !== null) navigator.geolocation.clearWatch(watch);
+        clearTimeout(timer);
+        if (best) resolve({ ok: true, coords: best, sharp: best.accuracy <= targetM, ...extra });
+        else resolve({ ok: false, error: extra.error || 'Could not get a location.' });
+      };
+
+      const timer = setTimeout(() => finish(), budgetMs);
+
+      watch = navigator.geolocation.watchPosition(
+        pos => {
+          const { latitude: lat, longitude: lng, accuracy } = pos.coords;
+          const acc = Number.isFinite(accuracy) ? Math.round(accuracy) : 9999;
+          // Only ever replace with something better, so a good first fix is not
+          // thrown away by a worse second one.
+          if (!best || acc < best.accuracy) best = { lat, lng, accuracy: acc };
+          if (onProgress) onProgress(best);
+          if (best.accuracy <= targetM) finish();
+        },
+        err => {
+          const msgs = {
+            1: 'Location permission is denied.',
+            2: 'Location is unavailable right now.',
+            3: 'The location request timed out.',
+          };
+          // A late error after a usable fix is not a failure — keep what we have.
+          if (best) finish();
+          else finish({ error: msgs[err.code] || 'Could not get a location.' });
+        },
+        { enableHighAccuracy: true, timeout: budgetMs, maximumAge: 0 }
+      );
+    });
+  }
+
+  /** One quick fix, for "how far away am I", where ±50m is fine. */
+  function quickFix() {
+    return new Promise(resolve => {
+      if (!navigator.geolocation) { resolve(null); return; }
+      navigator.geolocation.getCurrentPosition(
+        pos => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        () => resolve(null),
+        { enableHighAccuracy: false, timeout: 8000, maximumAge: 30000 }
+      );
+    });
+  }
+
+  // Nominatim asks for one request per second and no hammering. The same spot gets
+  // looked up again every time a pane opens, so the answer is kept.
+  const geoCache = new Map();
+  let lastGeocodeAt = 0;
+
   async function reverseGeocode(lat, lng) {
+    const key = `${Number(lat).toFixed(4)},${Number(lng).toFixed(4)}`;
+    if (geoCache.has(key)) return geoCache.get(key);
+
+    // Their usage policy is one call a second. Nothing here needs to be faster.
+    const wait = 1100 - (Date.now() - lastGeocodeAt);
+    if (wait > 0) await new Promise(r => setTimeout(r, wait));
+    lastGeocodeAt = Date.now();
+
     try {
       const r = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
+        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&zoom=18`,
         { headers: { 'Accept-Language': 'en' } }
       );
+      if (!r.ok) return null;
       const data = await r.json();
       const a = data.address || {};
       const parts = [
@@ -4169,7 +4990,11 @@ function createFileInfoElement() {
         a.suburb || a.neighbourhood || a.quarter,
         a.city || a.town || a.village
       ].filter(Boolean);
-      return parts.slice(0, 2).join(', ') || data.display_name?.split(',').slice(0, 2).join(',').trim() || null;
+      const out = parts.slice(0, 2).join(', ')
+        || data.display_name?.split(',').slice(0, 2).join(',').trim()
+        || null;
+      geoCache.set(key, out);
+      return out;
     } catch { return null; }
   }
 
@@ -4177,12 +5002,21 @@ function createFileInfoElement() {
     const history = getParkHistory();
     const latest  = history[0];
     const mobileEl= document.getElementById('parkValueMobile');
+    const footEl  = document.getElementById('parkFootMobile');
 
     if (latest) {
-      const ago = timeAgo(latest.timestamp);
-      if (mobileEl) mobileEl.textContent = ago;
+      if (mobileEl) mobileEl.textContent = timeAgo(latest.timestamp);
+      if (footEl) {
+        // The foot line carries whichever of these is the most useful, in that
+        // order: a running time limit beats a place name beats the old static hint.
+        if (latest.until) footEl.textContent = `Move it ${untilText(latest.until)}`;
+        else if (latest.label) footEl.textContent = latest.level
+          ? `${latest.label} · ${latest.level}` : latest.label;
+        else footEl.textContent = 'Hold for history';
+      }
     } else {
       if (mobileEl) mobileEl.textContent = 'Tap to save';
+      if (footEl) footEl.textContent = 'Hold for history';
     }
   }
 
@@ -4206,74 +5040,175 @@ function createFileInfoElement() {
     if (type !== 'loading') setTimeout(() => { popup.classList.remove('show'); }, 2200);
   }
 
-  async function saveCurrentParkLocation() {
-    if (!navigator.geolocation) { showAppPopup('error', 'Geolocation not supported.'); return; }
-    showAppPopup('loading', 'Getting accurate location…');
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const { latitude: lat, longitude: lng, accuracy } = pos.coords;
-        const entry = { lat, lng, accuracy: Math.round(accuracy), timestamp: new Date().toISOString(), address: null };
-        // One row. The store keeps the list trimmed, in the cloud as well as here.
-        savePark(entry);
-        updateParkUI();
-        showAppPopup('success', `Saved! ±${Math.round(accuracy)}m`);
-        // The timestamp is what starts the reminder clock, so hand it over.
-        if (window.triggerParkingNotif) window.triggerParkingNotif(entry.timestamp);
-        const addr = await reverseGeocode(lat, lng);
-        // Only if it is still the newest — he may have parked again while the
-        // geocoder was thinking.
-        if (addr && getParkHistory()[0]?.timestamp === entry.timestamp) {
-          saveParkAddress(entry.timestamp, addr);
-          updateParkUI();
-        }
-      },
-      (err) => {
-        const msgs = { 1: 'Location permission denied.', 2: 'Location unavailable.', 3: 'Request timed out.' };
-        showAppPopup('error', msgs[err.code] || 'Could not get location.');
-      },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+  /**
+   * Mirror the newest spot into the reminder scheduler.
+   *
+   * Two things now: the parked-at time, which drives the "still parked" nudge, and
+   * the time limit, which drives the one that actually matters. Both have to live in
+   * the scheduler's own store rather than here, because the service worker sends
+   * them while the app is shut.
+   */
+  function syncParkSession() {
+    if (!window.sageSyncParkSession) return;
+    const latest = getParkHistory()[0];
+    window.sageSyncParkSession(
+      latest ? latest.timestamp : null,
+      latest && latest.until ? latest.until : null
     );
   }
 
-  function renderParkHistory() {
-    const modal   = document.getElementById('parkHistoryModal');
-    const list    = document.getElementById('parkHistoryList');
-    const history = getParkHistory();
-    if (!modal || !list) return;
+  /**
+   * Save where the bike is, reporting every step.
+   *
+   * The old version popped "Getting accurate location…" and then either a tick or
+   * an error, which meant a 14-second wait looked identical to a hang. The accuracy
+   * it is currently holding is shown while it narrows down, because that is the one
+   * number that tells you whether to keep waiting.
+   */
+  async function captureSpot() {
+    const hint = document.getElementById('parkSaveNowHint');
+    const btn = document.getElementById('parkSaveNow');
+    const say = text => { if (hint) hint.textContent = text; };
 
-    list.innerHTML = history.length ? history.map((e, i) => {
-      const display = e.address || `${parseFloat(e.lat).toFixed(5)}, ${parseFloat(e.lng).toFixed(5)}`;
-      const maps    = `https://www.google.com/maps?q=${e.lat},${e.lng}`;
-      const date    = new Date(e.timestamp).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
-      const acc     = e.accuracy ? ` · ±${e.accuracy}m` : '';
-      return `<div class="park-history-item">
-        <span class="park-history-dot"></span>
-        <div class="park-history-info">
-          <span class="park-history-addr">${display}</span>
-          <span class="park-history-time">${date}${acc} · ${timeAgo(e.timestamp)}</span>
-        </div>
-        <div class="park-history-btns">
-          <a href="${maps}" target="_blank" rel="noopener" class="park-map-btn" title="Open in Maps"><i class="fas fa-map-location-dot"></i></a>
-          <button type="button" class="park-del-btn" data-idx="${i}" title="Delete"><i class="fas fa-trash"></i></button>
-        </div>
-      </div>`;
-    }).join('') : `<div class="park-history-empty"><i class="fas fa-location-dot"></i><p>No saved locations yet.<br>Tap to save your parking spot.</p></div>`;
+    if (!navigator.geolocation) {
+      showAppPopup('error', 'This device has no location access.');
+      say('This device has no location access.');
+      return { ok: false, error: 'This device has no location access.' };
+    }
 
-    list.querySelectorAll('.park-del-btn').forEach(btn => btn.addEventListener('click', async () => {
-      await dropPark(parseInt(btn.dataset.idx, 10));
+    if (btn) btn.disabled = true;
+    showAppPopup('loading', 'Finding you…');
+    say('Finding you…');
+
+    const fix = await bestFix({
+      onProgress: b => say(`Narrowing down — ±${b.accuracy}m so far`),
+    });
+
+    if (btn) btn.disabled = false;
+    if (!fix.ok) {
+      showAppPopup('error', fix.error);
+      say(fix.error);
+      return { ok: false, error: fix.error };
+    }
+
+    const { lat, lng, accuracy } = fix.coords;
+    const entry = {
+      lat, lng, accuracy,
+      timestamp: new Date().toISOString(),
+      address: null,
+    };
+    // One row. The store keeps the list trimmed, in the cloud as well as here.
+    savePark(entry);
+    updateParkUI();
+
+    // Naming a vague fix beats a tick that implies precision it does not have.
+    const vague = accuracy > FIX_VAGUE_M;
+    showAppPopup(vague ? 'error' : 'success',
+      vague ? `Saved, but only ±${accuracy}m — add a note or a photo`
+        : `Saved · ±${accuracy}m`);
+    say(vague
+      ? `Saved at ±${accuracy}m. Indoors? Add a level or a photo.`
+      : `Saved · ±${accuracy}m${fix.sharp ? '' : ' (best it could manage)'}`);
+
+    // The timestamp is what starts the reminder clock, so hand it over.
+    if (window.triggerParkingNotif) window.triggerParkingNotif(entry.timestamp);
+
+    renderParkList();
+
+    const addr = await reverseGeocode(lat, lng);
+    // Only if it is still the newest — he may have parked again while the geocoder
+    // was thinking.
+    if (addr && getParkHistory()[0]?.timestamp === entry.timestamp) {
+      saveParkAddress(entry.timestamp, addr);
       updateParkUI();
-      renderParkHistory();
-      // Reminders follow the newest entry, so deleting it ends the session.
-      const left = getParkHistory();
-      if (window.sageSyncParkSession) window.sageSyncParkSession(left[0]?.timestamp || null);
-    }));
+      renderParkList();
+    }
+    return { ok: true, saved: { ...entry, address: addr || null }, sharp: fix.sharp };
+  }
+
+  // ══ The sheet ══════════════════════════════════════════════════════════
+
+  const $ = id => document.getElementById(id);
+
+  function openSheet() {
+    const modal = $('parkHistoryModal');
+    if (!modal) return;
+    showList();
     modal.setAttribute('aria-hidden', 'false');
     modal.classList.add('sl-modal--open');
   }
 
   function closeParkModal() {
-    const m = document.getElementById('parkHistoryModal');
-    m?.classList.remove('sl-modal--open'); m?.setAttribute('aria-hidden', 'true');
+    const m = $('parkHistoryModal');
+    m?.classList.remove('sl-modal--open');
+    m?.setAttribute('aria-hidden', 'true');
+    clearInterval(walkTimer);
+    walkTimer = null;
+    openAt = null;
+  }
+
+  function showList() {
+    openAt = null;
+    pickedPhoto = null;
+    clearInterval(walkTimer);
+    walkTimer = null;
+    $('parkListPane')?.removeAttribute('hidden');
+    $('parkEditPane')?.setAttribute('hidden', '');
+    $('parkBack')?.setAttribute('hidden', '');
+    const label = $('parkSheetLabel');
+    if (label) label.textContent = 'Parking';
+    const note = $('parkMigrateNote');
+    // Only worth saying while it is true, and only once the store has looked.
+    const store = cloudStore();
+    if (note) {
+      if (store && store.isReady() && store.parkLegacy && store.parkLegacy()) {
+        note.removeAttribute('hidden');
+      } else {
+        note.setAttribute('hidden', '');
+      }
+    }
+    renderParkList();
+  }
+
+  function renderParkList() {
+    const list = $('parkHistoryList');
+    if (!list) return;
+    const history = getParkHistory();
+
+    list.innerHTML = history.length ? history.map((e, i) => {
+      // Place and level are what a person actually reads first; the street address
+      // is the fallback and the raw coordinates are the fallback's fallback.
+      const head = e.label
+        || e.address
+        || `${Number(e.lat).toFixed(5)}, ${Number(e.lng).toFixed(5)}`;
+      const sub = [
+        new Date(e.timestamp).toLocaleString('en-IN',
+          { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }),
+        e.accuracy ? `±${e.accuracy}m` : null,
+        timeAgo(e.timestamp),
+      ].filter(Boolean).join(' · ');
+      const chips = [
+        e.level ? `<span class="park-tag">${esc(e.level)}</span>` : '',
+        e.photo ? '<span class="park-tag park-tag--ico"><i class="fas fa-camera" aria-hidden="true"></i></span>' : '',
+        e.notes ? '<span class="park-tag park-tag--ico"><i class="fas fa-note-sticky" aria-hidden="true"></i></span>' : '',
+        e.until ? `<span class="park-tag ${Number(e.until) - Date.now() <= LIMIT_LEAD_MS
+          ? 'park-tag--hot' : 'park-tag--warn'}">${esc(untilText(e.until))}</span>` : '',
+      ].join('');
+
+      return `<button type="button" class="park-history-item" data-at="${e.at}">
+        <span class="park-history-dot${i === 0 ? ' park-history-dot--live' : ''}"></span>
+        <span class="park-history-info">
+          <span class="park-history-addr">${esc(head)}</span>
+          <span class="park-history-time">${esc(sub)}</span>
+          ${chips ? `<span class="park-tags">${chips}</span>` : ''}
+        </span>
+        <span class="park-history-go"><i class="fas fa-chevron-right" aria-hidden="true"></i></span>
+      </button>`;
+    }).join('') : '<div class="park-history-empty"><i class="fas fa-location-dot" aria-hidden="true"></i>'
+      + '<p>Nothing saved yet.<br>Save this spot and it shows up here on every device.</p></div>';
+
+    list.querySelectorAll('.park-history-item').forEach(row =>
+      row.addEventListener('click', () => showSpot(Number(row.dataset.at))));
   }
 
   function makeLongPress(el, onTap, onLong, ms = 650) {
@@ -4286,38 +5221,261 @@ function createFileInfoElement() {
     el.addEventListener('pointermove',  (e) => { if (timer && (Math.abs(e.clientX - startX) > MOVE_THRESHOLD || Math.abs(e.clientY - startY) > MOVE_THRESHOLD)) cancel(); });
   }
 
+  // ══ One spot ═══════════════════════════════════════════════════════════
+
+  /** datetime-local wants local wall-clock, not an ISO string in UTC. */
+  function toLocalInput(ms) {
+    const d = new Date(Number(ms));
+    if (Number.isNaN(d.getTime())) return '';
+    const p = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+      + `T${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+
+  function spotBy(at) {
+    return getParkHistory().find(s => s.at === Number(at)) || null;
+  }
+
+  function setStatus(text, kind) {
+    const el = $('parkEditStatus');
+    if (!el) return;
+    el.textContent = text || '';
+    el.className = 'park-edit-status'
+      + (kind ? ` park-edit-status--${kind}` : '');
+  }
+
+  function showSpot(at) {
+    const spot = spotBy(at);
+    if (!spot) { showList(); return; }
+    openAt = spot.at;
+    pickedPhoto = null;
+
+    $('parkListPane')?.setAttribute('hidden', '');
+    $('parkEditPane')?.removeAttribute('hidden');
+    $('parkBack')?.removeAttribute('hidden');
+    const label = $('parkSheetLabel');
+    if (label) label.textContent = spot.label || 'This spot';
+
+    const meta = $('parkEditMeta');
+    if (meta) {
+      const bits = [
+        new Date(spot.timestamp).toLocaleString('en-IN',
+          { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }),
+        spot.accuracy ? `±${spot.accuracy}m` : null,
+        spot.address || null,
+      ].filter(Boolean);
+      meta.textContent = bits.join(' · ');
+    }
+
+    const go = $('parkWalkGo');
+    const map = $('parkWalkMap');
+    if (go) go.href = walkLink(spot);
+    if (map) map.href = mapsLink(spot);
+
+    const fLabel = $('parkFieldLabel');
+    const fLevel = $('parkFieldLevel');
+    const fNotes = $('parkFieldNotes');
+    const fUntil = $('parkFieldUntil');
+    if (fLabel) fLabel.value = spot.label || '';
+    if (fLevel) fLevel.value = spot.level || '';
+    if (fNotes) fNotes.value = spot.notes || '';
+    if (fUntil) fUntil.value = spot.until ? toLocalInput(spot.until) : '';
+    readLimit();
+    setStatus('');
+    showPhoto(spot.photo);
+
+    // Distance is only meaningful while the pane is open, so it is polled here and
+    // the interval is cleared on both exits.
+    refreshWalk();
+    clearInterval(walkTimer);
+    walkTimer = setInterval(refreshWalk, 20000);
+  }
+
+  /**
+   * How far away the bike is, in words.
+   *
+   * Written as a stat rather than a sentence, and with no full stop, because this
+   * line renders in Blender Pro Heavy — a CAPS-ONLY cut. "You are right about here."
+   * comes out as a shout with a stray dot on the end; "20 M AWAY" does not.
+   */
+  async function refreshWalk() {
+    const spot = openAt ? spotBy(openAt) : null;
+    const el = $('parkWalkDist');
+    if (!spot || !el) return;
+    const here = await quickFix();
+    if (!here) { el.textContent = 'Distance unavailable'; return; }
+    const m = metresBetween(here, spot);
+    const pretty = niceDistance(m);
+    // Under 30m the bearing is noise — you are standing next to it.
+    el.textContent = m < 30
+      ? `${pretty} away — you are on top of it`
+      : `${pretty} ${compassFrom(here, spot)} of you`;
+  }
+
+  function readLimit() {
+    const input = $('parkFieldUntil');
+    const out = $('parkLimitRead');
+    if (!out) return;
+    const ms = input && input.value ? new Date(input.value).getTime() : NaN;
+    if (!Number.isFinite(ms)) { out.textContent = 'No limit set.'; return; }
+    out.textContent = ms <= Date.now()
+      ? `That is already ${untilText(ms)}.`
+      : `She will warn you about 15 minutes before — ${untilText(ms)}.`;
+  }
+
+  let photoObjectUrl = null;
+
+  /**
+   * Show the photo, or show nothing.
+   *
+   * The thumbnail stays hidden until the image has actually LOADED, rather than
+   * being revealed the moment a path exists. It was the other way round and the
+   * failure was ugly and reachable: a signed URL that does not come back — offline,
+   * expired, file deleted from the bucket by hand — left a broken-image glyph sitting
+   * on top of its own alt text. There is no useful half-state here, so there is no
+   * visible half-state.
+   */
+  function showPhoto(path) {
+    const view = $('parkPhotoView');
+    const img = $('parkPhotoImg');
+    const drop = $('parkPhotoDrop');
+    const text = $('parkPhotoBtnText');
+    const has = !!(path || pickedPhoto);
+    if (text) text.textContent = has ? 'Replace photo' : 'Add a photo';
+    if (drop) {
+      if (has) drop.removeAttribute('hidden');
+      else drop.setAttribute('hidden', '');
+    }
+    if (!view || !img) return;
+
+    // Hidden first, always. Whatever is about to happen, the old picture is not it.
+    view.setAttribute('hidden', '');
+    view.removeAttribute('href');
+    img.removeAttribute('src');
+    if (photoObjectUrl) { URL.revokeObjectURL(photoObjectUrl); photoObjectUrl = null; }
+
+    img.onload = () => view.removeAttribute('hidden');
+    img.onerror = () => view.setAttribute('hidden', '');
+
+    if (pickedPhoto) {
+      // From the file itself, before any upload, so choosing one is acknowledged
+      // rather than silent.
+      photoObjectUrl = URL.createObjectURL(pickedPhoto);
+      img.src = photoObjectUrl;
+      return;
+    }
+    if (!path) return;
+    // A private bucket, so the src is a signed URL that has to be fetched first.
+    if (typeof getSignedUrl !== 'function') return;
+    getSignedUrl(path).then(url => {
+      if (!url) return;
+      img.src = url;
+      view.href = url;
+    }).catch(() => {});
+  }
+
+  /**
+   * Put the photo in the documents bucket.
+   *
+   * Which is not where you would guess, and the reason is that the anon key cannot
+   * create a bucket — a new one means another manual dashboard step on top of the
+   * SQL file. vehicle-documents is already private, already has upload, remove and
+   * createSignedUrl working, and the documents page lists the vehicle_documents
+   * TABLE rather than the bucket, so a file with no row is invisible to it. The
+   * `park-` prefix keeps it obvious what these are.
+   */
+  async function uploadPhoto(file, at) {
+    if (typeof supabase === 'undefined' || !supabase) return { ok: false, error: 'No connection.' };
+    const clean = (file.name || 'photo.jpg').replace(/[^a-zA-Z0-9.\-_]/g, '_');
+    const name = `park-${at}-${clean}`;
+    const { error } = await supabase.storage.from('vehicle-documents')
+      .upload(name, file, { contentType: file.type || 'image/jpeg', cacheControl: '3600', upsert: true });
+    if (error) return { ok: false, error: error.message };
+    return { ok: true, path: name };
+  }
+
+  async function saveSpot(event) {
+    if (event) event.preventDefault();
+    const store = cloudStore();
+    const spot = openAt ? spotBy(openAt) : null;
+    if (!store || !spot) { setStatus('That spot is no longer here.', 'bad'); return; }
+
+    const btn = $('parkEditSave');
+    if (btn) btn.disabled = true;
+
+    const patch = {
+      label: $('parkFieldLabel')?.value || null,
+      level: $('parkFieldLevel')?.value || null,
+      notes: $('parkFieldNotes')?.value || null,
+    };
+    const rawUntil = $('parkFieldUntil')?.value || '';
+    const untilMs = rawUntil ? new Date(rawUntil).getTime() : null;
+    patch.until = Number.isFinite(untilMs) ? untilMs : null;
+
+    // The photo is the only part that can fail on its own, so it is reported on its
+    // own rather than folded into one "saved" or "failed".
+    if (pickedPhoto) {
+      setStatus('Uploading the photo…');
+      const up = await uploadPhoto(pickedPhoto, spot.at);
+      if (!up.ok) {
+        setStatus(`The photo did not upload (${up.error}). Nothing else was saved.`, 'bad');
+        if (btn) btn.disabled = false;
+        return;
+      }
+      patch.photo = up.path;
+      // A replaced photo leaves the old file behind otherwise.
+      if (spot.photo && spot.photo !== up.path) {
+        supabase.storage.from('vehicle-documents').remove([spot.photo]).catch(() => {});
+      }
+      pickedPhoto = null;
+    }
+
+    setStatus('Saving…');
+    const ok = store.updatePark(spot.at, patch);
+    if (btn) btn.disabled = false;
+    if (!ok) { setStatus('That spot is no longer here.', 'bad'); return; }
+
+    // The scheduler carries ONE park session, pointed at the newest spot, because
+    // that is where the bike actually is. A limit set on an older spot is stored but
+    // will never fire, and saying nothing about that is exactly the silent no-op
+    // this pane is meant to avoid.
+    const isNewest = getParkHistory()[0]?.at === spot.at;
+    if (!patch.until) setStatus('Saved.', 'good');
+    else if (isNewest) {
+      setStatus(`Saved. She will warn you ${untilText(patch.until - LIMIT_LEAD_MS)}.`, 'good');
+    } else {
+      setStatus('Saved, but the reminder only follows the spot you parked at last — '
+        + 'this one will not alert you.', 'bad');
+    }
+    updateParkUI();
+    renderParkList();
+    syncParkSession();
+    const label = $('parkSheetLabel');
+    if (label) label.textContent = patch.label || 'This spot';
+    showPhoto(patch.photo || spot.photo);
+  }
+
+  async function forgetSpot() {
+    const store = cloudStore();
+    const spot = openAt ? spotBy(openAt) : null;
+    if (!store || !spot) { showList(); return; }
+    setStatus('Forgetting it…');
+    const removed = await store.removeParkAt(spot.at);
+    if (!removed) { setStatus('That could not be removed.', 'bad'); return; }
+    if (spot.photo) {
+      supabase?.storage.from('vehicle-documents').remove([spot.photo]).catch(() => {});
+    }
+    updateParkUI();
+    syncParkSession();
+    showList();
+  }
+
   /**
    * Save the current spot and resolve with what happened, so Sage can report a
-   * real outcome instead of assuming it worked. The tap-driven path above stays
-   * exactly as it was.
+   * real outcome instead of assuming it worked.
    */
   window.dkSaveParkLocation = function() {
-    return new Promise(resolve => {
-      if (!navigator.geolocation) { resolve({ ok: false, error: 'This device has no location access.' }); return; }
-      showAppPopup('loading', 'Getting accurate location…');
-      navigator.geolocation.getCurrentPosition(
-        async (pos) => {
-          const { latitude: lat, longitude: lng, accuracy } = pos.coords;
-          const entry = { lat, lng, accuracy: Math.round(accuracy), timestamp: new Date().toISOString(), address: null };
-          savePark(entry);
-          updateParkUI();
-          showAppPopup('success', `Saved! ±${Math.round(accuracy)}m`);
-          if (window.triggerParkingNotif) window.triggerParkingNotif(entry.timestamp);
-
-          const address = await reverseGeocode(lat, lng);
-          if (address && getParkHistory()[0]?.timestamp === entry.timestamp) {
-            saveParkAddress(entry.timestamp, address);
-            updateParkUI();
-          }
-          resolve({ ok: true, saved: { ...entry, address: address || null } });
-        },
-        (err) => {
-          const msgs = { 1: 'He has not allowed location access.', 2: 'Location is unavailable right now.', 3: 'The location request timed out.' };
-          resolve({ ok: false, error: msgs[err.code] || 'Could not get a location.' });
-        },
-        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-      );
-    });
+    return captureSpot();
   };
 
   // So a park entry removed through the chat repaints the home card too.
@@ -4328,13 +5486,71 @@ function createFileInfoElement() {
     // Re-point the reminder session at the newest entry on every open, so a
     // cleared IndexedDB or a fresh install picks the session back up. Idempotent:
     // the same timestamp does not restart the 2-hour clock.
-    if (window.sageSyncParkSession) {
-      window.sageSyncParkSession(getParkHistory()[0]?.timestamp || null);
-    }
-    const mobileCard = document.getElementById('parkCardMobile');
-    if (mobileCard) makeLongPress(mobileCard, saveCurrentParkLocation, renderParkHistory);
-    document.getElementById('parkHistoryClose')?.addEventListener('click', closeParkModal);
-    document.getElementById('parkHistoryModal')?.addEventListener('click', e => { if (e.target === e.currentTarget) closeParkModal(); });
+    syncParkSession();
+
+    const mobileCard = $('parkCardMobile');
+    if (mobileCard) makeLongPress(mobileCard, captureSpot, openSheet);
+
+    $('parkHistoryClose')?.addEventListener('click', closeParkModal);
+    $('parkHistoryModal')?.addEventListener('click', e => {
+      if (e.target === e.currentTarget) closeParkModal();
+    });
+    $('parkBack')?.addEventListener('click', showList);
+    $('parkSaveNow')?.addEventListener('click', async () => {
+      await captureSpot();
+      // Straight into the details of what was just saved: a spot is most worth
+      // labelling in the ten seconds after you park.
+      const latest = getParkHistory()[0];
+      if (latest) showSpot(latest.at);
+    });
+
+    $('parkEditPane')?.addEventListener('submit', saveSpot);
+    $('parkEditDelete')?.addEventListener('click', forgetSpot);
+    $('parkFieldUntil')?.addEventListener('change', readLimit);
+
+    $('parkLimitChips')?.addEventListener('click', e => {
+      const chip = e.target.closest('.park-chip');
+      if (!chip) return;
+      const mins = Number(chip.dataset.mins);
+      const input = $('parkFieldUntil');
+      if (!input) return;
+      // Measured from now rather than from when it was parked: you set a limit when
+      // you read the sign, which is after you parked.
+      input.value = mins > 0 ? toLocalInput(Date.now() + mins * 60000) : '';
+      readLimit();
+    });
+
+    $('parkPhotoPick')?.addEventListener('click', () => $('parkPhotoInput')?.click());
+    $('parkPhotoInput')?.addEventListener('change', e => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      if (!/^image\//.test(file.type)) { setStatus('That is not an image.', 'bad'); return; }
+      pickedPhoto = file;
+      showPhoto(null);
+      setStatus('Photo ready — it uploads when you save.');
+      e.target.value = '';
+    });
+    $('parkPhotoDrop')?.addEventListener('click', () => {
+      const spot = openAt ? spotBy(openAt) : null;
+      pickedPhoto = null;
+      if (spot && spot.photo) {
+        // Cleared here and removed from storage on save, so a cancelled edit does
+        // not destroy the file.
+        cloudStore()?.updatePark(spot.at, { photo: null });
+        supabase?.storage.from('vehicle-documents').remove([spot.photo]).catch(() => {});
+      }
+      showPhoto(null);
+      setStatus('Photo removed.');
+      renderParkList();
+    });
+
+    // The sheet is a dialog; Escape should shut it, and the back arrow is the only
+    // other way out of the detail pane.
+    document.addEventListener('keydown', e => {
+      if (e.key !== 'Escape') return;
+      if (!$('parkHistoryModal')?.classList.contains('sl-modal--open')) return;
+      if (openAt) showList(); else closeParkModal();
+    });
   };
 })();
 
@@ -4519,7 +5735,7 @@ window.setupCoverDateEditing = function() {
     editTarget = { statusEl, label };
     // calendar-days, not calendar-pen: the pen variant is Font Awesome Pro, so
     // it was rendering as an empty box every time this modal opened.
-    if (titleEl) titleEl.innerHTML = `<i class="fas fa-calendar-days"></i> ${label}`;
+    if (titleEl) titleEl.innerHTML = `<i class="fas fa-calendar-days" aria-hidden="true"></i> ${label}`;
     if (input) input.value = statusEl.getAttribute('data-due') || '';
     openModal();
     setTimeout(() => input?.focus({ preventScroll: true }), 60);
@@ -4627,11 +5843,26 @@ window.setupCoverDateEditing = function() {
       if (typeValueEl) typeValueEl.textContent = 'All types';
       fromDate.value = '';
       toDate.value = '';
+      // The visible date text is a separate .date-display span, because the native
+      // date input is hidden on a phone. Clearing .value does not repaint it, so
+      // Clear left "01 Jan 2026" sitting in the FROM field with no filter behind it.
+      // The service page's clear calls updateDateUI() directly; that function lives in
+      // another closure, so dispatch the event it already listens for instead of
+      // exporting it. `change` also re-runs the filter, which is what we want anyway.
+      for (const d of [fromDate, toDate]) {
+        d?.dispatchEvent(new Event('change', { bubbles: true }));
+      }
       typeMenu?.querySelectorAll('.history-select-option').forEach((o, i) => o.setAttribute('aria-selected', i === 0 ? 'true' : 'false'));
       filterDocsTable();
     });
 
-    function filterDocsTable() {
+    /**
+     * @param {boolean} [resetPage] True when the FILTER changed, which has to send you
+     *   back to page one — page three of a four-page list is nowhere once the list is
+     *   two pages long. False when the table was merely re-rendered underneath an
+     *   unchanged filter, where the page you were on is still the page you want.
+     */
+    function filterDocsTable(resetPage = true) {
       const query = search.value.toLowerCase().trim();
       const type = typeFilter?.value || '';
       const from = fromDate?.value || '';
@@ -4639,51 +5870,1146 @@ window.setupCoverDateEditing = function() {
       const rows = table.querySelectorAll('tr');
 
       rows.forEach(row => {
-        const cells = row.querySelectorAll('td');
-        if (!cells.length) return;
-        const fileName = cells[0]?.textContent?.trim()?.toLowerCase() || '';
-        const notes = cells[1]?.textContent?.trim()?.toLowerCase() || '';
+        // The "Loading…" / "No uploads yet" placeholder is one cell with a colspan
+        // and no data to match, so it is not a candidate for filtering.
+        if (row.classList.contains('docs-history-note')) return;
+        // BY data-label, NOT BY INDEX.
+        //
+        // This read cells[0] for the filename and cells[1] for the note. Then Preview
+        // and Size became columns two and three, so cells[1] was an eye button with no
+        // text in it and searching for anything written in a note matched nothing —
+        // searching filenames still worked, which is what made it look like the box was
+        // only half broken. Verified headless: "milestone" and "cornering" both
+        // returned zero rows while "whatsapp" returned one.
+        //
+        // Every cell carries a data-label because the phone layout prints it as a
+        // caption. Querying that instead of counting positions means the next column
+        // added here cannot break the search again.
+        const fileCell = row.querySelector('td[data-label="File"]');
+        const notesCell = row.querySelector('td[data-label="Notes"]');
+        if (!fileCell) return;
+        const fileName = fileCell.textContent?.trim()?.toLowerCase() || '';
+        const notes = notesCell?.textContent?.trim()?.toLowerCase() || '';
         const text = fileName + ' ' + notes;
 
         let show = true;
         if (query && !text.includes(query)) show = false;
 
         if (type) {
-          const metaText = cells[0]?.querySelector('.docs-file-meta span:last-child')?.textContent?.toLowerCase() || '';
-          let mediaType = '';
-          if (metaText.includes('image')) mediaType = 'image';
-          else if (metaText.includes('audio')) mediaType = 'audio';
-          else if (metaText.includes('video')) mediaType = 'video';
+          // data-kind on the row, written by loadHistoricUploads() from the column the
+          // database actually stores.
+          //
+          // This used to sniff the word out of the grey "video · 1.6 MB" line, which
+          // worked only because that line happened to contain the media type — the fall-
+          // back below is that same read, kept for a tbody seeded by hand. The string in
+          // the dataset cannot be out of step with the badge in the TYPE column, because
+          // both are rendered from the one field.
+          let mediaType = row.dataset.kind || '';
+          if (!mediaType) {
+            const metaText = fileCell.querySelector('.docs-file-meta span:last-child')?.textContent?.toLowerCase() || '';
+            if (metaText.includes('image')) mediaType = 'image';
+            else if (metaText.includes('audio')) mediaType = 'audio';
+            else if (metaText.includes('video')) mediaType = 'video';
+          }
           if (mediaType !== type) show = false;
         }
 
         if (from || to) {
-          const dateEl = cells[3]?.querySelector('.docs-date-cell span');
-          const dateText = dateEl?.textContent?.trim() || '';
-          const parsed = new Date(dateText);
-          if (!isNaN(parsed.getTime())) {
-            // Local, not toISOString(): the text was parsed as a local date, and
-            // converting it to UTC here shifted rows a day out of the filter.
-            const rowDate = `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}`;
+          // data-day is the upload's LOCAL calendar day, already in the same
+          // YYYY-MM-DD shape the two date inputs hand over, so this is a string
+          // compare and nothing has to be parsed.
+          //
+          // It was read out of the rendered date text, which is a contract between the
+          // filter and a cell's formatting — and that cell now holds two lines, a day
+          // and a time. The text read is still the fallback for a tbody seeded by hand.
+          let rowDate = row.dataset.day || '';
+          if (!rowDate) {
+            const dateText = row.querySelector('td[data-label="Uploaded"] .docs-date-cell span')?.textContent?.trim() || '';
+            const parsed = new Date(dateText);
+            if (!isNaN(parsed.getTime())) {
+              // Local, not toISOString(): the text was parsed as a local date, and
+              // converting it to UTC here shifted rows a day out of the filter.
+              rowDate = `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}`;
+            }
+          }
+          if (rowDate) {
             if (from && rowDate < from) show = false;
             if (to && rowDate > to) show = false;
           }
         }
 
-        row.style.display = show ? '' : 'none';
+        // A CLASS, not an inline display.
+        //
+        // This was `row.style.display = 'none'`, and on a phone the row is styled
+        // `display: grid !important` — an author !important declaration BEATS an
+        // inline one, so the filter would have quietly stopped hiding anything as
+        // soon as the mobile card layout landed. A class the stylesheet can also
+        // mark !important is the only version that works at both widths, and it
+        // gives the media player a way to ask which rows are actually showing.
+        row.classList.toggle('is-filtered-out', !show);
       });
+      // The pager decides which of the surviving rows are on screen, so it has to run
+      // AFTER the filter and BEFORE the player re-collects its slides — otherwise the
+      // carousel holds rows that are not currently drawn.
+      window.dkDocsPager?.refresh({ keepPage: !resetPage });
+      window.dkDocsFilterChanged?.();
     }
 
+    // Reachable from loadHistoricUploads(), which rebuilds the tbody and so drops every
+    // is-filtered-out the user's filter had put there.
+    window.dkDocsFilterApply = () => filterDocsTable(false);
+
     let docsFilterTimer;
-    search.addEventListener('input', () => { clearTimeout(docsFilterTimer); docsFilterTimer = setTimeout(filterDocsTable, 150); });
-    fromDate?.addEventListener('change', filterDocsTable);
-    toDate?.addEventListener('change', filterDocsTable);
+    search.addEventListener('input', () => { clearTimeout(docsFilterTimer); docsFilterTimer = setTimeout(() => filterDocsTable(true), 150); });
+    fromDate?.addEventListener('change', () => filterDocsTable(true));
+    toDate?.addEventListener('change', () => filterDocsTable(true));
   }
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', setupDocsFilters);
   } else {
     setupDocsFilters();
+  }
+})();
+
+// ════════════════════════════════════════════════════════════════════════
+// RECORD HISTORY (DOCUMENTS) — PAGING, SORTING AND THUMBNAILS
+//
+// Three jobs that all turn on the same question — which rows are on screen right now
+// — so they live together and run in a fixed order: sort moves rows, the filter marks
+// the ones that do not count, the pager hides everything outside the current page, and
+// only then is there a set of rows small enough to be worth fetching pictures for.
+//
+// PAGING BY CLASS, NOT BY REMOVING ROWS. The tbody is the state here: the filter reads
+// it, the player pages through it, hold-to-edit reads the note out of it. Rebuilding it
+// per page would mean re-signing URLs and re-running the filter on every click, so a
+// row that is not on this page gets `.is-paged-out` and the same !important display
+// rule that answers `.is-filtered-out` answers this too.
+// ════════════════════════════════════════════════════════════════════════
+(function () {
+  'use strict';
+
+  const TBODY = '#mediaRecordTable tbody';
+
+  function allRows() {
+    return [...document.querySelectorAll(`${TBODY} tr.docs-media-row`)];
+  }
+
+  /** Rows the filter has kept — the list the pager is paging through. */
+  function keptRows() {
+    return allRows().filter(r => !r.classList.contains('is-filtered-out'));
+  }
+
+  // ══ Paging ═════════════════════════════════════════════════════════════
+
+  const pager = window.dkPager({
+    key: 'docsHistory',
+    noun: ['file', 'files'],
+    ids: {
+      root: 'docsHistoryPager',
+      per: 'docsHistoryPerPage',
+      count: 'docsHistoryRange',
+      nav: 'docsHistoryNav',
+      prev: 'docsHistoryPrev',
+      next: 'docsHistoryNext',
+      pages: 'docsHistoryPages',
+    },
+    onChange: () => apply(),
+  });
+
+  function apply() {
+    const kept = keptRows();
+    pager.setTotal(kept.length);
+    const { from, to } = pager.slice();
+    const onPage = new Set(kept.slice(from, to));
+    // Every row, not just the kept ones: a row the filter hid also has to carry
+    // is-paged-out, or it comes back the moment the filter lets it through again.
+    for (const row of allRows()) row.classList.toggle('is-paged-out', !onPage.has(row));
+    pager.paint();
+    // New rows on screen, so new pictures worth fetching.
+    thumbs.scan();
+  }
+
+  window.dkDocsPager = {
+    /**
+     * @param {object} [opts]
+     * @param {boolean} [opts.keepPage] Stay where you are (a reload, or a delete).
+     *   Otherwise go back to page one, which is what a changed filter wants.
+     */
+    refresh(opts = {}) {
+      if (!opts.keepPage) pager.reset();
+      apply();
+    },
+    /** Put the page holding `row` on screen. Returns false if it is not in the table. */
+    reveal(row) {
+      const i = keptRows().indexOf(row);
+      if (i < 0) return false;
+      pager.showIndex(i);
+      apply();
+      return true;
+    },
+  };
+
+  // ══ Sorting ════════════════════════════════════════════════════════════
+  //
+  // UPLOADED is the only sortable column because it is the only one with an order that
+  // means anything — a list of filenames alphabetically is a list nobody asked for.
+  // Supabase hands the rows over newest-first, so 'desc' is where this starts and the
+  // arrow in the header says so from the first paint rather than after the first click.
+
+  let dir = 'desc';
+
+  function applySort() {
+    const tbody = document.querySelector(TBODY);
+    if (!tbody) return;
+    const rows = allRows();
+    if (rows.length < 2) return;
+    // Stable within a single timestamp: two files uploaded in the same second keep the
+    // order the database gave them, so the list does not reshuffle on every sort.
+    const keyed = rows.map((row, i) => ({ row, i, when: Number(row.dataset.when) || 0 }));
+    keyed.sort((a, b) => (dir === 'asc' ? a.when - b.when : b.when - a.when) || (a.i - b.i));
+    // appendChild MOVES a node, so this reorders in place without touching innerHTML —
+    // which matters because the delegated hold handler and the note text live on these
+    // very elements.
+    for (const entry of keyed) tbody.appendChild(entry.row);
+  }
+
+  function paintSortButton() {
+    const btn = document.getElementById('docsHistorySort');
+    if (!btn) return;
+    btn.dataset.dir = dir;
+    const icon = btn.querySelector('i');
+    if (icon) icon.className = `fas fa-arrow-${dir === 'asc' ? 'up' : 'down'}`;
+    btn.title = dir === 'asc' ? 'Sort by upload date, newest first' : 'Sort by upload date, oldest first';
+    btn.closest('th')?.setAttribute('aria-sort', dir === 'asc' ? 'ascending' : 'descending');
+  }
+
+  window.dkDocsSortApply = () => { applySort(); paintSortButton(); };
+
+  function setupSort() {
+    const btn = document.getElementById('docsHistorySort');
+    if (!btn || btn.dataset.ready === 'true') return;
+    btn.dataset.ready = 'true';
+    btn.addEventListener('click', () => {
+      dir = dir === 'desc' ? 'asc' : 'desc';
+      applySort();
+      paintSortButton();
+      // Reordering the whole list makes the page you were on meaningless — page 1 of
+      // oldest-first is the other end of the table.
+      window.dkDocsPager.refresh();
+      window.dkDocsFilterChanged?.();
+    });
+    paintSortButton();
+  }
+
+  // ══ Thumbnails ═════════════════════════════════════════════════════════
+  //
+  // A frame of the file, in the button that opens it. This is the reason the eye button
+  // and its whole column could go: a thumbnail reads as pressable, which a file-type
+  // glyph never did.
+  //
+  // ── WHY THE FIRST VERSION WAS SLOW, AND WHAT EACH FIX ADDRESSES ──
+  //
+  // It signed one URL per row and then handed the browser the ORIGINAL object. A 4.6 MB
+  // photograph was downloaded in full to paint a 52-pixel box, ten of those per page,
+  // behind ten separate signing round trips, and none of it was kept — turning a page,
+  // changing a filter or reloading started the whole bill again.
+  //
+  //   ten round trips  ->  ONE. createSignedUrls signs the page in a single request.
+  //   4.6 MB per box    ->  a few KB. Supabase can resize at the edge; the URL for that
+  //                         is the signed URL with /object/sign/ swapped for
+  //                         /render/image/sign/ and the size appended. That is a shape,
+  //                         not a promise, and image transforms are not on every plan —
+  //                         so a failure falls back to the original object, and a
+  //                         failure of THAT falls back to the glyph.
+  //   nothing kept      ->  the painted frame is stored as a ~3 KB data URL under the
+  //                         object's name, so every later view of that file is
+  //                         instant and offline. This is the fix you actually feel.
+  //   waited to scroll  ->  the page's own rows start immediately. There are at most
+  //                         PREFETCH of them and they are the ones being looked at; the
+  //                         observer is still there for a 50-per-page list.
+  //
+  // Audio never had a frame to fetch and still does not.
+
+  const thumbs = (function () {
+    // What the cache stores and what the capture canvas is sized to. 2x the 52x40 box
+    // the desktop draws and a touch over the 72px phone square, so one cached frame
+    // serves both without looking soft on a retina screen.
+    const CAP_W = 144;
+    const CAP_H = 112;
+    const STORE_KEY = 'spinlogThumbs.v1';
+    // ~3 KB each at q0.62, so this is roughly half a megabyte against a 5 MB budget
+    // shared with everything else in localStorage.
+    const STORE_MAX = 160;
+    // How many of the current page start without waiting to be scrolled into view. Ten
+    // is the default page size; fifty is a size you have to ask for, and the rest of
+    // those wait for the observer.
+    const PREFETCH = 12;
+
+    const done = new WeakSet();
+    /**
+     * name -> { url, at }, so turning a page back does not re-sign what it already has.
+     *
+     * Timestamped because a signed URL is only good for an hour. Without the check, a
+     * tab left open all afternoon would hand a 403 to the first page it had not already
+     * cached a frame for, and the only symptom would be thumbnails that stopped
+     * appearing. 50 minutes leaves room for the fetch itself.
+     */
+    const signedUrls = new Map();
+    const SIGN_GOOD_FOR = 50 * 60 * 1000;
+
+    function freshUrl(name) {
+      const hit = signedUrls.get(name);
+      if (!hit) return null;
+      if (Date.now() - hit.at > SIGN_GOOD_FOR) { signedUrls.delete(name); return null; }
+      return hit.url;
+    }
+    /** name -> data URL. Read through from localStorage once, written back debounced. */
+    let frames = null;
+    let writeTimer = null;
+    let observer = null;
+
+    // ── The frame cache ────────────────────────────────────────────────
+
+    function store() {
+      if (frames) return frames;
+      frames = new Map();
+      try {
+        const raw = localStorage.getItem(STORE_KEY);
+        if (raw) for (const [k, v] of Object.entries(JSON.parse(raw))) frames.set(k, v);
+      } catch { /* private mode, or someone else's data under this key */ }
+      return frames;
+    }
+
+    function persist() {
+      clearTimeout(writeTimer);
+      // Debounced: ten thumbnails landing within a second of each other would otherwise
+      // serialise and write the whole cache ten times.
+      writeTimer = setTimeout(() => {
+        const map = store();
+        // Map preserves insertion order, so the oldest entries are the ones at the
+        // front — dropping from there is a plain LRU without a timestamp per row.
+        while (map.size > STORE_MAX) map.delete(map.keys().next().value);
+        try {
+          localStorage.setItem(STORE_KEY, JSON.stringify(Object.fromEntries(map)));
+        } catch {
+          // Over quota. Halve it and try once more rather than losing the lot.
+          const keys = [...map.keys()].slice(0, Math.floor(map.size / 2));
+          for (const k of keys) map.delete(k);
+          try { localStorage.setItem(STORE_KEY, JSON.stringify(Object.fromEntries(map))); } catch { /* give up */ }
+        }
+      }, 900);
+    }
+
+    /**
+     * Draw what loaded into a small canvas and keep the result.
+     *
+     * Silent on failure, and the likeliest failure is a tainted canvas: an <img> or
+     * <video> loaded without CORS cannot be read back. The elements below ask for CORS
+     * and fall back to a plain load, so the worst case is a thumbnail that shows every
+     * time instead of one that shows instantly — never a thumbnail that does not show.
+     */
+    function keepFrame(name, media, kind) {
+      try {
+        const w = kind === 'video' ? media.videoWidth : media.naturalWidth;
+        const h = kind === 'video' ? media.videoHeight : media.naturalHeight;
+        if (!w || !h) return;
+        const canvas = document.createElement('canvas');
+        canvas.width = CAP_W;
+        canvas.height = CAP_H;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        // cover, matching what object-fit does to the element, so the cached frame and
+        // a live one are not two different crops of the same picture.
+        const scale = Math.max(CAP_W / w, CAP_H / h);
+        const dw = w * scale;
+        const dh = h * scale;
+        ctx.drawImage(media, (CAP_W - dw) / 2, (CAP_H - dh) / 2, dw, dh);
+        const data = canvas.toDataURL('image/jpeg', 0.62);
+        if (!data || data.length < 64) return;
+        const map = store();
+        map.delete(name);            // re-insert, so a file just looked at is newest
+        map.set(name, data);
+        persist();
+      } catch { /* tainted canvas, or no 2d context */ }
+    }
+
+    // ── Painting ───────────────────────────────────────────────────────
+
+    function paint(btn, src, { cached = false } = {}) {
+      const img = document.createElement('img');
+      img.className = 'docs-thumb-media';
+      img.alt = '';
+      img.decoding = 'async';
+      img.src = src;
+      if (cached) {
+        // A data URL is already decoded by the time the next frame paints, so there is
+        // no gap to cover and the fade would be a flicker.
+        btn.classList.add('has-thumb', 'is-cached');
+        btn.insertBefore(img, btn.firstChild);
+        return;
+      }
+      img.addEventListener('load', () => btn.classList.add('has-thumb'), { once: true });
+      img.addEventListener('error', () => img.remove(), { once: true });
+      btn.insertBefore(img, btn.firstChild);
+    }
+
+    /**
+     * Whether the edge resizer answered the last time it was asked.
+     *
+     * Session-scoped on purpose rather than remembered in localStorage: a project that
+     * gains the feature should pick it up on the next load, and the frame cache means the
+     * cost of finding out is one request per session, not per file.
+     */
+    let transformsWork = true;
+
+    /**
+     * The transformed URL for a signed one, or null if it does not look signed.
+     *
+     * Derived by rewriting the path rather than by asking createSignedUrl for a
+     * transform, because that would cost one request per image and the whole point of
+     * the batch above is that it does not. If Supabase will not serve it — transforms
+     * are a plan feature — the <img> errors and the caller moves to the next attempt.
+     */
+    function renderUrl(signed) {
+      if (typeof signed !== 'string' || !signed.includes('/object/sign/')) return null;
+      const join = signed.includes('?') ? '&' : '?';
+      return `${signed.replace('/object/sign/', '/render/image/sign/')}`
+        + `${join}width=${CAP_W}&height=${CAP_H}&resize=cover&quality=70`;
+    }
+
+    /** Load `src` into an <img> we can read back, resolving to it or to null. */
+    function probe(src, withCors) {
+      return new Promise(resolve => {
+        const img = new Image();
+        if (withCors) img.crossOrigin = 'anonymous';
+        img.decoding = 'async';
+        img.addEventListener('load', () => resolve(img), { once: true });
+        img.addEventListener('error', () => resolve(null), { once: true });
+        img.src = src;
+      });
+    }
+
+    /** The first frame of a video, as an element we can read back, or null. */
+    function probeVideo(src, withCors) {
+      return new Promise(resolve => {
+        const video = document.createElement('video');
+        if (withCors) video.crossOrigin = 'anonymous';
+        // metadata, and #t=0.1 rather than 0: seeking to exactly zero lands before the
+        // first keyframe on plenty of real files and paints a black rectangle.
+        video.preload = 'metadata';
+        video.muted = true;
+        video.playsInline = true;
+        let settled = false;
+        const finish = value => { if (!settled) { settled = true; resolve(value); } };
+        video.addEventListener('loadeddata', () => finish(video), { once: true });
+        video.addEventListener('error', () => finish(null), { once: true });
+        // A video that neither loads nor errors holds a slot for ever. Six seconds is
+        // long enough for a metadata range request on a slow link and short enough that
+        // the glyph comes back while you are still looking at the row.
+        setTimeout(() => finish(null), 6000);
+        video.src = `${src}#t=0.1`;
+      });
+    }
+
+    /**
+     * Should a video frame be fetched at all right now?
+     *
+     * A picture can be resized at the edge; a video cannot, so its thumbnail means
+     * pulling enough of the file to decode one frame. On a metered or slow connection
+     * that is not a trade worth making silently, and the play glyph is a perfectly good
+     * answer. Once a frame is cached this question stops being asked.
+     */
+    function videoFramesWelcome() {
+      const c = navigator.connection;
+      if (!c) return true;
+      if (c.saveData) return false;
+      return !/^(slow-2g|2g)$/.test(String(c.effectiveType || ''));
+    }
+
+    // ── One slot ───────────────────────────────────────────────────────
+
+    async function fill(btn, signed) {
+      const name = btn.dataset.thumb;
+      const kind = btn.dataset.thumbKind;
+      if (!btn.isConnected) return;
+
+      if (kind === 'video') {
+        if (!videoFramesWelcome()) return;
+        const video = (await probeVideo(signed, true)) || (await probeVideo(signed, false));
+        if (!video || !btn.isConnected) return;
+        // Painted from the cache the capture writes, so there is one code path for
+        // showing a frame and the <video> element is thrown away immediately rather
+        // than sitting in the row holding a decoder open.
+        keepFrame(name, video, 'video');
+        const data = store().get(name);
+        if (data) paint(btn, data, { cached: true });
+        return;
+      }
+
+      // Smallest first. Each rung is a whole URL, not a retry of the same one: the
+      // transform may be off for this project, and CORS may be off for this bucket.
+      //
+      // And the transform is only tried until it is known not to work. Image resizing is
+      // a plan feature, so on a project without it the first rung is a guaranteed miss —
+      // once, which is a cheap 4xx, rather than once per file for ever.
+      const small = transformsWork ? renderUrl(signed) : null;
+      let img = small ? (await probe(small, true)) || (await probe(small, false)) : null;
+      if (small && !img) transformsWork = false;
+      if (!img) img = (await probe(signed, true)) || (await probe(signed, false));
+      if (!img || !btn.isConnected) return;
+      keepFrame(name, img, 'image');
+      paint(btn, img.currentSrc || img.src);
+    }
+
+    // ── Scheduling ─────────────────────────────────────────────────────
+
+    function watcher() {
+      if (observer || typeof IntersectionObserver !== 'function') return observer;
+      observer = new IntersectionObserver(entries => {
+        const wake = [];
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          observer.unobserve(entry.target);
+          wake.push(entry.target);
+        }
+        if (wake.length) run(wake);
+      }, { rootMargin: '300px 0px' });
+      return observer;
+    }
+
+    /** Sign whatever is left after the cache, then fill each slot. */
+    async function run(slots) {
+      const live = slots.filter(btn => !done.has(btn) && btn.isConnected && btn.dataset.thumb);
+      if (!live.length) return;
+      for (const btn of live) done.add(btn);
+
+      const cache = store();
+      const pending = [];
+      for (const btn of live) {
+        const hit = cache.get(btn.dataset.thumb);
+        // No await, no request, nothing to wait for. This is the whole point of the
+        // cache: the second time you look at a file its picture is simply there.
+        if (hit) paint(btn, hit, { cached: true });
+        else pending.push(btn);
+      }
+      if (!pending.length) return;
+
+      // Reuse anything already signed this session before asking for more.
+      const needed = pending.map(b => b.dataset.thumb).filter(n => !freshUrl(n));
+      if (needed.length) {
+        const signer = window.dkSignHistoricMediaBatch;
+        let batch = null;
+        if (typeof signer === 'function') {
+          try { batch = await signer(needed); } catch { batch = null; }
+        } else if (typeof window.dkGetHistoricMediaUrl === 'function') {
+          // The audit and the harness replace the single-file signer, so this path has
+          // to work on its own.
+          batch = new Map();
+          const urls = await Promise.all(needed.map(n => window.dkGetHistoricMediaUrl(n).catch(() => null)));
+          needed.forEach((n, i) => { if (urls[i]) batch.set(n, urls[i]); });
+        }
+        const at = Date.now();
+        if (batch) for (const [name, url] of batch) signedUrls.set(name, { url, at });
+      }
+
+      await Promise.all(pending.map(btn => {
+        const url = freshUrl(btn.dataset.thumb);
+        return url ? fill(btn, url) : null;
+      }));
+    }
+
+    return {
+      /**
+       * Fill the thumbnails on the current page.
+       *
+       * Called after every render, filter, sort and page turn, so it has to be cheap
+       * when there is nothing to do — hence the WeakSet, which also means a row rebuilt
+       * by loadHistoricUploads() is treated as the new element it is.
+       */
+      scan() {
+        const slots = [...document.querySelectorAll('#mediaRecordTable tbody tr.docs-media-row:not(.is-paged-out):not(.is-filtered-out) .docs-thumb[data-thumb]')]
+          .filter(btn => !done.has(btn));
+        if (!slots.length) return;
+        // The rows on this page are the rows being looked at, so the first screenful
+        // does not wait to be scrolled into view — that wait was itself part of "the
+        // thumbnails take a while".
+        run(slots.slice(0, PREFETCH));
+        const io = watcher();
+        for (const btn of slots.slice(PREFETCH)) {
+          // No IntersectionObserver is not a reason to have no thumbnails.
+          if (io) io.observe(btn);
+          else run([btn]);
+        }
+      },
+      /** Drop a deleted file's frame, so its name cannot resolve to a stale picture. */
+      forget(name) {
+        if (!name) return;
+        store().delete(name);
+        signedUrls.delete(name);
+        persist();
+      },
+    };
+  })();
+
+  window.dkDocsThumbs = thumbs;
+
+  function boot() {
+    setupSort();
+    pager.wire();
+    // Nothing in the table yet — loadHistoricUploads() calls back when there is.
+    apply();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+})();
+
+// ════════════════════════════════════════════════════════════════════════
+// RECORD HISTORY — MEDIA PLAYER AND HOLD-TO-EDIT
+//
+// Two things the rows used to do with buttons, now done with the row itself.
+//
+//   the type icon  opens the file
+//   holding a row  edits its note and its date
+//
+// The player is one carousel over every record CURRENTLY SHOWING, replacing four
+// single-file modals that each opened on one file and closed back to the list. It
+// sits on a scroll-snap track so the swipe is the browser's own horizontal
+// scrolling rather than hand-rolled touch maths — which matters because the slides
+// contain <video> and <audio> elements with their own drag handling.
+//
+// Signed URLs are fetched lazily and only for the slide you are on and its two
+// neighbours. A list of twenty videos would otherwise mean twenty signing round
+// trips and twenty preloading players the moment you tapped the first one.
+// ════════════════════════════════════════════════════════════════════════
+(function () {
+  const HOLD_MS = 520;
+  // 16px, not 10. A thumb resting on a phone screen wanders further than 10px over
+  // half a second, and every one of those was a hold that silently did nothing.
+  const HOLD_MOVE = 16;
+  const NEIGHBOURS = 1;
+
+  let items = [];
+  let index = 0;
+  const hydrated = new Set();
+  // Signed URL per slot, so Save does not have to sign the same file twice.
+  const urls = new Map();
+  let scrollSettle = null;
+
+  const $ = id => document.getElementById(id);
+
+  /**
+   * is-paged-out as well as is-filtered-out.
+   *
+   * The player pages through what is ON SCREEN, and once the table has page controls
+   * those are two different classes for the same answer: a row on page three is no more
+   * drawn than a row the search excluded. Without this the carousel would hold all
+   * twenty-four files while the table showed ten, and the counter in its bar would
+   * disagree with the list you opened it from.
+   */
+  function rowsShowing() {
+    return [...document.querySelectorAll('#mediaRecordTable tbody tr.docs-media-row')]
+      .filter(r => !r.classList.contains('is-filtered-out') && !r.classList.contains('is-paged-out'));
+  }
+
+  /** What the player will page through: the visible rows, in the order shown. */
+  function collect() {
+    return rowsShowing().map(tr => {
+      const id = Number(tr.dataset.mediaId);
+      const row = window._historicMediaRows?.get(id);
+      if (!row) return null;
+      const note = tr.querySelector('.docs-notes-cell')?.textContent?.trim() || '';
+      return {
+        id,
+        name: row.original_name || 'Untitled',
+        kind: String(row.media_type || '').toLowerCase(),
+        storage: row.file_name,
+        size: row.file_size,
+        note: note === 'No notes saved' ? '' : note,
+        when: tr.querySelector('td[data-label="Uploaded"] .docs-date-cell span')?.textContent?.trim() || '',
+      };
+    }).filter(Boolean);
+  }
+
+  /**
+   * This module is OUTSIDE the DOMContentLoaded closure that holds docsEscapeHtml
+   * and docsFormatBytes, so neither is in scope. `typeof` on an undeclared name is
+   * the one safe way to ask, and the fallbacks below are what actually run — they
+   * are the implementation here, not a defensive shrug.
+   */
+  function esc(v) {
+    return String(v === null || v === undefined ? '' : v)
+      .replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  function bytes(n) {
+    const size = Number(n);
+    if (!Number.isFinite(size) || size <= 0) return null;
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let i = 0;
+    let v = size;
+    while (v >= 1024 && i < units.length - 1) { v /= 1024; i += 1; }
+    return `${v < 10 && i > 0 ? v.toFixed(1) : Math.round(v)} ${units[i]}`;
+  }
+
+  // ══ Building ═══════════════════════════════════════════════════════════
+
+  function build() {
+    const stage = $('docsPlayerStage');
+    const dots = $('docsPlayerDots');
+    if (!stage) return;
+    hydrated.clear();
+    urls.clear();
+    stage.innerHTML = items.map((it, i) => `
+      <figure class="docs-player-slide" data-slot="${i}" aria-label="${esc(it.name)}">
+        <div class="docs-player-frame" data-frame="${i}">
+          <span class="docs-player-wait"><i class="fas fa-circle-notch fa-spin" aria-hidden="true"></i></span>
+        </div>
+      </figure>`).join('');
+    if (dots) {
+      // Dots stop being readable long before a real library stops being usable, so
+      // past a dozen the counter in the bar is the only position indicator.
+      dots.innerHTML = items.length > 1 && items.length <= 12
+        ? items.map((_, i) => `<span class="docs-player-dot" data-dot="${i}"></span>`).join('')
+        : '';
+    }
+  }
+
+  /** The signed URL, then the right element for the kind of file it is. */
+  async function hydrate(i) {
+    const it = items[i];
+    const frame = document.querySelector(`.docs-player-frame[data-frame="${i}"]`);
+    if (!it || !frame || hydrated.has(i)) return;
+    hydrated.add(i);
+
+    // window.dkGetHistoricMediaUrl, not the bare getHistoricMediaUrl.
+    //
+    // This IIFE is at the top level of the file; getHistoricMediaUrl is declared
+    // inside the big DOMContentLoaded closure and is not in scope here, so calling it
+    // directly is a ReferenceError the first time anyone opens a file. That closure
+    // already exposes it under this name for exactly this reason.
+    const signer = window.dkGetHistoricMediaUrl;
+    const url = typeof signer === 'function' ? await signer(it.storage) : null;
+    if (!url) {
+      frame.innerHTML = '<p class="docs-player-fail">That file could not be opened.<br>'
+        + 'Its link may have expired — close this and try again.</p>';
+      return;
+    }
+
+    urls.set(i, url);
+
+    if (it.kind === 'image') {
+      frame.innerHTML = `<img src="${esc(url)}" alt="${esc(it.name)}" decoding="async" />`;
+      return;
+    }
+    if (it.kind !== 'video' && it.kind !== 'audio') {
+      frame.innerHTML = `<a class="docs-player-open" href="${esc(url)}" target="_blank" rel="noopener">
+          <i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i> Open this file
+        </a>`;
+      return;
+    }
+
+    // ── A CODED PLAYER, not the browser's ──
+    //
+    // The native controls were there and unreachable. A portrait clip laid out at
+    // width:100%/height:auto came to 1412x1886 inside a 732px frame, so the control
+    // bar the browser draws at the bottom of the video box sat a thousand pixels
+    // below the visible area. It looked like a video that would not play.
+    //
+    // Owning the bar fixes more than that. It can sit INSIDE the frame whatever the
+    // media's shape; it can be the only thing that claims the horizontal drag, so the
+    // carousel keeps working everywhere except the seek slider; and audio gets the
+    // same control row as video instead of a stranded 40px widget.
+    const media = it.kind === 'video'
+      ? `<video class="dkp-media" src="${esc(url)}" playsinline preload="metadata"></video>`
+      : `<audio class="dkp-media" src="${esc(url)}" preload="metadata"></audio>`;
+
+    frame.innerHTML = `<div class="dkp dkp--${esc(it.kind)}">
+        ${it.kind === 'audio' ? `<span class="dkp-art" aria-hidden="true"><i class="fas fa-wave-square" aria-hidden="true"></i></span>` : ''}
+        ${media}
+        <div class="dkp-bar">
+          <button type="button" class="dkp-btn dkp-play" aria-label="Play">
+            <i class="fas fa-play" aria-hidden="true"></i>
+          </button>
+          <span class="dkp-time dkp-now">0:00</span>
+          <input class="dkp-seek" type="range" min="0" max="1000" value="0" step="1"
+                 aria-label="Seek" />
+          <span class="dkp-time dkp-dur">0:00</span>
+          <button type="button" class="dkp-btn dkp-mute" aria-label="Mute">
+            <i class="fas fa-volume-high" aria-hidden="true"></i>
+          </button>
+          ${it.kind === 'video' ? `<button type="button" class="dkp-btn dkp-full" aria-label="Fullscreen">
+            <i class="fas fa-expand" aria-hidden="true"></i>
+          </button>` : ''}
+        </div>
+      </div>`;
+
+    wirePlayer(frame.querySelector('.dkp'));
+  }
+
+  /** Clock format. 0:07, 1:42, 12:03 — no hours, nothing here runs that long. */
+  function clock(seconds) {
+    const s = Math.max(0, Math.floor(Number(seconds) || 0));
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  }
+
+  /**
+   * Wire one coded player.
+   *
+   * Everything reads FROM the media element, so the bar cannot drift out of step with
+   * what is actually playing — including when playback is started or stopped from
+   * somewhere else, like swiping to another slide.
+   */
+  function wirePlayer(root) {
+    if (!root) return;
+    const media = root.querySelector('.dkp-media');
+    const play = root.querySelector('.dkp-play');
+    const seek = root.querySelector('.dkp-seek');
+    const now = root.querySelector('.dkp-now');
+    const dur = root.querySelector('.dkp-dur');
+    const mute = root.querySelector('.dkp-mute');
+    const full = root.querySelector('.dkp-full');
+    if (!media) return;
+
+    let scrubbing = false;
+    const icon = (btn, name) => {
+      const i = btn && btn.querySelector('i');
+      if (i) i.className = `fas ${name}`;
+    };
+
+    const showPlaying = () => {
+      icon(play, media.paused ? 'fa-play' : 'fa-pause');
+      if (play) play.setAttribute('aria-label', media.paused ? 'Play' : 'Pause');
+      root.classList.toggle('is-playing', !media.paused);
+    };
+    const showTime = () => {
+      if (scrubbing) return;
+      const d = Number.isFinite(media.duration) ? media.duration : 0;
+      if (now) now.textContent = clock(media.currentTime);
+      if (dur) dur.textContent = clock(d);
+      if (seek) seek.value = d > 0 ? String(Math.round((media.currentTime / d) * 1000)) : '0';
+    };
+
+    media.addEventListener('loadedmetadata', showTime);
+    media.addEventListener('durationchange', showTime);
+    media.addEventListener('timeupdate', showTime);
+    media.addEventListener('play', showPlaying);
+    media.addEventListener('pause', showPlaying);
+    media.addEventListener('ended', () => { showPlaying(); showTime(); });
+    media.addEventListener('volumechange', () => {
+      icon(mute, media.muted || media.volume === 0 ? 'fa-volume-xmark' : 'fa-volume-high');
+      if (mute) mute.setAttribute('aria-label', media.muted ? 'Unmute' : 'Mute');
+    });
+
+    const toggle = () => { if (media.paused) media.play().catch(() => {}); else media.pause(); };
+    play?.addEventListener('click', toggle);
+    // Tapping the picture is how everyone expects to pause a video. Audio has no
+    // picture to tap, so it keeps the button only.
+    if (media.tagName === 'VIDEO') media.addEventListener('click', toggle);
+
+    // The slider is the ONLY thing in here that takes the horizontal gesture. That is
+    // the whole reason for a coded bar: touch-action on the <video> itself killed the
+    // swipe across the entire picture, and the carousel needs that everywhere else.
+    if (seek) {
+      const apply = () => {
+        const d = Number.isFinite(media.duration) ? media.duration : 0;
+        if (d > 0) media.currentTime = (Number(seek.value) / 1000) * d;
+      };
+      seek.addEventListener('pointerdown', () => { scrubbing = true; });
+      seek.addEventListener('input', () => {
+        const d = Number.isFinite(media.duration) ? media.duration : 0;
+        if (now && d > 0) now.textContent = clock((Number(seek.value) / 1000) * d);
+      });
+      seek.addEventListener('change', () => { apply(); scrubbing = false; });
+      ['pointerup', 'pointercancel'].forEach(t =>
+        seek.addEventListener(t, () => { apply(); scrubbing = false; }));
+    }
+
+    mute?.addEventListener('click', () => { media.muted = !media.muted; });
+
+    full?.addEventListener('click', () => {
+      const target = media.tagName === 'VIDEO' ? media : root;
+      if (document.fullscreenElement) { document.exitFullscreen?.(); return; }
+      // webkitEnterFullscreen is the only one iOS Safari offers on a <video>.
+      if (target.requestFullscreen) target.requestFullscreen().catch(() => {});
+      else if (media.webkitEnterFullscreen) media.webkitEnterFullscreen();
+    });
+
+    showPlaying();
+    showTime();
+  }
+
+  /**
+   * Save the file to the device.
+   *
+   * Through a blob, not a bare <a download>. The signed URL is a different origin, and
+   * the download attribute is ignored cross-origin — the browser navigates to the file
+   * instead, which on a video means it starts playing in a new tab. Fetching it first
+   * makes the blob same-origin, so the attribute is honoured and the file keeps its
+   * real name rather than the storage key.
+   */
+  async function save(i) {
+    const it = items[i];
+    if (!it) return;
+    const btn = $('docsPlayerSave');
+    const set = name => { const g = btn?.querySelector('i'); if (g) g.className = `fas ${name}`; };
+    let url = urls.get(i);
+    if (!url) {
+      const signer = window.dkGetHistoricMediaUrl;
+      url = typeof signer === 'function' ? await signer(it.storage) : null;
+    }
+    if (!url) { set('fa-triangle-exclamation'); return; }
+
+    if (btn) btn.disabled = true;
+    set('fa-circle-notch fa-spin');
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(String(res.status));
+      const blob = await res.blob();
+      const href = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = href;
+      a.download = it.name || 'spinlog-media';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      // Long enough for the download to have started; revoking immediately can
+      // cancel it in some browsers.
+      setTimeout(() => URL.revokeObjectURL(href), 20000);
+      set('fa-check');
+      setTimeout(() => set('fa-download'), 2200);
+    } catch {
+      set('fa-triangle-exclamation');
+      setTimeout(() => set('fa-download'), 2600);
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  // ══ Moving ═════════════════════════════════════════════════════════════
+
+  function paint() {
+    const it = items[index];
+    if (!it) return;
+    const count = $('docsPlayerCount');
+    const name = $('docsPlayerName');
+    const meta = $('docsPlayerMeta');
+    const note = $('docsPlayerNote');
+    if (count) count.textContent = `${index + 1} / ${items.length}`;
+    if (name) name.textContent = it.name;
+    if (meta) meta.textContent = [it.kind, bytes(it.size), it.when].filter(Boolean).join(' · ');
+    if (note) {
+      note.textContent = it.note;
+      note.hidden = !it.note;
+    }
+    document.querySelectorAll('.docs-player-dot').forEach(d => {
+      d.classList.toggle('is-on', Number(d.dataset.dot) === index);
+    });
+    const prev = $('docsPlayerPrev');
+    const next = $('docsPlayerNext');
+    if (prev) prev.disabled = index <= 0;
+    if (next) next.disabled = index >= items.length - 1;
+
+    // Only ever one thing playing. Swiping off a video used to leave it running
+    // behind the next slide.
+    document.querySelectorAll('#docsPlayerStage video, #docsPlayerStage audio')
+      .forEach(el => {
+        const slot = Number(el.closest('.docs-player-slide')?.dataset.slot);
+        if (slot !== index && !el.paused) el.pause();
+      });
+
+    for (let i = index - NEIGHBOURS; i <= index + NEIGHBOURS; i += 1) {
+      if (i >= 0 && i < items.length) hydrate(i);
+    }
+  }
+
+  function goTo(i, smooth) {
+    const stage = $('docsPlayerStage');
+    const next = Math.max(0, Math.min(items.length - 1, i));
+    index = next;
+    if (stage) {
+      const slide = stage.querySelector(`.docs-player-slide[data-slot="${next}"]`);
+      if (slide) {
+        // scrollTo on the container rather than scrollIntoView, which would also
+        // scroll the PAGE behind the fixed overlay.
+        stage.scrollTo({ left: slide.offsetLeft - stage.offsetLeft, behavior: smooth ? 'smooth' : 'auto' });
+      }
+    }
+    paint();
+  }
+
+  /** Which slide the track has settled on, after a swipe. */
+  function onScroll() {
+    const stage = $('docsPlayerStage');
+    if (!stage) return;
+    clearTimeout(scrollSettle);
+    scrollSettle = setTimeout(() => {
+      const at = Math.round(stage.scrollLeft / Math.max(1, stage.clientWidth));
+      if (at !== index && at >= 0 && at < items.length) {
+        index = at;
+        paint();
+      }
+    }, 90);
+  }
+
+  // ══ Opening and shutting ═══════════════════════════════════════════════
+
+  function open(id) {
+    const player = $('docsPlayer');
+    if (!player) return;
+    items = collect();
+    const at = items.findIndex(it => it.id === Number(id));
+    if (!items.length || at < 0) return;
+
+    build();
+    player.setAttribute('aria-hidden', 'false');
+    player.classList.add('is-open');
+    // The page behind must not scroll while a full-screen viewer is up.
+    document.body.classList.add('docs-player-lock');
+    // After the class, or the track has no width yet and every slide is at 0.
+    requestAnimationFrame(() => {
+      goTo(at, false);
+      $('docsPlayerStage')?.focus({ preventScroll: true });
+    });
+  }
+
+  function close() {
+    const player = $('docsPlayer');
+    if (!player) return;
+    document.querySelectorAll('#docsPlayerStage video, #docsPlayerStage audio')
+      .forEach(el => { el.pause(); el.removeAttribute('src'); el.load?.(); });
+    player.classList.remove('is-open');
+    player.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('docs-player-lock');
+    const stage = $('docsPlayerStage');
+    if (stage) stage.innerHTML = '';
+    hydrated.clear();
+    urls.clear();
+    items = [];
+  }
+
+  // ══ Wiring ═════════════════════════════════════════════════════════════
+
+  function setup() {
+    const tbody = document.querySelector('#mediaRecordTable tbody');
+    const player = $('docsPlayer');
+    if (!tbody || !player) return;
+
+    // ── Anything carrying data-media-open opens the file ──
+    // The thumbnail at the start of the row, at every width.
+    tbody.addEventListener('click', e => {
+      const btn = e.target.closest('[data-media-open]');
+      if (!btn) return;
+      e.preventDefault();
+      open(btn.dataset.mediaOpen);
+    });
+
+    // ── ONE OPEN CONTROL, NOT TWO ──
+    //
+    // There used to be a matchMedia watcher here that set `disabled` on every
+    // .docs-file-open from 769px up, plus a MutationObserver to re-apply it every time
+    // the tbody was rewritten. It existed because a desktop row had a SECOND way to open
+    // the file — an eye button in a Preview column of its own — and two controls for one
+    // action on one row is one too many, so the type glyph was switched off.
+    //
+    // The reason that second control existed was that a file-type glyph does not read as
+    // pressable to a mouse. It is a thumbnail now: a frame of the picture or the video,
+    // which does. So the eye button is gone, its column is the TYPE column, and this
+    // button is live at every width with no state to keep in step.
+
+    // ── Holding a row edits it ──
+    // Delegated on the tbody, so rows redrawn by loadHistoricUploads() keep working
+    // without rebinding. Same shape as the service records' hold-to-edit.
+    let timer = null;
+    let row = null;
+    let startX = 0;
+    let startY = 0;
+    const clear = () => {
+      clearTimeout(timer);
+      timer = null;
+      row?.classList.remove('is-holding');
+      row = null;
+    };
+
+    tbody.addEventListener('pointerdown', ev => {
+      clear();
+      // Live controls own their own taps: the thumbnail opens the file and the bin
+      // deletes it, so neither starts a hold. The filename, the note and the date are
+      // plain text and all of them do — which is most of the row's width.
+      if (ev.target.closest('button:not(:disabled), a')) return;
+      const hit = ev.target.closest('tr.docs-media-row');
+      if (!hit || !hit.dataset.mediaId) return;
+      row = hit;
+      startX = ev.clientX;
+      startY = ev.clientY;
+      row.classList.add('is-holding');
+      timer = setTimeout(() => {
+        const id = row?.dataset.mediaId;
+        clear();
+        if (id) window._editHistoricMedia?.(id);
+      }, HOLD_MS);
+    });
+    // A scroll that starts on a row must not become an edit — but a thumb that simply
+    // rests is not a scroll. The threshold was 10px, which a finger drifts past
+    // without meaning to, so the hold failed often enough to look broken. The browser
+    // tells us when it has genuinely taken the gesture over, via pointercancel, and
+    // that is the signal that actually matters; the distance check is only a backstop
+    // for a slow drag that never triggers one.
+    tbody.addEventListener('pointermove', ev => {
+      if (!timer) return;
+      if (Math.abs(ev.clientX - startX) > HOLD_MOVE
+        || Math.abs(ev.clientY - startY) > HOLD_MOVE) clear();
+    });
+    tbody.addEventListener('pointerup', clear);
+    // pointerleave is NOT cancelled on.
+    //
+    // Touch gets implicit pointer capture, so the events keep targeting the element
+    // the press began on — and the browser then fires pointerleave at the END of the
+    // gesture, on a press that never moved at all. Cancelling there raced the 520ms
+    // timer and killed valid holds. pointercancel and pointerup already cover every
+    // real way out.
+    tbody.addEventListener('pointercancel', clear);
+    // Holding on a phone otherwise raises the native selection callout over the sheet.
+    tbody.addEventListener('contextmenu', ev => {
+      if (ev.target.closest('tr.docs-media-row')) ev.preventDefault();
+    });
+
+    // ── The player's own controls ──
+    $('docsPlayerClose')?.addEventListener('click', close);
+    $('docsPlayerSave')?.addEventListener('click', () => save(index));
+    $('docsPlayerPrev')?.addEventListener('click', () => goTo(index - 1, true));
+    $('docsPlayerNext')?.addEventListener('click', () => goTo(index + 1, true));
+    $('docsPlayerStage')?.addEventListener('scroll', onScroll, { passive: true });
+    $('docsPlayerDots')?.addEventListener('click', e => {
+      const dot = e.target.closest('.docs-player-dot');
+      if (dot) goTo(Number(dot.dataset.dot), true);
+    });
+    // Only the backdrop, not the slide: tapping a photo to close it while trying to
+    // look at it is the most annoying thing a viewer can do.
+    player.addEventListener('click', e => { if (e.target === player) close(); });
+
+    document.addEventListener('keydown', e => {
+      if (!player.classList.contains('is-open')) return;
+      if (e.key === 'Escape') { e.preventDefault(); close(); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); goTo(index - 1, true); }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); goTo(index + 1, true); }
+    });
+
+    // Filtering while the viewer is open would leave it paging through rows that are
+    // no longer on the list behind it.
+    window.dkDocsFilterChanged = () => {
+      if (player.classList.contains('is-open')) close();
+    };
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setup);
+  } else {
+    setup();
   }
 })();
 
@@ -4815,20 +7141,11 @@ window.setupCoverDateEditing = function() {
         : 'No records yet';
     }
 
-    // The "Next Service" stat card was removed as a duplicate of the Next
-    // Service In panel, so this foot may legitimately be absent.
-    const nextFoot = $('dkNextFoot');
-    if (nextFoot) {
-      nextFoot.classList.remove('is-good', 'is-warn', 'is-bad');
-      const due = latest ? parseDate(latest.next_due) : null;
-      if (!due) {
-        nextFoot.textContent = 'Not scheduled';
-      } else {
-        const n = dayDiff(new Date(), due);
-        nextFoot.textContent = n < 0 ? `overdue by ${Math.abs(n)} days` : relDays(n);
-        nextFoot.classList.add(n < 0 ? 'is-bad' : n <= 14 ? 'is-warn' : 'is-good');
-      }
-    }
+    // A #dkNextFoot block sat here, painting a countdown into a third stat card.
+    // That card was removed as a duplicate of the Next Service In panel, which
+    // owns the same story with a progress bar and a projected timeline node, so
+    // the branch was guarded by an `if` that could never be true. The panel is
+    // filled by renderNextPanel() and the note by #dkNextNote.
   }
 
   function renderTimeline(asc) {
@@ -5083,41 +7400,85 @@ window.setupCoverDateEditing = function() {
   let searchIndex = null;
   let activeResult = -1;
 
-  function flash(el) {
+  /**
+   * Scroll to a target and mark it, so arriving from search says which row it was.
+   *
+   * The mark was removed once before, and correctly: the only thing using it then was
+   * a [data-flash] button sitting on the same page as its own target, so it lit up
+   * something already in view and read as an error state. Coming out of search is the
+   * opposite case — a different section, a table of twenty rows, and no way to tell
+   * which one was meant. So the mark is back, and only for a target the user has
+   * actually been carried to.
+   *
+   * The class is removed on animationend rather than a timer: if the animation is
+   * disabled for reduced motion it never fires, so the rule for that case does not
+   * animate at all and the class is dropped on a fallback timeout instead.
+   */
+  const FOUND_CLASS = 'dk-found';
+
+  function markFound(el) {
+    if (!el) return;
+    el.classList.remove(FOUND_CLASS);
+    // Reading offsetWidth forces the style change to land, or adding the class back
+    // in the same frame is a no-op and a second search for the same row does nothing.
+    void el.offsetWidth;
+    el.classList.add(FOUND_CLASS);
+    const done = () => el.classList.remove(FOUND_CLASS);
+    el.addEventListener('animationend', done, { once: true });
+    setTimeout(done, 2600);
+  }
+
+  function flash(el, mark) {
     if (!el) return;
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    el.classList.remove('dk-flash');
-    void el.offsetWidth; // reflow so the animation restarts on repeat hits
-    el.classList.add('dk-flash');
-    setTimeout(() => el.classList.remove('dk-flash'), 1700);
+    if (mark) markFound(el);
   }
 
   /**
-   * Highlight a target that may not exist yet. Sections lazy-load their data,
-   * so a service row can appear well after the navigation — a fixed delay
-   * missed it and the highlight silently never happened.
+   * Find a target that may not exist yet, then scroll to it and mark it.
+   *
+   * Sections lazy-load their data, so a service row can appear well after the
+   * navigation — a fixed delay missed it and nothing happened at all.
+   *
+   * `reveal` runs once, the first time the target is still missing after a couple of
+   * polls: a service table with a filter set does not render the rows it excludes, so
+   * the row being searched for may never appear until the filter is dropped. Running
+   * it immediately instead would wipe the filters on every jump, including the ones
+   * that did not need it.
    */
-  function flashWhenReady(selector, tries = 24) {
+  function flashWhenReady(selector, { mark = true, reveal = null } = {}, tries = 24) {
     let n = 0;
+    let revealed = false;
     const tick = () => {
       const el = document.querySelector(selector);
-      if (el) { flash(el); return; }
+      if (el) { flash(el, mark); return; }
+      if (!revealed && n === 2 && typeof reveal === 'function') {
+        revealed = true;
+        reveal();
+      }
       if (++n < tries) setTimeout(tick, 120);
     };
     tick();
   }
 
-  function go(sectionId, flashSelector) {
+  function go(sectionId, flashSelector, opts) {
     if (typeof window.dkNavigate === 'function') window.dkNavigate(sectionId);
-    if (flashSelector) flashWhenReady(flashSelector);
+    if (flashSelector) flashWhenReady(flashSelector, opts);
   }
 
-  /** Any [data-home-section] control may name a target to highlight on arrival. */
+  /**
+   * Any [data-home-section] control may name a target to scroll to on arrival.
+   *
+   * No mark here. These point at a whole form or a section heading, not at one row
+   * among many — "Log Service" scrolls to the entry form, and lighting up a form that
+   * already lights its own focused field was the reason the mark was dropped the first
+   * time round. Search results are the case that needs it.
+   */
   function initNavHighlights() {
     document.querySelectorAll('[data-home-section][data-flash]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const sel = btn.getAttribute('data-flash');
-        if (sel) flashWhenReady(sel);
+        if (sel) flashWhenReady(sel, { mark: false });
       });
     });
   }
@@ -5142,7 +7503,19 @@ window.setupCoverDateEditing = function() {
         sub: `${r.type || 'Service'} · ${nf(r.odo)} km`,
         meta: d ? fmtDate(d) : '',
         hay: `${r.type || ''} ${r.notes || ''} ${r.odo || ''} ${r.cost || ''} ${r.date || ''} ${r.next_due || ''}`,
-        run: () => go('service', `.service-record-row[data-record-id="${CSS.escape(String(r.id))}"]`),
+        run: () => go(
+          'service',
+          `.service-record-row[data-record-id="${CSS.escape(String(r.id))}"]`,
+          // Clearing the filters is no longer enough on its own: the table pages, so a
+          // record can be absent from the DOM because it is on page three. This turns
+          // to whichever page holds it. Falls back to the plain filter clear, which is
+          // what a build without the pager would have.
+          {
+            reveal: () => (window.dkShowServiceRecord
+              ? window.dkShowServiceRecord(r.id)
+              : window.dkClearServiceFilters?.()),
+          },
+        ),
       });
     });
 
@@ -5158,7 +7531,9 @@ window.setupCoverDateEditing = function() {
         icon: group === 'Bike Details' ? 'fa-id-card' : 'fa-gear',
         title: label, sub: value, meta: '',
         hay: `${label} ${value}`,
-        run: () => { go('home'); setTimeout(() => flash(row), 240); },
+        // A spec row is one line in a list of six, so it gets the mark for the same
+        // reason a service record does.
+        run: () => { go('home'); setTimeout(() => flash(row, true), 240); },
       });
     });
 

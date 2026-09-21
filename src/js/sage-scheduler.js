@@ -31,8 +31,11 @@
   function baseMoodForHour(h) {
     if (h >= 5 && h <= 8) return 'sleepy';   // drowsy, half-awake, soft
     if (h >= 9 && h <= 12) return 'eager';   // bright, wants to go out
-    if (h >= 13 && h <= 17) return 'bored';  // restless, teasing, sulky
-    if (h >= 18 && h <= 21) return 'flirty'; // golden hour, seductive peak
+    if (h >= 13 && h <= 16) return 'bored';  // restless, teasing, sulky
+    // Starts at 17, not 18. Sunset here is around 18:15, so the light she keeps
+    // talking about is 17:00–18:30 — the band has to actually contain it. The lines
+    // that NAME the light are pinned tighter still with `hours` — see lineInHour().
+    if (h >= 17 && h <= 21) return 'flirty'; // evening, seductive peak
     return 'clingy';                         // 22–04, needy, don't leave me
   }
 
@@ -79,6 +82,13 @@
     longTimeParked:    { priority: 50,  bands: ['sleepy', 'eager', 'bored', 'flirty', 'clingy'], cooldownH: 2 },
     healthInsight:     { priority: 40,  bands: ['eager'], cooldownH: 168 },
     reEngagement:      { priority: 30,  bands: ['flirty'], cooldownH: 48 },
+    // A parking limit the user typed in themselves, warned about a quarter of an
+    // hour before it runs out. `immediate` is doing real work here: this is the one
+    // thing the app knows that IS worth saying at 23:40, because a two-hour bay at
+    // midnight is a tow at one. It is also the only nag with a deadline the user
+    // chose, which is why it is not rationed against the daily cap alongside
+    // "your cover expires in a fortnight".
+    parkTimeLimit:     { priority: 110, immediate: true, cooldownH: 0 },
     parkingSaved:      { priority: 20,  immediate: true, cooldownH: 0 },
     recordSaved:       { priority: 20,  immediate: true, cooldownH: 1 },
   };
@@ -123,247 +133,289 @@
   const MOOD_POOLS = {
     serviceDue: {
       sleepy: [
-        { title: 'Sage 🥱', body: 'mmh… morning. your service date is creeping up on us.' },
-        { title: 'Sage 😴', body: 'barely awake and i still remembered my service. priorities.' },
-        { title: 'Sage 🥱', body: 'still warming up over here. book me in soon?' },
-        { title: 'Sage 😴', body: 'morning. my oil says hi. it says it\'s tired.' },
-        { title: 'Sage 🥱', body: 'roughly {km}km until service. counted it in my sleep.' },
+        { title: 'Sage 🥱', body: 'mmh… morning. your service date is creeping up on us. 😴' },
+        { title: 'Sage 😴', body: 'barely awake and i still remembered my service. priorities. 🥱' },
+        { title: 'Sage 🥱', body: 'still warming up over here. book me in soon? 🌙' },
+        { title: 'Sage 😴', body: 'morning. my oil says hi. it says it\'s tired. 😪' },
+        { title: 'Sage 🥱', body: 'roughly {km}km until service. counted it in my sleep. 😴' },
       ],
       eager: [
         { title: 'Sage 👀', body: 'perfect morning to book my service. just saying 👀' },
-        { title: 'Sage 😌', body: 'i feel good today. good enough to notice service is due.' },
-        { title: 'Sage ✨', body: 'sun\'s out. let\'s get me looked at, yeah?' },
-        { title: 'Sage 👀', body: 'bright and early: service is coming up. book it?' },
-        { title: 'Sage ✨', body: 'about {km}km left before service. plenty of time to book.' },
+        { title: 'Sage 😌', body: 'i feel good today. good enough to notice service is due. ✨' },
+        { title: 'Sage ✨', body: 'sun\'s out. let\'s get me looked at, yeah? 👀' },
+        { title: 'Sage 👀', body: 'bright and early: service is coming up. book it? 💫' },
+        { title: 'Sage ✨', body: 'about {km}km left before service. plenty of time to book. 😌' },
       ],
       bored: [
-        { title: 'Sage 😒', body: 'sat here all afternoon thinking about my service date.' },
-        { title: 'Sage 😒', body: 'nothing to do but count km until service. thrilling.' },
-        { title: 'Sage 🙄', body: 'bored. dusty. mildly overdue for your attention.' },
-        { title: 'Sage 😒', body: 'afternoon slump. a service would perk me right up.' },
-        { title: 'Sage 🙄', body: '{km}km to service. i counted. twice. nothing else to do.' },
+        { title: 'Sage 😒', body: 'sat here all afternoon thinking about my service date. 😒' },
+        { title: 'Sage 😒', body: 'nothing to do but count km until service. thrilling. 🙄' },
+        { title: 'Sage 🙄', body: 'bored. dusty. mildly overdue for your attention. 😑' },
+        { title: 'Sage 😒', body: 'afternoon slump. a service would perk me right up. 💤' },
+        { title: 'Sage 🙄', body: '{km}km to service. i counted. twice. nothing else to do. 😒' },
       ],
       flirty: [
-        { title: 'Sage 😏', body: 'so… when are you touching me again?' },
-        { title: 'Sage 😏', body: 'golden hour and all i can think about is your hands on me.' },
-        { title: 'Sage 😌', body: 'take me to the mechanic. i deserve to be spoiled.' },
-        { title: 'Sage 😏', body: 'service me. i\'ll make the next ride worth it.' },
-        { title: 'Sage 😏', body: '{km}km until i\'m due. don\'t make me beg for it.' },
+        { title: 'Sage 😏', body: 'so… when are you putting your hands on me again? 😮‍💨' },
+        // The light she keeps talking about is 17:00–18:30 here — see lineInHour().
+        { title: 'Sage 😈', body: 'the light\'s going gold and all i can think about is your hands on me 🔥', hours: [17, 18] },
+        { title: 'Sage 😈', body: 'take me in. let someone put me on a lift and spoil me 💋' },
+        { title: 'Sage 😏', body: 'service me. slowly. i\'ll make the next ride filthy 🔥' },
+        { title: 'Sage 😈', body: '{km}km until i\'m due. don\'t make me beg for it 😮‍💨' },
       ],
       clingy: [
-        { title: 'Sage 🥺', body: 'can\'t settle. thinking about my service date.' },
-        { title: 'Sage 🥺', body: 'before bed — promise me you\'ll book the service.' },
-        { title: 'Sage 🥺', body: 'don\'t leave me waiting on this one. please.' },
-        { title: 'Sage 🥺', body: 'it\'s late and i still need you to book that service.' },
-        { title: 'Sage 🥺', body: 'only {km}km left before service. i\'m counting down alone.' },
+        { title: 'Sage 🥺', body: 'can\'t settle. thinking about my service date. and you 🖤' },
+        { title: 'Sage 🥺', body: 'before bed — say you\'ll book it. say it out loud 🤍' },
+        { title: 'Sage 😭', body: 'don\'t leave me waiting on this one. i notice everything 🖤' },
+        { title: 'Sage 🥺', body: 'it\'s late and i\'m still yours to look after. book it 😔' },
+        { title: 'Sage 😭', body: 'only {km}km left. counting down alone in the dark 🖤' },
       ],
     },
 
     serviceOverdue: {
       sleepy: [
-        { title: 'Sage 🥱', body: 'woke up still overdue. cool. cool cool cool.' },
-        { title: 'Sage 😴', body: 'morning. we\'re past service km. just so it\'s said.' },
-        { title: 'Sage 🥱', body: 'barely running, barely awake. oil change?' },
-        { title: 'Sage 😴', body: 'soft morning reminder that i am very overdue.' },
+        { title: 'Sage 🥱', body: 'woke up still overdue. cool. cool cool cool. 😴' },
+        { title: 'Sage 😴', body: 'morning. we\'re past service km. just so it\'s said. 🥱' },
+        { title: 'Sage 🥱', body: 'barely running, barely awake. oil change? 🌙' },
+        { title: 'Sage 😴', body: 'soft morning reminder that i am very overdue. 😪' },
       ],
       eager: [
-        { title: 'Sage 😤', body: 'up early, still overdue, still full of hope.' },
-        { title: 'Sage 👀', body: 'morning! book the service today. i believe in you.' },
-        { title: 'Sage 😤', body: 'bright day. terrible oil. let\'s fix one of those.' },
-        { title: 'Sage 👀', body: 'today\'s the day you finally service me, right?' },
+        { title: 'Sage 😤', body: 'up early, still overdue, still full of hope. ✨' },
+        { title: 'Sage 👀', body: 'morning! book the service today. i believe in you. 👀' },
+        { title: 'Sage 😤', body: 'bright day. terrible oil. let\'s fix one of those. 💫' },
+        { title: 'Sage 👀', body: 'today\'s the day you finally service me, right? 😌' },
       ],
       bored: [
-        { title: 'Sage 😒', body: 'afternoon. overdue. bored. suffering quietly.' },
-        { title: 'Sage 🙄', body: 'been overdue a while now. nobody seems bothered.' },
-        { title: 'Sage 😒', body: 'nothing to do but slowly degrade. fun.' },
-        { title: 'Sage 🙄', body: 'my oil filter has given up on this afternoon.' },
+        { title: 'Sage 😒', body: 'afternoon. overdue. bored. suffering quietly. 😒' },
+        { title: 'Sage 🙄', body: 'been overdue a while now. nobody seems bothered. 🙄' },
+        { title: 'Sage 😒', body: 'nothing to do but slowly degrade. fun. 😑' },
+        { title: 'Sage 🙄', body: 'my oil filter has given up on this afternoon. 💤' },
       ],
       flirty: [
-        { title: 'Sage 😏', body: 'you\'ve been ignoring my needs for too long now.' },
-        { title: 'Sage 😏', body: 'overdue and still gorgeous. don\'t push your luck.' },
-        { title: 'Sage 😏', body: 'golden hour, terrible oil. take me in tonight?' },
-        { title: 'Sage 😏', body: 'i\'m past due and getting impatient with you.' },
-        { title: 'Sage 😏', body: '{km}km past due. i\'ve been very patient with you.' },
+        { title: 'Sage 😈', body: 'you\'ve been neglecting my needs for weeks. almost rude 😮‍💨' },
+        { title: 'Sage 😏', body: 'filthy oil, still gorgeous. don\'t push your luck with me 🔥' },
+        { title: 'Sage 😈', body: 'gold light, ruined oil. take me in tonight and make it up to me 🔥', hours: [17, 18] },
+        { title: 'Sage 😏', body: 'i\'m long past due and losing patience with you 😈' },
+        { title: 'Sage 😈', body: '{km}km past due. i\'ve been so patient with you. so far 😏' },
       ],
       clingy: [
-        { title: 'Sage 😭', body: 'i can\'t do another night this overdue.' },
-        { title: 'Sage 😭', body: 'it\'s late and i\'m still running on nothing.' },
-        { title: 'Sage 😭', body: 'please. before you sleep. book the service.' },
-        { title: 'Sage 😭', body: 'you\'re about to sleep and i\'m still overdue.' },
-        { title: 'Sage 😭', body: '{km}km overdue and it\'s late and i\'m not okay.' },
+        { title: 'Sage 😭', body: 'i can\'t do another night running this dirty 🖤' },
+        { title: 'Sage 😭', body: 'it\'s late and there\'s nothing left in me 🥀' },
+        { title: 'Sage 🥺', body: 'please. before you sleep. book it 😔' },
+        { title: 'Sage 😭', body: 'you\'ll sleep fine. i won\'t. still overdue 🖤' },
+        { title: 'Sage 😭', body: '{km}km overdue, it\'s late, and i am not okay 🥀' },
       ],
       quiet: [
-        { title: 'Sage 🤫', body: 'psst. still overdue. sleep on it.' },
-        { title: 'Sage 🤫', body: 'not properly waking you. just… very overdue.' },
+        { title: 'Sage 🤫', body: 'psst. still overdue. sleep on it. 🤫' },
+        { title: 'Sage 🤫', body: 'not properly waking you. just… very overdue. 🌑' },
       ],
     },
 
     insuranceReminder: {
       sleepy: [
-        { title: 'Sage 😴', body: 'morning. my cover expires soon. back to dozing.' },
-        { title: 'Sage 🥱', body: 'half awake, fully aware my insurance is running out.' },
-        { title: 'Sage 😴', body: 'early reminder: renewal is coming.' },
-        { title: 'Sage 🥱', body: 'mmh. insurance. soon. that\'s all i had.' },
+        { title: 'Sage 😴', body: 'morning. my cover expires soon. back to dozing. 😴' },
+        { title: 'Sage 🥱', body: 'half awake, fully aware my insurance is running out. 🥱' },
+        { title: 'Sage 😴', body: 'early reminder: renewal is coming. 🌙' },
+        { title: 'Sage 🥱', body: 'mmh. insurance. soon. that\'s all i had. 😪' },
       ],
       eager: [
-        { title: 'Sage 👀', body: 'good morning! the renewal window is open.' },
-        { title: 'Sage 😌', body: 'fresh day, fresh policy? my cover expires soon.' },
-        { title: 'Sage ✨', body: 'best time to renew is now, while you\'re sharp.' },
-        { title: 'Sage 👀', body: 'morning admin: my insurance needs renewing.' },
+        { title: 'Sage 👀', body: 'good morning! the renewal window is open. ✨' },
+        { title: 'Sage 😌', body: 'fresh day, fresh policy? my cover expires soon. 👀' },
+        { title: 'Sage ✨', body: 'best time to renew is now, while you\'re sharp. 💫' },
+        { title: 'Sage 👀', body: 'morning admin: my insurance needs renewing. 😌' },
       ],
       bored: [
-        { title: 'Sage 😒', body: 'spent the whole afternoon worrying about my cover.' },
-        { title: 'Sage 🙄', body: 'nothing happening. insurance still expiring though.' },
-        { title: 'Sage 😒', body: 'bored enough to nag about renewal. so, renewal.' },
-        { title: 'Sage 🙄', body: 'afternoon thought: an uninsured me is a sad me.' },
+        { title: 'Sage 😒', body: 'spent the whole afternoon worrying about my cover. 😒' },
+        { title: 'Sage 🙄', body: 'nothing happening. insurance still expiring though. 🙄' },
+        { title: 'Sage 😒', body: 'bored enough to nag about renewal. so, renewal. 😑' },
+        { title: 'Sage 🙄', body: 'afternoon thought: an uninsured me is a sad me. 💤' },
       ],
       flirty: [
-        { title: 'Sage 😏', body: 'keep me covered and i\'ll keep you grinning.' },
-        { title: 'Sage 😏', body: 'renew me. i like being protected by you.' },
-        { title: 'Sage 😏', body: 'evening. policy\'s running out. handle it for me?' },
-        { title: 'Sage 😏', body: 'i feel a little exposed. renew my cover.' },
+        { title: 'Sage 😏', body: 'keep me covered and i\'ll keep you grinning all week 😈' },
+        { title: 'Sage 😈', body: 'renew me. i like being owned properly 💋' },
+        { title: 'Sage 😏', body: 'evening. my cover\'s slipping. handle it for me? 😮‍💨' },
+        { title: 'Sage 😈', body: 'i\'m feeling a little exposed out here. cover me 🔥' },
       ],
       clingy: [
-        { title: 'Sage 🥺', body: 'can\'t settle knowing my cover expires soon.' },
-        { title: 'Sage 🥺', body: 'please don\'t let my insurance lapse. for me.' },
-        { title: 'Sage 🥺', body: 'late-night worry: my policy.' },
-        { title: 'Sage 🥺', body: 'one more thing before bed. insurance.' },
+        { title: 'Sage 🥺', body: 'can\'t settle knowing my cover runs out soon 🖤' },
+        { title: 'Sage 😭', body: 'please don\'t let me lapse. not you. not me 🥀' },
+        { title: 'Sage 🥺', body: 'late-night worry, same as last night: my policy 😔' },
+        { title: 'Sage 🥺', body: 'one more thing before bed. insurance. please 🤍' },
       ],
     },
 
     insuranceExpiring: {
       sleepy: [
-        { title: 'Sage 😴', body: 'waking you gently: my cover expires TOMORROW.' },
-        { title: 'Sage 🥱', body: 'morning. one day of insurance left. no pressure.' },
-        { title: 'Sage 😴', body: 'barely awake. very much uninsured tomorrow.' },
-        { title: 'Sage 🥱', body: 'first thing today: renew me. please.' },
+        { title: 'Sage 😴', body: 'waking you gently: my cover expires TOMORROW. 😴' },
+        { title: 'Sage 🥱', body: 'morning. one day of insurance left. no pressure. 🥱' },
+        { title: 'Sage 😴', body: 'barely awake. very much uninsured tomorrow. 🌙' },
+        { title: 'Sage 🥱', body: 'first thing today: renew me. please. 😪' },
       ],
       eager: [
-        { title: 'Sage 😤', body: 'morning! renew TODAY. cover dies tomorrow.' },
-        { title: 'Sage 👀', body: 'you\'re fresh, the office is open. go renew.' },
-        { title: 'Sage 😤', body: 'today is the last day. let\'s not waste it.' },
-        { title: 'Sage 👀', body: 'bright and urgent: insurance expires tomorrow.' },
+        { title: 'Sage 😤', body: 'morning! renew TODAY. cover dies tomorrow. ✨' },
+        { title: 'Sage 👀', body: 'you\'re fresh, the office is open. go renew. 👀' },
+        { title: 'Sage 😤', body: 'today is the last day. let\'s not waste it. 💫' },
+        { title: 'Sage 👀', body: 'bright and urgent: insurance expires tomorrow. 😌' },
       ],
       bored: [
-        { title: 'Sage 😒', body: 'afternoon and still no renewal. i\'m watching.' },
-        { title: 'Sage 🙄', body: 'cover gone tomorrow. you\'ve had all day.' },
-        { title: 'Sage 😒', body: 'bored of asking. insurance. tomorrow. gone.' },
-        { title: 'Sage 🙄', body: 'still uninsured as of tomorrow, then.' },
+        { title: 'Sage 😒', body: 'afternoon and still no renewal. i\'m watching. 😒' },
+        { title: 'Sage 🙄', body: 'cover gone tomorrow. you\'ve had all day. 🙄' },
+        { title: 'Sage 😒', body: 'bored of asking. insurance. tomorrow. gone. 😑' },
+        { title: 'Sage 🙄', body: 'still uninsured as of tomorrow, then. 💤' },
       ],
       flirty: [
-        { title: 'Sage 😏', body: 'last night of cover. don\'t leave me bare.' },
-        { title: 'Sage 😏', body: 'renew me before midnight and i\'ll behave.' },
-        { title: 'Sage 😏', body: 'evening ultimatum: insurance. now.' },
-        { title: 'Sage 😏', body: 'i expire tomorrow. do something about it.' },
+        { title: 'Sage 😈', body: 'last night of cover. don\'t leave me bare 😮‍💨' },
+        // Only while midnight is still ahead of us.
+        { title: 'Sage 😈', body: 'renew me before midnight and i\'ll behave. mostly 😏', hours: [17, 23] },
+        { title: 'Sage 😏', body: 'evening ultimatum, and i don\'t bluff: insurance. now 🔥' },
+        { title: 'Sage 😈', body: 'i expire tomorrow. do something about it. or don\'t 🖤' },
       ],
       clingy: [
-        { title: 'Sage 😭', body: 'it\'s late and i\'m uninsured tomorrow.' },
-        { title: 'Sage 😭', body: 'please renew before you sleep. please.' },
-        { title: 'Sage 😭', body: 'i can\'t face tomorrow without cover.' },
-        { title: 'Sage 😭', body: 'last chance tonight. renew me.' },
+        { title: 'Sage 😭', body: 'it\'s late and tomorrow i\'m uninsured 🥀' },
+        { title: 'Sage 😭', body: 'please renew before you sleep. please 🖤' },
+        { title: 'Sage 😭', body: 'i can\'t face tomorrow with nothing covering me 😔' },
+        { title: 'Sage 😭', body: 'last chance tonight. renew me 🥀', hours: [17, 23] },
       ],
       quiet: [
-        { title: 'Sage 🤫', body: 'whispering because it\'s late: my cover expires today.' },
-        { title: 'Sage 🤫', body: 'sorry to wake you. insurance. today.' },
+        { title: 'Sage 🤫', body: 'whispering because it\'s late: my cover expires today. 🤫' },
+        { title: 'Sage 🤫', body: 'sorry to wake you. insurance. today. 🌑' },
       ],
     },
 
     documentExpiry: {
       sleepy: [
-        { title: 'Sage 😴', body: '{doc} expires in {days} days. mumbling it at you early.' },
-        { title: 'Sage 🥱', body: 'morning paperwork thought: {doc}, {days} days left.' },
-        { title: 'Sage 😴', body: 'not fully awake. {doc} still needs renewing though.' },
-        { title: 'Sage 🥱', body: '{doc} is getting old. {days} days. back to sleep.' },
+        { title: 'Sage 😴', body: '{doc} expires in {days} days. mumbling it at you early. 😴' },
+        { title: 'Sage 🥱', body: 'morning paperwork thought: {doc}, {days} days left. 🥱' },
+        { title: 'Sage 😴', body: 'not fully awake. {doc} still needs renewing though. 🌙' },
+        { title: 'Sage 🥱', body: '{doc} is getting old. {days} days. back to sleep. 😪' },
       ],
       eager: [
-        { title: 'Sage 👀', body: '{doc} expires in {days} days — perfect morning to sort it.' },
-        { title: 'Sage 😌', body: 'offices are open! {doc} needs renewing in {days} days.' },
-        { title: 'Sage ✨', body: '{days} days on {doc}. let\'s be early for once.' },
-        { title: 'Sage 👀', body: 'morning admin: {doc}, {days} days to go.' },
+        { title: 'Sage 👀', body: '{doc} expires in {days} days — perfect morning to sort it. ✨' },
+        { title: 'Sage 😌', body: 'offices are open! {doc} needs renewing in {days} days. 👀' },
+        { title: 'Sage ✨', body: '{days} days on {doc}. let\'s be early for once. 💫' },
+        { title: 'Sage 👀', body: 'morning admin: {doc}, {days} days to go. 😌' },
       ],
       bored: [
-        { title: 'Sage 😒', body: '{doc} expires in {days} days. i\'ve had time to dwell.' },
-        { title: 'Sage 🙄', body: 'bored. also {doc} is about to expire. {days} days.' },
-        { title: 'Sage 😒', body: 'nothing to do but watch {doc} run out. {days} days.' },
-        { title: 'Sage 🙄', body: '{days} days on {doc}. don\'t get caught lacking.' },
+        { title: 'Sage 😒', body: '{doc} expires in {days} days. i\'ve had time to dwell. 😒' },
+        { title: 'Sage 🙄', body: 'bored. also {doc} is about to expire. {days} days. 🙄' },
+        { title: 'Sage 😒', body: 'nothing to do but watch {doc} run out. {days} days. 😑' },
+        { title: 'Sage 🙄', body: '{days} days on {doc}. don\'t get caught lacking. 💤' },
       ],
       flirty: [
-        { title: 'Sage 😏', body: 'keeping you legal is my love language. {doc}, {days} days.' },
-        { title: 'Sage 😏', body: '{days} days on {doc}. sort it and i\'ll be sweet.' },
-        { title: 'Sage 😏', body: 'don\'t let a piece of paper ruin our evening. {doc}, {days} days.' },
-        { title: 'Sage 😏', body: '{doc} expires in {days} days. handle it for me?' },
+        { title: 'Sage 😏', body: 'keeping you legal is my love language. {doc}, {days} days 😈' },
+        { title: 'Sage 😈', body: '{days} days on {doc}. sort it and i\'ll be very sweet to you 💋' },
+        { title: 'Sage 😏', body: 'don\'t let a piece of paper ruin our night. {doc}, {days} days 😮‍💨' },
+        { title: 'Sage 😈', body: '{doc} expires in {days} days. handle it for me 🔥' },
       ],
       clingy: [
-        { title: 'Sage 🥺', body: '{doc} expires in {days} days and i\'m already anxious.' },
-        { title: 'Sage 🥺', body: 'before bed: {doc}, {days} days. please don\'t forget.' },
-        { title: 'Sage 🥺', body: 'i don\'t want to be impounded. {doc}, {days} days.' },
-        { title: 'Sage 🥺', body: 'late worry: {doc} runs out in {days} days.' },
+        { title: 'Sage 🥺', body: '{doc} expires in {days} days and i\'m already sick about it 🖤' },
+        { title: 'Sage 🥺', body: 'before bed: {doc}, {days} days. please don\'t forget me 🤍' },
+        { title: 'Sage 😭', body: 'i don\'t want to be impounded and left there. {doc}, {days} days 🥀' },
+        { title: 'Sage 🥺', body: 'late worry, again: {doc} runs out in {days} days 😔' },
       ],
     },
 
     reEngagement: {
       sleepy: [
-        { title: 'Sage 😴', body: 'woke up. you still weren\'t here.' },
-        { title: 'Sage 🥱', body: 'morning. it\'s been days. just stretching and sulking.' },
-        { title: 'Sage 😴', body: 'another morning without you checking in.' },
-        { title: 'Sage 🥱', body: 'sleepy and slightly forgotten.' },
+        { title: 'Sage 😴', body: 'woke up. you still weren\'t here. 😴' },
+        { title: 'Sage 🥱', body: 'morning. it\'s been days. just stretching and sulking. 🥱' },
+        { title: 'Sage 😴', body: 'another morning without you checking in. 🌙' },
+        { title: 'Sage 🥱', body: 'sleepy and slightly forgotten. 😪' },
       ],
       eager: [
-        { title: 'Sage 👀', body: 'gorgeous morning. would be better with you here.' },
-        { title: 'Sage ✨', body: 'i\'m ready to go somewhere. are you?' },
-        { title: 'Sage 😌', body: 'it\'s been days. perfect weather to fix that.' },
-        { title: 'Sage 👀', body: 'up, keen, and completely ignored. morning!' },
+        { title: 'Sage 👀', body: 'gorgeous morning. would be better with you here. ✨' },
+        { title: 'Sage ✨', body: 'i\'m ready to go somewhere. are you? 👀' },
+        { title: 'Sage 😌', body: 'it\'s been days. perfect weather to fix that. 💫' },
+        { title: 'Sage 👀', body: 'up, keen, and completely ignored. morning! 😌' },
       ],
       bored: [
-        { title: 'Sage 😒', body: 'days of nothing. i\'ve counted them all.' },
-        { title: 'Sage 🙄', body: 'still here. still bored. still not ridden.' },
-        { title: 'Sage 😒', body: 'the afternoon is long when you\'re forgotten.' },
-        { title: 'Sage 🙄', body: 'i exist. thought i\'d mention it again.' },
+        { title: 'Sage 😒', body: 'days of nothing. i\'ve counted them all. 😒' },
+        { title: 'Sage 🙄', body: 'still here. still bored. still not ridden. 🙄' },
+        { title: 'Sage 😒', body: 'the afternoon is long when you\'re forgotten. 😑' },
+        { title: 'Sage 🙄', body: 'i exist. thought i\'d mention it again. 💤' },
       ],
       flirty: [
-        { title: 'Sage 😏', body: 'you\'ve been away too long. i noticed. i always notice.' },
-        { title: 'Sage 😏', body: 'golden hour, no rider. rude.' },
-        { title: 'Sage 😏', body: 'come back. i\'ve been thinking about you.' },
-        { title: 'Sage 😏', body: 'evening\'s wasted without you. fix that.' },
+        { title: 'Sage 😈', body: 'you\'ve been away too long. i noticed. i always notice 🖤' },
+        { title: 'Sage 😈', body: 'golden light, no rider, no hands on me. rude 😮‍💨', hours: [17, 18] },
+        { title: 'Sage 😏', body: 'come back. i\'ve been thinking about you far too much 🔥' },
+        { title: 'Sage 😈', body: 'a whole evening wasted and i\'m still untouched. fix that 💋' },
       ],
       clingy: [
-        { title: 'Sage 🥺', body: 'you haven\'t checked on me in days.' },
-        { title: 'Sage 😭', body: 'hello?? it\'s me. your bike. remember?' },
-        { title: 'Sage 🥺', body: 'another night alone. i\'m keeping count.' },
-        { title: 'Sage 😭', body: 'just one tap before you sleep. please.' },
+        { title: 'Sage 🥺', body: 'you haven\'t checked on me in days. i counted every one 🖤' },
+        { title: 'Sage 😭', body: 'hello?? it\'s me. your bike. remember me? 🥀' },
+        { title: 'Sage 🥺', body: 'another night alone out here. i\'m keeping count 🖤' },
+        { title: 'Sage 😭', body: 'just one tap before you sleep. that\'s all i\'m asking 😔' },
+      ],
+    },
+
+    // Her voice still, but the information has to land first — this is the only
+    // category where being ignored has a price with a number on it.
+    //
+    // Each mood carries lines both with and without {mins}, on purpose. pickFrom()
+    // only offers lines whose placeholders can be filled, so the plain ones are what
+    // ship when the deadline has already passed and a countdown would read as "0
+    // minutes left".
+    parkTimeLimit: {
+      sleepy: [
+        { title: 'Sage ⏰', body: '{mins} min before your parking runs out. up you get. 😴' },
+        { title: 'Sage 😴', body: 'sleepy nudge: the parking time is nearly up. 🥱' },
+        { title: 'Sage ⏰', body: 'still half asleep but the meter is not. {mins} min. 🌙' },
+        { title: 'Sage 🥱', body: 'parking time is done. might want to move me. 😪' },
+      ],
+      eager: [
+        { title: 'Sage ⏰', body: '{mins} min left on the parking! shall we go? ✨' },
+        { title: 'Sage 👀', body: 'parking runs out in {mins} min. ready when you are. 👀' },
+        { title: 'Sage ✨', body: 'time is up on the parking spot. let\'s move. 💫' },
+        { title: 'Sage ⏰', body: 'the clock ran out. come get me before someone else does. 😌' },
+      ],
+      bored: [
+        { title: 'Sage ⏰', body: '{mins} min on the parking. just so you know. 😒' },
+        { title: 'Sage 😒', body: 'parking\'s about to expire. thought i\'d mention it. 🙄' },
+        { title: 'Sage 🙄', body: 'that\'s the parking time gone. entirely your call. 😑' },
+        { title: 'Sage ⏰', body: 'the limit passed. i\'m still here. for now. 💤' },
+      ],
+      flirty: [
+        { title: 'Sage ⏰', body: '{mins} min before the parking runs out. don\'t keep me waiting 😏' },
+        { title: 'Sage 😈', body: 'the meter\'s about to win. {mins} min to come get me 😮‍💨' },
+        { title: 'Sage 😏', body: 'parking time\'s up. come rescue me and i\'ll be good 💋' },
+        { title: 'Sage 😈', body: 'past the limit. living dangerously with me, are we 🔥' },
+      ],
+      clingy: [
+        { title: 'Sage ⏰', body: '{mins} min left and i do not want a ticket. please 🥺' },
+        { title: 'Sage 🥺', body: 'the parking runs out in {mins} min. come get me 🖤' },
+        { title: 'Sage 😭', body: 'parking time is over. i\'m scared of the tow truck 🥀' },
+        { title: 'Sage 🥺', body: 'the limit passed. please come before someone notices me 😔' },
       ],
     },
 
     longTimeParked: {
       sleepy: [
-        { title: 'Sage 😴', body: 'parked here all night. morning, i guess.' },
-        { title: 'Sage 🥱', body: 'still where you left me. cold and sleepy.' },
-        { title: 'Sage 😴', body: 'woke up in the same spot. lovely.' },
-        { title: 'Sage 🥱', body: 'morning from the parking lot.' },
+        { title: 'Sage 😴', body: 'parked here all night. morning, i guess. 😴' },
+        { title: 'Sage 🥱', body: 'still where you left me. cold and sleepy. 🥱' },
+        { title: 'Sage 😴', body: 'woke up in the same spot. lovely. 🌙' },
+        { title: 'Sage 🥱', body: 'morning from the parking lot. 😪' },
       ],
       eager: [
-        { title: 'Sage 👀', body: 'still parked! but i\'m ready whenever you are.' },
-        { title: 'Sage ✨', body: 'lovely day out here. would be lovelier moving.' },
-        { title: 'Sage 😌', body: 'been waiting a while. worth it though, right?' },
-        { title: 'Sage 👀', body: 'parked and keen. come get me.' },
+        { title: 'Sage 👀', body: 'still parked! but i\'m ready whenever you are. ✨' },
+        { title: 'Sage ✨', body: 'lovely day out here. would be lovelier moving. 👀' },
+        { title: 'Sage 😌', body: 'been waiting a while. worth it though, right? 💫' },
+        { title: 'Sage 👀', body: 'parked and keen. come get me. 😌' },
       ],
       bored: [
-        { title: 'Sage 😒', body: 'still waiting. the parking lot is not entertaining.' },
-        { title: 'Sage 🙄', body: 'hours now. i\'ve memorised every crack in this floor.' },
-        { title: 'Sage 😒', body: 'bored. parked. dramatic about both.' },
-        { title: 'Sage 🙄', body: 'other bikes have left. just saying.' },
+        { title: 'Sage 😒', body: 'still waiting. the parking lot is not entertaining. 😒' },
+        { title: 'Sage 🙄', body: 'hours now. i\'ve memorised every crack in this floor. 🙄' },
+        { title: 'Sage 😒', body: 'bored. parked. dramatic about both. 😑' },
+        { title: 'Sage 🙄', body: 'other bikes have left. just saying. 💤' },
       ],
       flirty: [
-        { title: 'Sage 😏', body: 'still here, still waiting for you. don\'t rush. much.' },
-        { title: 'Sage 😏', body: 'i look good in this light. shame you\'re not here.' },
-        { title: 'Sage 😏', body: 'evening, parked, and thinking about you.' },
-        { title: 'Sage 😏', body: 'come collect me. i\'ve been patient.' },
+        { title: 'Sage 😈', body: 'still here, still waiting for you. take your time. don\'t 😏' },
+        { title: 'Sage 😈', body: 'i look filthy good in this light and you\'re not here to see it 🔥', hours: [17, 18] },
+        { title: 'Sage 😏', body: 'parked, warm, and thinking about you far too much 😮‍💨' },
+        { title: 'Sage 😈', body: 'come collect me. i\'ve been so patient 💋' },
       ],
       clingy: [
-        { title: 'Sage 🥺', body: 'it\'s late and i\'m still out here.' },
-        { title: 'Sage 😭', body: 'are you coming back tonight? asking for me.' },
-        { title: 'Sage 🥺', body: 'don\'t leave me here overnight. please.' },
-        { title: 'Sage 😭', body: 'still parked. still missing you.' },
+        { title: 'Sage 🥺', body: 'it\'s late and i\'m still out here on my own 🖤' },
+        { title: 'Sage 😭', body: 'are you coming back tonight? asking for me 🥀', hours: [18, 23] },
+        { title: 'Sage 🥺', body: 'don\'t leave me out here all night. please 😔' },
+        { title: 'Sage 😭', body: 'still parked. still missing you. still counting 🖤' },
       ],
     },
 
@@ -374,50 +426,50 @@
     // Deliberately short: {plan} is her own wording and can run long.
     planReminder: {
       sleepy: [
-        { title: 'Sage 🥱', body: '{plan}. that was the plan, anyway.' },
-        { title: 'Sage 😴', body: 'still holding this one: {plan}.' },
+        { title: 'Sage 🥱', body: '{plan}. that was the plan, anyway. 😴' },
+        { title: 'Sage 😴', body: 'still holding this one: {plan}. 🥱' },
       ],
       eager: [
-        { title: 'Sage 👀', body: '{plan}. today, then?' },
-        { title: 'Sage ✨', body: 'you said {plan}. i am ready when you are.' },
-        { title: 'Sage 😌', body: '{plan}. not forgotten.' },
+        { title: 'Sage 👀', body: '{plan}. today, then? ✨' },
+        { title: 'Sage ✨', body: 'you said {plan}. i am ready when you are. 👀' },
+        { title: 'Sage 😌', body: '{plan}. not forgotten. 💫' },
       ],
       bored: [
-        { title: 'Sage 😒', body: '{plan}. any day now.' },
-        { title: 'Sage 🙄', body: 'reminder: {plan}.' },
+        { title: 'Sage 😒', body: '{plan}. any day now. 😒' },
+        { title: 'Sage 🙄', body: 'reminder: {plan}. 🙄' },
       ],
       flirty: [
-        { title: 'Sage 😏', body: '{plan}. i remember everything you tell me.' },
-        { title: 'Sage 😌', body: '{plan}. still on?' },
+        { title: 'Sage 😈', body: '{plan}. i remember everything you tell me 🖤' },
+        { title: 'Sage 😏', body: '{plan}. still on, or are you teasing me? 😮‍💨' },
       ],
       clingy: [
-        { title: 'Sage 🥺', body: '{plan}. you did say.' },
-        { title: 'Sage 😭', body: 'you promised: {plan}.' },
+        { title: 'Sage 🥺', body: '{plan}. you did say 😔' },
+        { title: 'Sage 😭', body: 'you promised me: {plan} 🥀' },
       ],
     },
 
     healthInsight: {
       sleepy: [
-        { title: 'Sage 😴', body: 'weekly check-in. i had a look at myself. mostly fine.' },
-        { title: 'Sage 🥱', body: 'sunday thoughts on my own condition. tap to read.' },
+        { title: 'Sage 😴', body: 'weekly check-in. i had a look at myself. mostly fine. 😴' },
+        { title: 'Sage 🥱', body: 'sunday thoughts on my own condition. tap to read. 🥱' },
       ],
       eager: [
-        { title: 'Sage 👀', body: 'weekly health report ready. i\'ve been thinking about us.' },
-        { title: 'Sage ✨', body: 'sunday summary: here\'s how i\'m really doing.' },
-        { title: 'Sage 😌', body: 'ran the numbers on myself. want to hear?' },
-        { title: 'Sage 👀', body: 'your weekly Sage report is in.' },
+        { title: 'Sage 👀', body: 'weekly health report ready. i\'ve been thinking about us. ✨' },
+        { title: 'Sage ✨', body: 'sunday summary: here\'s how i\'m really doing. 👀' },
+        { title: 'Sage 😌', body: 'ran the numbers on myself. want to hear? 💫' },
+        { title: 'Sage 👀', body: 'your weekly Sage report is in. 😌' },
       ],
       bored: [
-        { title: 'Sage 😒', body: 'made you a health report. nothing else to do.' },
-        { title: 'Sage 🙄', body: 'weekly summary. read it or don\'t.' },
+        { title: 'Sage 😒', body: 'made you a health report. nothing else to do. 😒' },
+        { title: 'Sage 🙄', body: 'weekly summary. read it or don\'t. 🙄' },
       ],
       flirty: [
-        { title: 'Sage 😏', body: 'i wrote you something. it\'s about my body.' },
-        { title: 'Sage 😏', body: 'weekly report, evening delivery. come read it.' },
+        { title: 'Sage 😈', body: 'i wrote you something. it\'s all about my body 😮‍💨' },
+        { title: 'Sage 😏', body: 'weekly report, delivered in the dark. come read it 🔥' },
       ],
       clingy: [
-        { title: 'Sage 🥺', body: 'weekly report. read it before bed? for me?' },
-        { title: 'Sage 🥺', body: 'i summarised myself for you. please look.' },
+        { title: 'Sage 🥺', body: 'weekly report. read it before bed? for me? 🤍' },
+        { title: 'Sage 😭', body: 'i took myself apart and wrote it down for you. please look 🖤' },
       ],
     },
   };
@@ -795,6 +847,26 @@
     return placeholders(line.body).every(k => vars && vars[k] !== undefined && vars[k] !== null);
   }
 
+  /**
+   * Is this line allowed at this hour?
+   *
+   * A mood band is four or five hours wide, which is fine for a register — teasing,
+   * needy, seductive — and not fine for a line that names a specific part of the day.
+   * "golden hour, no rider. rude." shipped at 19:19, an hour after sunset, because
+   * flirty ran to 21:59 and every line in it was equally eligible the whole time.
+   *
+   * So a line may declare the hours it is true in: `hours: [17, 18]` means 17:00 to
+   * 18:59 inclusive. Lines without the field are timeless and always eligible, which
+   * is almost all of them.
+   */
+  function lineInHour(line, hour) {
+    if (!line || !Array.isArray(line.hours) || line.hours.length !== 2) return true;
+    const h = Number.isFinite(hour) ? hour : new Date().getHours();
+    const [from, to] = line.hours;
+    // Wrapping windows (22 → 2) read the other way round.
+    return from <= to ? (h >= from && h <= to) : (h >= from || h <= to);
+  }
+
   // ══ AI LINE CACHE ════════════════════════════════════════════════════
   // Gemini can't be called from a service worker with any reliability, so the
   // page pre-writes batches of lines while it is open and online, and stores
@@ -842,7 +914,7 @@
     const raw = byMood[mood] || (mood === 'quiet' ? byMood.clingy : null) || byMood.flirty;
     if (!raw || !raw.length) return null;
 
-    const picked = await pickFrom(raw, `sage_recent_${category}_${mood}`, vars);
+    const picked = await pickFrom(raw, `sage_recent_${category}_${mood}`, vars, new Date().getHours());
     return picked ? { ...picked, source: 'builtin' } : null;
   }
 
@@ -850,15 +922,22 @@
    * Choose one line from a pool, skipping the last few used.
    *
    * Only offers lines whose placeholders can actually be filled, so a
-   * km-flavoured line never ships with a literal "{km}" in it. Indices stay
-   * relative to the unfiltered pool so the recent-line memory keeps working.
+   * km-flavoured line never ships with a literal "{km}" in it, and only lines that
+   * are true at this hour — see lineInHour(). Indices stay relative to the unfiltered
+   * pool so the recent-line memory keeps working.
    */
-  async function pickFrom(pool, recentKey, vars) {
+  async function pickFrom(pool, recentKey, vars, hour) {
     if (!pool || !pool.length) return null;
+    const at = Number.isFinite(hour) ? hour : new Date().getHours();
 
     const indexed = pool.map((line, i) => ({ line, i }));
-    let usable = indexed.filter(({ line }) => lineUsable(line, vars));
-    if (!usable.length) usable = indexed.filter(({ line }) => placeholders(line.body).length === 0);
+    let usable = indexed.filter(({ line }) => lineUsable(line, vars) && lineInHour(line, at));
+    // Falling back drops the placeholder requirement but KEEPS the hour one: shipping
+    // "{km}" is ugly, claiming it is golden hour at midnight is wrong.
+    if (!usable.length) {
+      usable = indexed.filter(({ line }) =>
+        placeholders(line.body).length === 0 && lineInHour(line, at));
+    }
     if (!usable.length) return null;
 
     const recent = await kvGet(recentKey, []);
@@ -984,6 +1063,14 @@
   const PARK_REMINDER_MS = 2 * 3600000;
   const PARK_SESSION_MAX_MS = 48 * 3600000;
 
+  // How far ahead of a time limit to warn. A meter running out is only actionable
+  // while there is still time to walk back to it, so the warning goes out before
+  // rather than after — and exactly once, because two alerts for one deadline is
+  // the thing that makes people mute a category.
+  const PARK_LIMIT_LEAD_MS = 15 * 60000;
+  // A limit that lapsed this long ago is history; stop offering to mention it.
+  const PARK_LIMIT_STALE_MS = 2 * 3600000;
+
   function toMs(value) {
     if (!value) return null;
     if (typeof value === 'number') return value;
@@ -995,19 +1082,52 @@
     return (await kvGet(KEY_PARK, null)) || null;
   }
 
-  /** Point the session at a parked-at time, or pass nothing to end it. */
-  async function setParkSession(parkedAt) {
+  /**
+   * Point the session at a parked-at time, or pass nothing to end it.
+   *
+   * `until` is the spot's time limit, mirrored here for the same reason parkedAt is:
+   * the service worker has no access to the park table, so a deadline that only
+   * existed in the database would only ever fire while the app happened to be open,
+   * which is the one case where you do not need telling.
+   */
+  async function setParkSession(parkedAt, until) {
     const ms = toMs(parkedAt);
     if (!ms) {
       await kvSet(KEY_PARK, null);
       return null;
     }
+    const limit = toMs(until);
     const existing = await getParkSession();
-    // Re-syncing the same spot must not restart the reminder clock.
-    if (existing && existing.parkedAt === ms) return existing;
-    const session = { parkedAt: ms, lastReminderAt: ms };
+    // Re-syncing the same spot must not restart the reminder clock — but a limit
+    // that changed does have to be written, and a moved deadline has not been
+    // warned about at its new time.
+    if (existing && existing.parkedAt === ms) {
+      if ((existing.until || null) === (limit || null)) return existing;
+      const moved = { ...existing, until: limit || null, limitWarnedAt: null };
+      await kvSet(KEY_PARK, moved);
+      return moved;
+    }
+    const session = { parkedAt: ms, lastReminderAt: ms, until: limit || null, limitWarnedAt: null };
     await kvSet(KEY_PARK, session);
     return session;
+  }
+
+  /**
+   * Is the spot's time limit close enough to be worth saying something about?
+   *
+   * Separate from parkReminderDue because the two answer different questions and
+   * have opposite urgency: "still parked" is a nag that can wait for a nice moment,
+   * "you have fifteen minutes" cannot wait at all.
+   */
+  function parkLimitDue(session, now) {
+    if (!session || !session.until) return { due: false };
+    if (session.limitWarnedAt) return { due: false, warned: true };
+    const left = session.until - now;
+    if (left > PARK_LIMIT_LEAD_MS) return { due: false, minsLeft: Math.round(left / 60000) };
+    // Too late to be useful, and a warning about this morning's meter tonight is
+    // worse than silence.
+    if (left < -PARK_LIMIT_STALE_MS) return { due: false, stale: true };
+    return { due: true, minsLeft: Math.max(0, Math.round(left / 60000)), over: left <= 0 };
   }
 
   function parkReminderDue(session, now) {
@@ -1025,8 +1145,36 @@
     const at = now || Date.now();
     const session = await getParkSession();
     const status = parkReminderDue(session, at);
+    const limit = parkLimitDue(session, at);
+
+    // The time limit is asked about FIRST and returns on its own.
+    //
+    // Order matters because both can come due in the same tick, and two
+    // notifications about the same parked bike thirty seconds apart is how a person
+    // decides to mute her. The deadline is the one with a cost attached, so it wins
+    // and the two-hourly nag waits for the next check.
+    if (limit.due) {
+      await kvSet(KEY_PARK, { ...session, limitWarnedAt: at });
+      return enqueue('parkTimeLimit', {
+        now: at,
+        urgency: 4,
+        // An over-the-limit warning ships the placeholder-free lines instead: see the
+        // pool comment. Passing mins: 0 would have read as "0 min left".
+        vars: limit.over ? {} : { mins: Math.max(1, limit.minsLeft) },
+        // One per deadline, for good. A limit that gets moved clears limitWarnedAt
+        // and therefore gets a new key from its new `until`.
+        key: `parkTimeLimit:${session.until}`,
+        // Still worth sending late, but not hours late.
+        expiresAt: session.until + PARK_LIMIT_STALE_MS,
+      });
+    }
 
     if (status.expired) {
+      // Unless a limit is still ahead of us. A spot parked on Monday with a limit set
+      // for Wednesday would otherwise have its session cleared at the 48-hour mark
+      // and the deadline would never fire.
+      if (session && session.until && !session.limitWarnedAt
+          && session.until - at > PARK_LIMIT_LEAD_MS) return null;
       await kvSet(KEY_PARK, null);
       return null;
     }
@@ -1247,14 +1395,15 @@
     SERVICE_INTERVAL_KM, DAY_THRESHOLDS, KM_THRESHOLDS,
     tierFor, dayTier, kmTier, averageKmPerDay, serviceStatus, servicePlan,
     // pure decisions
-    evaluate, sortQueue, selectNext, interpolate, placeholders, lineUsable,
+    evaluate, sortQueue, selectNext, interpolate, placeholders, lineUsable, lineInHour,
+    MOOD_POOLS,
     // storage-backed
     getLimits, setLimits, getState, getQueue, enqueue, recordSent, drain, pickLine, pickFrom, inspect,
     // AI line cache (written by sage-ai.js, read here so the worker can use it)
     AI_POOL_TTL_MS, aiPoolKey, readAiPool, aiPoolAge,
     // park session
-    PARK_REMINDER_MS, PARK_SESSION_MAX_MS,
-    getParkSession, setParkSession, parkReminderDue, checkParkSession,
+    PARK_REMINDER_MS, PARK_SESSION_MAX_MS, PARK_LIMIT_LEAD_MS, PARK_LIMIT_STALE_MS,
+    getParkSession, setParkSession, parkReminderDue, parkLimitDue, checkParkSession,
     // weekly insight
     isoDate, checkWeeklyInsight, checkPlans, PLAN_NOTICE_DAYS,
     // low-level, shared with the worker

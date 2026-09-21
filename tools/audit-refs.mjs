@@ -215,14 +215,28 @@ const broken = refs.filter((r) => !r.ok);
 const referenced = new Set(refs.filter((r) => r.ok).map((r) => r.resolved));
 
 // Entry points and non-runtime files are reachable without being referenced.
+// vendor/pdf-lib.min.js is appended as a <script> at runtime by bill-merge.js the
+// first time a merge needs it — deliberately not in index.html, because 513KB in
+// front of every cold start to serve the minority of entries with more than one
+// file attached is the wrong trade. Nothing in the markup points at it, so the
+// orphan check cannot see it.
 const EXEMPT =
-  /^(?:index\.html|service-worker\.js|manifest\.json|README\.md|\.gitignore|docs\/|tools\/|supabase\/|assets\/source\/|vendor\/three\.core\.js)/;
+  /^(?:index\.html|service-worker\.js|manifest\.json|README\.md|\.gitignore|docs\/|tools\/|supabase\/|assets\/source\/|vendor\/three\.core\.js|vendor\/pdf-lib\.min\.js)/;
 const orphans = walk(ROOT).filter((f) => !referenced.has(f) && !EXEMPT.test(f));
 
 // vendor/three.core.js is imported from inside the minified bundle, and
 // assets/source/** is deliberately not shipped — both are exempt above but
 // worth surfacing separately so the exemption stays honest.
 const notes = [];
+if (existsSync(path.join(ROOT, 'vendor/pdf-lib.min.js'))) {
+  const kb = (statSync(path.join(ROOT, 'vendor/pdf-lib.min.js')).size / 1024).toFixed(0);
+  const loader = readFileSync(path.join(ROOT, 'src/js/bill-merge.js'), 'utf8');
+  // Stated as a check, not a comment: the exemption above is only honest while
+  // something still loads it.
+  notes.push(loader.includes('vendor/pdf-lib.min.js')
+    ? `vendor/pdf-lib.min.js (${kb} KB) is lazy-loaded by src/js/bill-merge.js; exempt from the orphan check.`
+    : '⚠ vendor/pdf-lib.min.js is exempt from the orphan check but NOTHING loads it any more — delete it.');
+}
 if (existsSync(path.join(ROOT, 'assets/source'))) {
   const srcFiles = walk(path.join(ROOT, 'assets/source'));
   if (srcFiles.length) {

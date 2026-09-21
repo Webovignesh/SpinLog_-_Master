@@ -81,8 +81,11 @@
     },
     {
       name: 'list_park_history',
-      description: 'Where he has parked you recently, newest first, with addresses when they were '
-        + 'resolved. Use this when he asks where you are or where he left you.',
+      description: 'Where he has parked you recently, newest first. Each spot has the address when '
+        + 'one was resolved, plus anything he added himself: place, level, note, whether there is a '
+        + 'photo, and moveBy if he set a time limit. Prefer place and level over the coordinates '
+        + 'when you answer — that is how he will recognise it. Use this when he asks where you are '
+        + 'or where he left you.',
       parameters: { type: 'object', properties: {} },
     },
     {

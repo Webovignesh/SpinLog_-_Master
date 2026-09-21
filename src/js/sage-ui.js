@@ -33,6 +33,7 @@
     insuranceExpiring: { name: 'Cover expiring', hint: 'The last day or two' },
     documentExpiry: { name: 'Documents expiring', hint: 'PUC, RC, licence' },
     longTimeParked: { name: 'Still parked', hint: 'Every couple of hours' },
+    parkTimeLimit: { name: 'Parking runs out', hint: '15 minutes before a limit you set' },
     parkingSaved: { name: 'Parking saved', hint: 'Confirmation when you park' },
     recordSaved: { name: 'Record saved', hint: 'Confirmation when you log something' },
     reEngagement: { name: 'Missing you', hint: 'After a couple of quiet days' },
@@ -2512,6 +2513,14 @@
 
   function onKeydown(ev) {
     if (!isOpen()) return;
+    // `e` is the element cache, and it has to be taken here like every other
+    // function in this file does. It was missing, and the cost was the whole
+    // keyboard contract of this dialog: the first `e.memPick` read below threw
+    // ReferenceError, so Escape never closed the dialog and Tab never trapped —
+    // focus walked straight out into the page behind it. Silent, because the
+    // throw happens inside a listener and nothing above it was watching.
+    const e = cache();
+
     // The slide dialog opens over this one and keeps its own keys. Without this,
     // Escape cancelled the slide AND closed the settings dialog behind it in the
     // same keypress, and Tab was pulled back out of the dialog asking the
@@ -3198,7 +3207,17 @@
   async function sendChat(text) {
     const e = chatEls();
     const AI = window.SageAI;
-    const asked = String(text || '').trim();
+    // Nothing but punctuation is nothing. A phone keyboard turns a double space
+    // into ". " and an autocomplete tap into a stray full stop, and two "." turns
+    // had landed in his log between real messages — each one a bubble, a counted
+    // message, and an API call spent asking her to interpret a full stop.
+    //
+    // Emoji are NOT punctuation. "❤️" on its own is a message, and a reply to it
+    // is the right behaviour.
+    const asked = /^[\s\p{P}\p{S}]*$/u.test(String(text || ''))
+        && !/\p{Extended_Pictographic}/u.test(String(text || ''))
+      ? ''
+      : String(text || '').trim();
     // Files on their own are a valid message: clip a bill, press send, and she
     // works out what it is.
     if ((!asked && !pending.length) || chatBusy) return;
@@ -3441,9 +3460,69 @@
     e.settings?.addEventListener('click', () => open());
 
     setupAttachments();
+    keepComposerAboveKeyboard(e);
     renderChat();
     refreshChatMood();
     console.log('[SpinLog] ✅ Sage chat ready');
+  }
+
+  /**
+   * Keep what he is typing above the keyboard.
+   *
+   * `interactive-widget=resizes-content` on the viewport meta does the real work —
+   * it makes the keyboard shrink the layout viewport, so the chat card's `dvh`
+   * heights contract and the composer is inside the page again rather than behind
+   * half a screen of keys.
+   *
+   * This is the second half. The layout resize does not scroll anything, so on a
+   * long page the composer can end up correctly sized and still off-screen. And
+   * the resize arrives while the keyboard is still animating, so a scroll issued
+   * on `focus` alone aims at where the page was a moment ago.
+   *
+   * So: scroll on focus, and again when the viewport actually settles. visualViewport
+   * is the only event that fires when the keyboard finishes moving; on a browser
+   * without it the focus scroll alone is the same behaviour as before, only aimed
+   * at the right element.
+   */
+  function keepComposerAboveKeyboard(e) {
+    if (!e.input) return;
+    const anchor = e.form || e.input;
+    let typing = false;
+
+    // Is the composer already somewhere he can see? Checked against the VISUAL
+    // viewport, whose height is what the keyboard actually takes away.
+    //
+    // This is what keeps the whole thing from being a nuisance. sendChat() refocuses
+    // the input after every reply with `preventScroll: true`, on purpose, so the
+    // page does not jump — and scrolling here unconditionally would undo that. It
+    // also makes the desktop case a no-op, where the composer never moves.
+    const inView = () => {
+      const box = anchor.getBoundingClientRect();
+      const limit = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+      return box.top >= 0 && box.bottom <= limit - 4;
+    };
+
+    const bring = () => {
+      if (!typing || inView()) return;
+      // block:'end' rather than 'center': the composer is the last thing in the
+      // card, so its bottom edge is what has to clear the keyboard.
+      anchor.scrollIntoView({ block: 'end', behavior: 'smooth' });
+    };
+
+    e.input.addEventListener('focus', () => {
+      typing = true;
+      // Two frames: one for the focus to commit, one for the browser's own
+      // scroll-on-focus to land, so this does not fight it.
+      requestAnimationFrame(() => requestAnimationFrame(bring));
+    });
+    e.input.addEventListener('blur', () => { typing = false; });
+
+    // The only event that fires when the keyboard has finished moving. A scroll
+    // issued on focus alone aims at where the page was before it opened.
+    //
+    // Resize only. Visual-viewport SCROLL is his gesture, and following it would
+    // mean fighting him for control of the page while he reads.
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', bring);
   }
 
   /** Called when the Sage section is opened. */

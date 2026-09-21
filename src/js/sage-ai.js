@@ -2223,6 +2223,7 @@
     documentExpiry: ['doc', 'days'],
     reEngagement: ['days'],
     longTimeParked: ['hours'],
+    parkTimeLimit: ['mins'],
     healthInsight: [],
   };
 
@@ -2234,6 +2235,8 @@
     documentExpiry: 'One of your documents expires soon and needs renewing.',
     reEngagement: 'He has not opened the app or checked on you in days.',
     longTimeParked: 'You have been parked in the same spot for hours, waiting.',
+    parkTimeLimit: 'The parking time limit he set for you runs out in {mins} minutes. '
+      + 'Say so plainly — this one costs him money if he misses it.',
     healthInsight: 'You have a weekly summary of your own condition ready for him.',
     // Not used for a pre-warmed pool — a plan reminder has to be about one
     // specific plan, so writePlanLine() writes it at send time instead. The brief

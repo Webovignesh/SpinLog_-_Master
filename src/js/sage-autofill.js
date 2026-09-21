@@ -558,6 +558,24 @@
     if (kind) hint.classList.add(`is-${kind}`);
   }
 
+  // The proposal panel lived here: proposalHost(), propose(), clearProposal(),
+  // showValue() and an escapeHtml() that only it used.
+  //
+  // It listed what she had read and waited for a second press — "Fill these in" —
+  // before anything reached the form. That was the right answer to the wrong
+  // problem. The complaint it was built for was that she filled the form UNASKED,
+  // and the button staying dormant until a file is attached already fixes that: he
+  // attaches, he presses, she fills. Asking again after he has pressed the one
+  // button whose whole purpose is "fill this in" is a confirmation of the thing he
+  // just confirmed, and the panel repeated in a read-only box the same values that
+  // were about to appear in the editable fields directly above it.
+  //
+  // The fields are the review. They are labelled, they are editable, they are where
+  // he was going to look anyway, and a wrong value is retyped in place rather than
+  // discarded and re-entered from scratch. What survives is the part that mattered:
+  // a value that REPLACED something he typed is still named in the hint, so a fill
+  // is never a silent overwrite.
+
   // ══ PROGRESS ═════════════════════════════════════════════════════════
   // A single generateContent call reports nothing at all until it returns, so
   // this percentage is paced, not measured — the same approach
@@ -681,53 +699,87 @@
     const base = readingFile ? {} : localServiceGuess();
     const merged = { ...base, ...fromModel };
 
-    // Mods/Updates has no next due date — the form hides that row entirely.
-    if (merged.type === 'Mods/Updates') delete merged.nextDue;
+    // NEXT DUE IS HIS, ALWAYS.
+    //
+    // Every other field on this form is a fact about a visit that has happened —
+    // it is on the bill, or it is not. Next due is a DECISION about the future,
+    // and hers was the least reliable value on the panel: with a bill she took
+    // whatever date the invoice printed, which dealers put there optimistically,
+    // and without one she worked it out from average daily distance. Either way he
+    // was checking it rather than reading it, and a field you always check is a
+    // field better left blank.
+    //
+    // The calendar's +3/+6/+12 chips, measured from the service date, do this job
+    // properly and in one tap — see chipsFor() in src/js/date-picker.js.
+    delete merged.nextDue;
 
+    // Which fields she can actually change: she has a value, and it differs from
+    // what is in the form. Just the keys — this used to carry a formatted `shown`
+    // and `was` for each row, which the review panel displayed. The panel is gone and
+    // the fill loop below reads `merged` directly, so formatting both values for
+    // every field was work whose only output was discarded.
+    // nextDue is absent on purpose — see the delete above.
+    const changes = ['type', 'date', 'odo', 'cost', 'notes']
+      .filter(key => merged[key] !== undefined && merged[key] !== null && merged[key] !== '')
+      .filter(key => String(merged[key]) !== String(current[key] || ''));
+
+    progress.done(changes.length > 0);
+
+    const blocked = blockedReason();
+    if (!changes.length) {
+      let why = blocked;
+      if (!why && readingFile) why = 'She could not make out any new details on that bill. Fill them in yourself.';
+      if (!why && asked && billFile) why = 'That file could not be read, so there was nothing new to take from it.';
+      serviceHint(why || 'Nothing she can add to this — it is already filled in.', why ? 'warn' : 'ok');
+      return { ok: false, applied: [], skipped: [], readFile: readingFile };
+    }
+
+    const missing = ['type', 'date', 'odo', 'cost', 'notes']
+      .filter(k => !merged[k] && !current[k])
+      .map(k => FIELD_LABELS[k] || k);
+    const note = [
+      missing.length
+        ? `No ${missing.join(', ')} — she could not read ${missing.length === 1 ? 'it' : 'those'}.`
+        : '',
+      blocked || '',
+    ].filter(Boolean).join(' ');
+
+    // STRAIGHT INTO THE FIELDS.
+    //
+    // The review panel is gone. It was the right answer to the wrong problem: the
+    // complaint it fixed was that she filled the form UNASKED, and the button being
+    // dormant until a bill is attached already fixes that — he attaches, he presses,
+    // she fills. Asking again after he has pressed the one button whose entire
+    // purpose is "fill this in" is a confirmation for a thing he just confirmed.
+    //
+    // The fields are the review. They are editable, they are labelled, they are
+    // where he was going to look anyway, and a wrong value is retyped in place
+    // rather than discarded and re-entered from scratch.
     const applied = [];
-    const skipped = [];
+    const replaced = [];
 
     // Type first: it decides whether the Next Due row is even visible.
-    if (merged.type && (opts.force || !current.type)) {
-      if (setServiceType(merged.type)) applied.push('type');
-    } else if (merged.type) skipped.push('type');
-
+    if (merged.type && setServiceType(merged.type)) applied.push('type');
     [
       ['date', field('date')],
-      ['nextDue', field('nextDue')],
       ['odo', field('odo')],
       ['cost', field('cost')],
       ['notes', field('notes')],
     ].forEach(([key, input]) => {
-      if (merged[key] === undefined || merged[key] === null) return;
-      // Notes are the brief she was given, so never overwrite them unless asked.
-      if (!opts.force && current[key]) { skipped.push(key); return; }
+      if (merged[key] === undefined || merged[key] === null || merged[key] === '') return;
+      if (String(merged[key]) === String(current[key] || '')) return;
+      if (current[key]) replaced.push(FIELD_LABELS[key] || key);
       if (fill(input, merged[key])) applied.push(key);
     });
 
-    progress.done(applied.length > 0);
-
-    const blocked = blockedReason();
-    if (!applied.length) {
-      let why = blocked;
-      if (!why && readingFile) why = 'She could not make out any new details on that bill. Fill them in yourself.';
-      if (!why && asked && billFile) why = 'That file could not be read, so there was nothing new to take from it.';
-      serviceHint(why || 'Nothing left for her to fill in — check it over and add the bill.',
-        why ? 'warn' : 'ok');
-      return { ok: false, applied, skipped, readFile: readingFile };
-    }
-
     const names = applied.map(k => FIELD_LABELS[k] || k).join(', ');
-    const missing = ['type', 'date', 'odo', 'cost', 'notes']
-      .filter(k => !merged[k] && !current[k])
-      .map(k => FIELD_LABELS[k] || k);
+    // Replacements are still named. He pressed the button, so overwriting is what he
+    // asked for — but which of his own words went is not something to leave him to
+    // notice on his own.
+    const over = replaced.length ? ` Replaced what you had in ${replaced.join(', ')}.` : '';
+    serviceHint(`Filled in ${names}.${over}${note ? ` ${note}` : ''}`, 'ok');
 
-    let hint = readingFile ? `Read the bill and filled in ${names}.` : `Filled in ${names}.`;
-    if (missing.length) hint += ` Left ${missing.join(', ')} blank — she could not read ${missing.length === 1 ? 'it' : 'those'}.`;
-    hint += blocked ? ` ${blocked}` : ' Check it over, then add the entry.';
-
-    serviceHint(hint, blocked ? 'warn' : 'ok');
-    return { ok: true, applied, skipped, values: merged, readFile: readingFile };
+    return { ok: true, applied, replaced, values: merged, readFile: readingFile };
   }
 
   // ══ ADD-A-DOCUMENT ═══════════════════════════════════════════════════
@@ -838,26 +890,61 @@
       }
     }
 
-    const applied = [];
-    if (merged.name && (opts.force || !current.name) && fill(nameEl, merged.name)) applied.push('name');
-    if (merged.notes && notesEl && (opts.force || !current.notes) && fill(notesEl, merged.notes)) applied.push('notes');
+    // Same rule as the service form: she proposes, he applies. Global means global
+    // — a document's name is the thing he will search for later, so having her
+    // quietly replace one he chose himself is the same fault in a smaller field.
+    const rows = [
+      { key: 'name', label: 'Name', input: nameEl, value: merged.name },
+      { key: 'notes', label: 'Notes', input: notesEl, value: merged.notes },
+    ]
+      .filter(r => r.input && r.value && String(r.value) !== String(current[r.key] || ''))
+      .map(r => ({
+        key: r.key,
+        label: r.label,
+        value: r.value,
+        shown: String(r.value),
+        was: current[r.key] ? String(current[r.key]) : '',
+      }));
 
-    progress.done(applied.length > 0);
+    progress.done(rows.length > 0);
 
-    if (!applied.length) {
+    if (!rows.length) {
       docHint(blockedReason()
         || (readingFile
           ? 'She could not tell what that document is. Name it yourself.'
           : 'Nothing to add — it already looks named.'), 'bad');
-      return { ok: false, applied, readFile: readingFile };
+      return { ok: false, applied: [], readFile: readingFile };
     }
 
+    // STRAIGHT INTO THE FIELDS, the same as the service form above.
+    //
+    // This was the last review panel left. It listed the name and the note, then
+    // asked him to press "Fill these in" — a confirmation of the button he had just
+    // pressed, whose entire purpose was to fill them in. Two presses for one
+    // intention, and the panel repeated in a read-only box the two values that were
+    // about to appear in the two editable fields directly above it.
+    //
+    // The fields are the review. Both are text inputs he can retype, and a name he
+    // dislikes is quicker to correct in place than to discard and think up himself.
     const blocked = blockedReason();
-    if (blocked) docHint(`Named it from the file name. ${blocked}`);
-    else if (readingFile) docHint('Read the document and filled it in — check it before saving.');
-    else docHint('Named from the file name — reword it if that is not right.');
+    const applied = [];
+    const replaced = [];
+    rows.forEach(r => {
+      const input = r.key === 'name' ? nameEl : notesEl;
+      if (!input) return;
+      if (r.was) replaced.push(r.label);
+      if (fill(input, r.value)) applied.push(r.key);
+    });
 
-    return { ok: true, applied, values: merged, readFile: readingFile };
+    const names = applied.map(k => (k === 'name' ? 'Name' : 'Notes')).join(' and ');
+    // A replacement is still named. He asked for the fill, so overwriting is what he
+    // wanted — but which of his own words went is not something to leave him to spot.
+    const over = replaced.length ? ` Replaced what you had in ${replaced.join(' and ')}.` : '';
+    docHint(applied.length
+      ? `Filled in ${names}.${over}${blocked ? ` ${blocked}` : ''}`
+      : 'Nothing was changed.', applied.length ? 'ok' : 'warn');
+
+    return { ok: true, applied, replaced, values: merged, readFile: readingFile };
   }
 
   // ══ HISTORIC MEDIA NOTES ═════════════════════════════════════════════
@@ -1003,26 +1090,76 @@
   }
 
   /**
-   * Read a file the moment it is attached.
+   * Offer to read a file the moment it is attached. Do not read it.
    *
-   * Attaching the bill is the point at which every field becomes knowable, so
-   * waiting for a second tap on a button would be asking for something the app
-   * already has. Guarded on the file's identity so re-rendering or re-opening a
-   * form cannot spend a second request on the same document.
+   * This used to fire `run()` on the change event, on the reasoning that attaching
+   * the bill is the point at which every field becomes knowable, so a second tap
+   * was asking for something the app already had.
+   *
+   * That reasoning was wrong in the way that matters: it spent a Gemini request
+   * and overwrote fields he may have already filled, without being asked. Picking
+   * a file is him filing a bill, not him asking her to read it — and the two are
+   * only the same action about half the time. Worse, it made the button a lie:
+   * "Let Sage fill it in" is an offer, and the offer had already been taken before
+   * he could decline it.
+   *
+   * So the file arms the button instead. The hint names what she would read, the
+   * button picks up `.is-offered` so it is visibly the next thing to press, and
+   * nothing leaves the device until he presses it.
    */
-  function autoReadOnPick(input, button, run) {
+  /**
+   * Dormant until there is something to read, then live.
+   *
+   * She could work without a file — localServiceGuess() estimates the odometer from
+   * average daily distance and the type from what this bike usually gets. That is
+   * exactly the behaviour that came across as random filling, and it is the weakest
+   * thing she does: an estimate in a field that looks identical to a transcription
+   * is worse than an empty field, because there is nothing about it that says
+   * "check me". A bill is the only input that makes her reliable.
+   *
+   * So no file, no offer. The button is visibly dormant and says why when pressed —
+   * `aria-disabled` rather than the `disabled` attribute, because a dead control
+   * that swallows the click teaches him nothing, and `disabled` is already spoken
+   * for by the busy state.
+   */
+  function setDormant(button, dormant, why) {
+    if (!button) return;
+    button.classList.toggle('is-dormant', !!dormant);
+    button.classList.toggle('is-offered', !dormant);
+    if (dormant) button.setAttribute('aria-disabled', 'true');
+    else button.removeAttribute('aria-disabled');
+    if (why) button.title = why;
+  }
+
+  function offerOnPick(input, button, hint) {
     if (!input || input.dataset.sageAutoRead === 'true') return;
     input.dataset.sageAutoRead = 'true';
-    input.addEventListener('change', () => {
+    // `dk-bill-ready` as well as `change`: when several files are picked they are
+    // merged into one PDF first, and the `change` that fired at pick time carried a
+    // list she cannot read. script.js fires this once the input holds the single
+    // merged file. See setupFileInput() there.
+    ['change', 'dk-bill-ready'].forEach(type => input.addEventListener(type, () => {
       // script.js validates first and clears the input when a file is rejected,
-      // so an empty list here means there is nothing worth reading.
+      // so an empty list here means there is nothing worth offering.
       const file = input.files && input.files[0];
+      if (!button) return;
+      if (!file) {
+        setDormant(button, true, DORMANT_WHY);
+        if (hint) hint('');
+        return;
+      }
+      // Still signature-guarded, so re-rendering a form does not re-nudge him
+      // about a file he has already dealt with.
       const signature = fileSignature(file);
-      if (!file || signature === input.dataset.sageLastRead) return;
-      input.dataset.sageLastRead = signature;
-      run().catch(() => releaseButton(button));
-    });
+      if (signature === input.dataset.sageLastOffered) return;
+      input.dataset.sageLastOffered = signature;
+      setDormant(button, false);
+      button.title = `Read ${file.name}`;
+      if (hint) hint(`${file.name} is attached — tap to have her read it.`);
+    }));
   }
+
+  const DORMANT_WHY = 'Attach the bill first — she reads the details off it.';
 
   function setup() {
     const serviceBtn = el('serviceAutofill');
@@ -1030,13 +1167,29 @@
       serviceBtn.dataset.ready = 'true';
       serviceBtn.dataset.idleLabel = serviceBtn.querySelector('.sage-fill-label')?.textContent?.trim()
         || 'Let Sage fill it in';
-      serviceBtn.addEventListener('click', () => service().catch(() => releaseButton(serviceBtn)));
-      autoReadOnPick(el('fileInput'), serviceBtn, service);
-      // A reset clears her hint and lets the next bill be read for a fresh entry.
+      // Dormant from the start: an empty form has no bill in it.
+      setDormant(serviceBtn, true, DORMANT_WHY);
+      serviceBtn.addEventListener('click', () => {
+        if (serviceBtn.getAttribute('aria-disabled') === 'true') {
+          serviceHint(DORMANT_WHY, 'warn');
+          el('customFileButton')?.focus({ preventScroll: true });
+          return;
+        }
+        serviceBtn.classList.remove('is-offered');
+        service().catch(() => releaseButton(serviceBtn));
+      });
+      offerOnPick(el('fileInput'), serviceBtn, serviceHint);
+      // A reset clears her hint and lets the next bill be offered for a fresh entry.
       serviceForm()?.addEventListener('reset', () => {
         window.setTimeout(() => {
           const input = el('fileInput');
-          if (input) input.dataset.sageLastRead = '';
+          if (input) {
+            input.dataset.sageLastRead = '';
+            input.dataset.sageLastOffered = '';
+          }
+          // Back to dormant with the rest of the form: reset clears the file input,
+          // so there is nothing for her to read again.
+          setDormant(serviceBtn, true, DORMANT_WHY);
           serviceHint('');
         }, 0);
       });
@@ -1047,8 +1200,21 @@
       docBtn.dataset.ready = 'true';
       docBtn.dataset.idleLabel = docBtn.querySelector('.sage-fill-label')?.textContent?.trim()
         || 'Let Sage name it';
-      docBtn.addEventListener('click', () => doc().catch(() => releaseButton(docBtn)));
-      autoReadOnPick(el('docAddFile'), docBtn, doc);
+      // The document form is the same bargain: she names a document by reading it,
+      // so with nothing attached there is nothing to name it from.
+      const docWhy = 'Pick the file first — she names it from that.';
+      setDormant(docBtn, true, docWhy);
+      docBtn.addEventListener('click', () => {
+        if (docBtn.getAttribute('aria-disabled') === 'true') {
+          docHint(docWhy, 'bad');
+          return;
+        }
+        docBtn.classList.remove('is-offered');
+        doc().catch(() => releaseButton(docBtn));
+      });
+      // Same rule as the service form: attaching arms the button, it does not fire
+      // it. "Global change" — no upload anywhere starts her on its own.
+      offerOnPick(el('docAddFile'), docBtn, null);
     }
 
     const mediaBtn = el('historicNotesAutofill');

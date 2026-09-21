@@ -38,20 +38,31 @@ import vm from 'node:vm';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
-// Exactly the order in index.html.
-const FILES = [
-  'src/js/cloud-store.js',
-  'src/js/sage-confirm.js',
-  'src/js/sage-scheduler.js',
-  'src/js/sage-memory.js',
-  'src/js/sage-tools.js',
-  'src/js/sage-ai.js',
-  'src/js/sage-keyvault.js',
-  'src/js/notifications.js',
-  'src/js/script.js',
-  'src/js/sage-autofill.js',
-  'src/js/sage-ui.js',
-];
+// READ OUT OF index.html, NOT LISTED HERE.
+//
+// This was a hardcoded array with the comment "exactly the order in index.html"
+// above it, and it had stopped being true: date-picker.js and bill-merge.js were
+// added to the page and never added here, so the two files went several versions
+// without ever being checked for either of the faults this tool exists to catch.
+// A list that has to be kept in step by hand, in a tool whose whole job is
+// catching things humans do not notice, is the wrong shape.
+//
+// `type="module"` scripts are deliberately excluded: home3d.js and docs3d.js have
+// their own scope and cannot collide with anything, which is the entire point of
+// the two failure modes above.
+const html = await readFile(join(ROOT, 'index.html'), 'utf8');
+const FILES = [...html.matchAll(/<script\b([^>]*)>/g)]
+  .map(m => m[1])
+  .filter(attrs => !/\btype\s*=\s*["']module["']/.test(attrs))
+  .map(attrs => (attrs.match(/\bsrc\s*=\s*["']([^"']+)["']/) || [])[1])
+  .filter(Boolean)
+  // Ours only. The Supabase client comes off a CDN and is stubbed below.
+  .filter(src => !/^https?:/.test(src));
+
+if (!FILES.length) {
+  console.error('✗ no classic scripts found in index.html — has the markup changed?');
+  process.exit(1);
+}
 
 // ── The least DOM that lets top-level code run ──────────────────────────
 function makeElement(tag) {

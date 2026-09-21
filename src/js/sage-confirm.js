@@ -81,7 +81,7 @@
       overlay.innerHTML = `
         <div class="sl-slide-card" role="document">
           <span class="sl-slide-mark" aria-hidden="true">
-            <i class="fas ${esc(opts.icon || 'fa-trash-can')}"></i>
+            <i class="fas ${esc(opts.icon || 'fa-trash-can')}" aria-hidden="true"></i>
           </span>
           <h3 class="sl-slide-title" id="slSlideTitle">${esc(opts.title || 'Delete this?')}</h3>
           ${detail ? `<p class="sl-slide-copy">${detail}</p>` : ''}

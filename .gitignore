@@ -33,13 +33,16 @@ Spinlog-BACKUP-*.zip
 # "Bike bg.png" (1.9 MB), whose shipped derivative is assets/img/bike-bg.webp.
 # Deliberately NOT committed — adding 1.9 MB of dead weight to history would
 # need a history rewrite to undo. The files stay on disk locally.
-# See docs/AUDIT.md, finding PERF-1.
+# audit-refs.mjs knows about this folder and exempts it from the orphan check.
 assets/source/
 
 # ── Secrets ───────────────────────────────────────────────────────────
-# This app currently hardcodes its Supabase + Gemini keys in src/js
-# (see docs/AUDIT.md, finding SEC-1). If those move to a config file,
-# that file must land here.
+# This app hardcodes its Supabase anon key in src/js and that is deliberate —
+# there is no login, so the key ships in the page and every RLS policy is
+# `using (true)`. See "Known limits" and "A note on the key vault" in the README
+# for what that does and does not expose. Gemini keys are NOT hardcoded: they live
+# on the device and reach the cloud only as AES-256-GCM ciphertext.
+# If any of it ever moves to a config file, that file must land here.
 .env
 .env.*
 !.env.example
@@ -56,3 +59,16 @@ package-lock.json.orig
 *.log
 /tmp/
 /.cache/
+
+# ── Layout audit scratch ──────────────────────────────────────────────────
+# tools/audit-mobile.mjs --shots renders the app in headless Chromium and drops
+# PNGs here to look at. They are evidence for one session, not artefacts.
+#
+# The four audits are tracked. Everything in tools/ whose name starts with an
+# underscore is not: that prefix is the convention for a throwaway probe written to
+# answer one question — a screenshot differ, a cascade dump, a one-off codemod — and
+# a repo with no build step should not accumulate them.
+#
+# Playwright is likewise not a dependency of the app; see the header of
+# audit-mobile.mjs or audit-app.mjs for the two commands that install it.
+tools/_*

@@ -1,7 +1,10 @@
 // Bump this on every asset-list change: the activate handler deletes any
 // spinlog-cache-* key that is not the current name, which is what forces the
 // new precache to be written.
-const CACHE_NAME = 'spinlog-cache-v1.7.83-emoji-by-mood-no-tics';
+// Version segment matches <meta name="version"> in index.html. That meta is what the
+// screen shows; this is what is actually cached. If they disagree, the number on the
+// home chip is a lie about which build is running.
+const CACHE_NAME = 'spinlog-cache-v1.9.1-audit-polish';
 const OFFLINE_URL = 'index.html';
 
 // The scheduler is shared with the page so foreground and background agree on
@@ -19,6 +22,12 @@ const PRECACHE = [
   './src/js/script.js',
   './src/js/cloud-store.js',
   './src/js/sage-confirm.js',
+  './src/js/date-picker.js',
+  // The merger itself is tiny and always needed to route a pick. pdf-lib, which it
+  // pulls in, is deliberately NOT here — 513KB in front of every cold start, to
+  // serve the minority of entries with more than one file, is the wrong trade. The
+  // network-first rule caches it on first use instead.
+  './src/js/bill-merge.js',
   './src/js/sage-scheduler.js',
   './src/js/sage-memory.js',
   './src/js/sage-tools.js',
@@ -33,6 +42,10 @@ const PRECACHE = [
   './vendor/three.core.js',
   './assets/img/sage.webp',
   './assets/img/bike-bg.webp',
+  // Both notification marks. A notification raised from the worker while offline
+  // still has to draw them, and a missing icon there is a blank square.
+  './assets/icons/icon-192.png',
+  './assets/icons/badge-96.png',
   './assets/fonts/BlenderPro-Heavy.woff2',
   './manifest.json'
 ];
@@ -52,8 +65,96 @@ self.addEventListener('install', event => {
   self.skipWaiting();
 });
 
+// ── Uploaded files, kept for offline ──────────────────────────────────
+//
+// His documents and bills live in Supabase storage and were reachable only
+// online: the app asks for a signed URL, fetches it, and the bytes were never
+// kept. Standing at a police check with no signal is the exact moment a phone
+// full of paperwork is worth having, and it was the one moment it did not work.
+//
+// TWO THINGS MAKE THIS LESS OBVIOUS THAN IT LOOKS.
+//
+// A signed URL is single-use in practice. It carries `?token=…` and expires in an
+// hour, so the next signing of the SAME file is a different URL and a cache keyed
+// on the request would never hit. The key here is the URL with its query stripped
+// — the storage path, which is stable for the life of the file.
+//
+// And a PDF viewer asks for ranges. A 206 Partial Content response must never be
+// cached: put one away and the next offline open gets a fragment of a file
+// presented as the whole thing, which is worse than a clean failure.
+//
+// Kept in its own cache under its own name, so the version purge in `activate`
+// (which only removes `spinlog-cache-*`) leaves his papers alone on every update.
+const DOC_CACHE = 'spinlog-docs-v1';
+const DOC_CACHE_MAX = 60;
+const STORAGE_PATH = /\/storage\/v1\/object\//;
+
+/** The stable identity of a stored file: its path, without the signing token. */
+function docKey(url) {
+  const bare = new URL(url);
+  bare.search = '';
+  bare.hash = '';
+  return bare.toString();
+}
+
+/**
+ * Oldest out first, when the shelf is full.
+ *
+ * `cache.keys()` resolves in insertion order, so the front of the list is the
+ * least recently ADDED. Not the least recently used — tracking that needs a
+ * timestamp per entry and a place to keep it, which is more machinery than a
+ * document cache warrants.
+ */
+async function trimDocCache(cache) {
+  const keys = await cache.keys();
+  if (keys.length <= DOC_CACHE_MAX) return;
+  await Promise.all(keys.slice(0, keys.length - DOC_CACHE_MAX).map(k => cache.delete(k)));
+}
+
+async function handleDoc(request) {
+  const key = docKey(request.url);
+  const cache = await caches.open(DOC_CACHE);
+
+  // A range request is for a slice of something, so it is answered from the
+  // network or not at all — and never written down.
+  if (request.headers.has('range')) {
+    try {
+      return await fetch(request);
+    } catch (err) {
+      const held = await cache.match(key);
+      // Handing back the whole file for a range request is wrong, but a viewer
+      // that gets a 200 it did not ask for degrades to reading the lot, whereas
+      // one that gets nothing shows an error. The former is the better failure.
+      if (held) return held;
+      throw err;
+    }
+  }
+
+  try {
+    const response = await fetch(request);
+    // Only a complete, successful body is worth keeping. `response.ok` covers
+    // 200-299; the explicit 200 keeps 206 out even if a server sets ok on it.
+    if (response.ok && response.status === 200) {
+      cache.put(key, response.clone())
+        .then(() => trimDocCache(cache))
+        .catch(() => { /* a full disk must not break the download */ });
+    }
+    return response;
+  } catch (err) {
+    const held = await cache.match(key);
+    if (held) return held;
+    throw err;
+  }
+}
+
 self.addEventListener('fetch', event => {
   if (event.request.method !== 'GET') return;
+
+  if (STORAGE_PATH.test(event.request.url)) {
+    event.respondWith(handleDoc(event.request));
+    return;
+  }
+
   event.respondWith(
     fetch(event.request).catch(() => caches.match(event.request))
   );
@@ -80,8 +181,9 @@ self.addEventListener('push', event => {
   event.waitUntil(
     self.registration.showNotification(title, {
       body,
-      icon: './assets/img/sage.webp',
-      badge: './assets/icons/icon-192.png',
+      // The square logo, and a silhouette badge — see the note in notifications.js.
+      icon: './assets/icons/icon-192.png',
+      badge: './assets/icons/badge-96.png',
       vibrate: [120, 60, 120],
     })
   );
@@ -235,8 +337,8 @@ async function fireBgNotif(category, line, opts) {
   const whisper = opts && opts.whisper;
   await self.registration.showNotification(chosen.title, {
     body: chosen.body,
-    icon: './assets/img/sage.webp',
-    badge: './assets/icons/icon-192.png',
+    icon: './assets/icons/icon-192.png',
+    badge: './assets/icons/badge-96.png',
     // Quiet-hours emergencies land silently rather than buzzing at 3am.
     vibrate: whisper ? [0] : [120, 60, 120],
     silent: !!whisper,

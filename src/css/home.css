@@ -50,9 +50,27 @@
   --dk-border:        rgba(255, 255, 255, 0.095);
   --dk-border-strong: rgba(251, 105, 0, 0.28);
 
+  /* THE THREE TEXT TIERS, AND THE FLOOR UNDER THEM.
+
+     `--dk-text-mute` was 0.45, which measures 4.46:1 against the lightest end of
+     --dk-panel. AA wants 4.5. Four hundredths of an alpha value under the line is
+     not a rounding error you can ignore, because this variable is the colour of
+     every kicker, stat label and footnote in the app — 27 rules, all of them set
+     between 9.6px and 11px, which is exactly the size that needs the contrast
+     most. 0.56 measures 6.36:1 and still reads as clearly the quietest of the
+     three tiers.
+
+     THE FLOOR: no text colour in this app goes below `rgba(255,255,255,0.50)` on
+     a dark surface. 0.50 is 5.3:1, 0.56 is 6.4:1, and the two of them are the
+     whole muted scale — a faint tier and a secondary-label tier. Anything fainter
+     failed AA at the sizes used here, and 82 declarations across both sheets had
+     drifted down to between 0.18 and 0.46 one component at a time.
+
+     The one exemption is an INACTIVE control (`.sage-fill-btn.is-dormant`), which
+     WCAG 1.4.3 excludes, and where dimness is the entire message. */
   --dk-text:          #ffffff;
   --dk-text-dim:      rgba(255, 255, 255, 0.68);
-  --dk-text-mute:     rgba(255, 255, 255, 0.45);
+  --dk-text-mute:     rgba(255, 255, 255, 0.56);
 
   --dk-shadow:        0 18px 44px rgba(0, 0, 0, 0.42);
   --dk-shadow-sm:     0 8px 22px rgba(0, 0, 0, 0.30);
@@ -65,7 +83,10 @@
 
   --dk-gap:           clamp(12px, 1.4vw, 18px);
   --dk-pad:           clamp(15px, 1.7vw, 22px);
-  --dk-bar-h:        64px;   /* top bar height, used by the hide transform */
+  /* --dk-bar-h: 64px was here, described as "top bar height, used by the hide
+     transform". There is no top bar and no hide transform — the fixed header was
+     removed and status moved inside the hero — and nothing read the variable. It
+     was the only unused custom property of the forty-six declared. */
 
   --dk-font:          'Oswald', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
   --dk-font-display:  'Blender Pro', 'Oswald', system-ui, Arial, sans-serif;
@@ -233,6 +254,49 @@ main { padding: 0 !important; background: transparent !important; }
 /* The pill's own bottom margin is for sitting above the heading. In the chrome
    row it would just push the status chip out of alignment. */
 .dk-hero-chrome .dk-pill { margin-bottom: 0; }
+
+/* --- Build number ---
+   Last line on the page, centred, and the quietest text in the app. It sat beside the
+   database chip first and read as a second status readout, which it is not: nobody
+   watches a version number, they look it up once when something is wrong. Text comes
+   from the version meta tag via [data-app-version]. */
+.dk-build {
+  margin: clamp(18px, 2.4vw, 30px) 0 0;
+  /* A row, so the branch glyph sits beside the text instead of being a word in it.
+     text-align cannot centre a flex line, hence justify-content as well — the property
+     is kept because the <p> is centred text in every other respect. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  color: rgba(255, 255, 255, 0.50);
+  /* --dk-font-display, NOT --dk-font.
+     This was Oswald: the token named --dk-font, which is this app's *reading* face, on
+     a string that is pure display type. The difference is invisible at 0.68rem until
+     you put the two next to each other, which is why it sat wrong for so long.
+
+     Blender Pro is also the correct choice mechanically and not only by eye: the cut
+     shipped in this repo is CAPS-ONLY, and this string is already uppercase below, so
+     nothing is lost to it — and the digits come out on the same stem weight as the
+     letters, which is what makes "SPINLOG V1.9.0" read as one token rather than a word
+     followed by some numbers. */
+  font-family: var(--dk-font-display);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-align: center;
+  text-transform: uppercase;
+  /* Version digits get compared by eye against a changelog, so they line up. */
+  font-variant-numeric: tabular-nums;
+}
+
+/* Quieter than the text and a touch smaller, because it is a marker rather than a word
+   — at the same size it read as a letter in "SPINLOG". */
+.dk-build i {
+  font-size: 0.62rem;
+  color: rgba(251, 105, 0, 0.55);
+}
+.dk-build-text { display: inline-block; }
 
 /* --- DB status chip (JS owns db-status-{checking,online,offline}) --- */
 .dk-db-chip {
@@ -1179,7 +1243,13 @@ main { padding: 0 !important; background: transparent !important; }
   align-items: center;
   gap: 7px;
   margin-top: 14px;
-  padding: 5px 11px;
+  /* 36px tall, not the 28px that 5px of padding gave it. This is a real button
+     that opens the rest of the service history, and it was the smallest touch
+     target on the home page by 6px — under the 24px WCAG 2.5.8 floor it was fine,
+     but next to the 40px+ controls around it a thumb kept missing it. The padding
+     stays small and min-height does the work, so the pill does not grow wider. */
+  min-height: 36px;
+  padding: 5px 13px;
   border: 1px dashed var(--dk-border);
   border-radius: 999px;
   background: transparent;
@@ -1491,8 +1561,38 @@ main { padding: 0 !important; background: transparent !important; }
 
 /* ── 13  Motion, focus, print ────────────────────────────────────────────── */
 
+/* ── The routing target does not get a ring ──────────────────────────────
+   setActiveSection() sends focus to the incoming section's heading, because
+   routing here is `display: none` on the outgoing section and the button you just
+   pressed is inside it — so focus was being dropped on <body> and the next Tab
+   restarted from the top of the document.
+
+   Chromium matches :focus-visible on a programmatically focused [tabindex="-1"]
+   element, so the UA's `outline: auto` drew a 1px box around "Documents & Media"
+   every single time you opened the page. Nobody tabbed to that heading and nobody
+   needs to be told where it is; what the focus move buys is the announcement and
+   the right Tab position, and both survive without the ring.
+
+   Scoped to exactly the element the router touches. Every real Tab stop keeps its
+   outline — the rule below this one, and audit-app.mjs asserts all of them. */
+main section > h2[tabindex="-1"]:focus,
+main section h2[tabindex="-1"]:focus,
+main section h3[tabindex="-1"]:focus,
+main section[tabindex="-1"]:focus {
+  outline: none;
+}
+
+/* The three .doc-* entries are the document vault's own controls — Upload, View
+   and the trash button on each card. They had no focus state at all, in either
+   sheet: tabbing through the Documents page moved an invisible cursor across nine
+   cards and four buttons, one of which deletes a file. .doc-add-tile, the add-a-
+   document tile that sits in the same grid, was already here, which is what makes
+   the omission look accidental rather than intended. tools/audit-app.mjs asserts
+   every focusable control in every section matches a :focus rule, so this cannot
+   quietly come undone again. */
 :where(.dk-btn, .dk-link, .dk-db-chip, .dk-stat, .dk-search-item,
-       .dk-search-clear, .dk-tl-more, .doc-add-tile):focus-visible {
+       .dk-search-clear, .dk-tl-more, .doc-add-tile,
+       .upload-btn, .doc-open-pill, .doc-delete-btn):focus-visible {
   outline: 2px solid var(--dk-accent);
   outline-offset: 3px;
 }
@@ -1502,28 +1602,30 @@ main { padding: 0 !important; background: transparent !important; }
 .dk-search-input:focus,
 .dk-search-input:focus-visible { outline: none; box-shadow: none; }
 
-/* Search "jump to" affordance: briefly ring the element we scrolled to. */
-@keyframes dkFlash {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(251, 105, 0, 0); }
-  15%, 60% { box-shadow: 0 0 0 3px var(--dk-accent), 0 0 26px rgba(251, 105, 0, 0.4); }
-}
-.dk-flash { animation: dkFlash 1.5s var(--dk-ease); border-radius: var(--dk-r-md); }
+/* `dkFlash` / `.dk-flash` lived here: an orange ring drawn around whatever a nav
+   button or a search hit scrolled to. Removed rather than kept unused, because a
+   dead animation is the sort of thing that gets reattached by accident.
+
+   Scrolling to a thing is already how you find it. On a form that lights its own
+   border while it is being filled, a second orange glow around the whole panel
+   read as an error state, and it was a full-panel highlight for a button press he
+   had just made himself. flash() in script.js does the scroll and stops. */
 
 @media (prefers-reduced-motion: reduce) {
   /* The backdrop stays visible: home3d.js paints one static frame with every
      animated term switched off, rather than hiding the photo entirely. */
   .dk-scene { transition: none; }
-  *, *::before, *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    /* Needed as well as the duration: the timeline stagger uses `backwards`
-       fill, so a surviving delay would hold the hidden keyframe for up to half a
-       second before snapping in. */
-    animation-delay: 0ms !important;
-    transition-duration: 0.001ms !important;
-    scroll-behavior: auto !important;
-  }
 }
+
+/* The universal `*, *::before, *::after` reduced-motion reset used to be in the
+   block above. It is the thing that actually covers all 40 keyframes and every
+   transition in both sheets — the twenty-two per-component blocks in styles.css
+   are refinements on top of it, not the coverage.
+   It has moved to styles.css, next to the [hidden] guard, because this file is a
+   HOME-PAGE sheet by name and by content: dropping it, scoping it, or loading it
+   before styles.css would each have silently reduced motion coverage from
+   "everything" to "about thirty-five named selectors" with nothing failing. A
+   global invariant does not belong in a per-view stylesheet. */
 
 @media print {
   .dk-scene, .dk-hero-actions, .dk-panel--next .dk-btn { display: none !important; }

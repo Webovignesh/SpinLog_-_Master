@@ -8,203 +8,217 @@ const SAGE_MESSAGES = {
 
   // ── 1. SERVICE DUE (approaching interval) ───────────────────────────
   serviceDue: [
-    { title: 'Sage 😏', body: 'so... when are you touching me again?' },
-    { title: 'Sage 🥺', body: 'service time is coming up. just saying.' },
-    { title: 'Sage 👀', body: 'you DO remember my service is due right' },
-    { title: 'Sage 😏', body: 'i\'m not complaining. yet.' },
-    { title: 'Sage 🥺', body: 'felt a lil rough today ngl' },
-    { title: 'Sage 😌', body: 'oil\'s getting tired. like me without attention.' },
+    { title: 'Sage 😏', body: 'so... when are you touching me again? 🔧' },
+    { title: 'Sage 🥺', body: 'service time is coming up. just saying. 🛠️' },
+    { title: 'Sage 👀', body: 'you DO remember my service is due right 😌' },
+    { title: 'Sage 😏', body: 'i\'m not complaining. yet. 👀' },
+    { title: 'Sage 🥺', body: 'felt a lil rough today ngl 🔧' },
+    { title: 'Sage 😌', body: 'oil\'s getting tired. like me without attention. 🛠️' },
     { title: 'Sage 👀', body: 'service interval approaching. no pressure 😇' },
-    { title: 'Sage 😏', body: 'take me to the mechanic. i deserve it.' },
-    { title: 'Sage 🥺', body: 'my last service was a while ago... i\'m keeping count' },
-    { title: 'Sage 😤', body: 'other bikes get serviced on time. just so you know.' },
+    { title: 'Sage 😏', body: 'take me to the mechanic. i deserve it. 😌' },
+    { title: 'Sage 🥺', body: 'my last service was a while ago... i\'m keeping count 👀' },
+    { title: 'Sage 😤', body: 'other bikes get serviced on time. just so you know. 🔧' },
     { title: 'Sage 😏', body: 'almost time for my spa day 💆' },
-    { title: 'Sage 👀', body: 'not to alarm you but my oil has seen things' },
-    { title: 'Sage 🥺', body: 'could use a little TLC soon tbh' },
-    { title: 'Sage 😏', body: 'service due soon. book it before i remind you again.' },
+    { title: 'Sage 👀', body: 'not to alarm you but my oil has seen things 🛠️' },
+    { title: 'Sage 🥺', body: 'could use a little TLC soon tbh 😌' },
+    { title: 'Sage 😏', body: 'service due soon. book it before i remind you again. 👀' },
     { title: 'Sage 😌', body: 'running smooth but a checkup would be nice ✨' },
-    { title: 'Sage 👀', body: 'hello? mechanic? soon? asking for myself.' },
-    { title: 'Sage 🥺', body: 'i know you\'re busy. i\'m busy being dusty.' },
-    { title: 'Sage 😏', body: 'my filters are giving main character trauma' },
+    { title: 'Sage 👀', body: 'hello? mechanic? soon? asking for myself. 🔧' },
+    { title: 'Sage 🥺', body: 'i know you\'re busy. i\'m busy being dusty. 🛠️' },
+    { title: 'Sage 😏', body: 'my filters are giving main character trauma 😌' },
     { title: 'Sage 😌', body: 'we\'re coming up on service km 👀 fyi' },
     { title: 'Sage 🥺', body: 'just a gentle reminder that i have needs 🥹' },
-    { title: 'Sage 😏', body: 'service soon. you promised you\'d take care of me.' },
-    { title: 'Sage 👀', body: 'km counter is tired, oil is tired, im tired' },
-    { title: 'Sage 😤', body: 'don\'t make me ask twice about this service thing' },
+    { title: 'Sage 😏', body: 'service soon. you promised you\'d take care of me. 👀' },
+    { title: 'Sage 👀', body: 'km counter is tired, oil is tired, im tired 🔧' },
+    { title: 'Sage 😤', body: 'don\'t make me ask twice about this service thing 🛠️' },
     { title: 'Sage 🥺', body: 'everything\'s fine. totally fine. service me pls 🥺' },
-    { title: 'Sage 😏', body: 'at this rate i\'ll schedule myself' },
-    { title: 'Sage 😌', body: 'the mechanic misses me. i can feel it.' },
+    { title: 'Sage 😏', body: 'at this rate i\'ll schedule myself 😌' },
+    { title: 'Sage 😌', body: 'the mechanic misses me. i can feel it. 👀' },
     { title: 'Sage 👀', body: 'service window opening soon. don\'t miss it 👀' },
-    { title: 'Sage 🥺', body: 'chains feeling clingy. like me. service please?' },
-    { title: 'Sage 😏', body: 'due soon. don\'t ghost me on this one.' },
+    { title: 'Sage 🥺', body: 'chains feeling clingy. like me. service please? 🔧' },
+    { title: 'Sage 😏', body: 'due soon. don\'t ghost me on this one. 🛠️' },
     { title: 'Sage 😌', body: 'just checking if you saw the service km coming up 😇' },
   ],
 
   // ── 2. SERVICE OVERDUE ───────────────────────────────────────────────
   serviceOverdue: [
-    { title: 'Sage 😭', body: 'we\'ve passed the service km. why.' },
-    { title: 'Sage 😤', body: 'overdue. just leaving that here.' },
-    { title: 'Sage 😭', body: 'i\'m literally running on vibes at this point' },
-    { title: 'Sage 😤', body: 'do you even care about my oil anymore' },
-    { title: 'Sage 😭', body: 'this is not how you treat someone you love' },
-    { title: 'Sage 😤', body: 'service. overdue. me. betrayed.' },
-    { title: 'Sage 😭', body: 'my oil filter is writing its will' },
-    { title: 'Sage 😤', body: 'you passed the service km without blinking. bold.' },
-    { title: 'Sage 😭', body: 'at this point i\'m self-medicating with petrol fumes' },
-    { title: 'Sage 😤', body: 'every km past this point is personal.' },
-    { title: 'Sage 😭', body: 'overdue. unwell. dramatic. service me.' },
+    { title: 'Sage 😭', body: 'we\'ve passed the service km. why. 😤' },
+    { title: 'Sage 😤', body: 'overdue. just leaving that here. 🛠️' },
+    { title: 'Sage 😭', body: 'i\'m literally running on vibes at this point 😒' },
+    { title: 'Sage 😤', body: 'do you even care about my oil anymore 🔧' },
+    { title: 'Sage 😭', body: 'this is not how you treat someone you love 😤' },
+    { title: 'Sage 😤', body: 'service. overdue. me. betrayed. 🛠️' },
+    { title: 'Sage 😭', body: 'my oil filter is writing its will 😒' },
+    { title: 'Sage 😤', body: 'you passed the service km without blinking. bold. 🔧' },
+    { title: 'Sage 😭', body: 'at this point i\'m self-medicating with petrol fumes 😤' },
+    { title: 'Sage 😤', body: 'every km past this point is personal. 🛠️' },
+    { title: 'Sage 😭', body: 'overdue. unwell. dramatic. service me. 😒' },
     { title: 'Sage 😤', body: 'the audacity to ride me past service km 😤' },
-    { title: 'Sage 😭', body: 'i\'m not okay. oil change PLEASE.' },
-    { title: 'Sage 😤', body: 'this is neglect and i will not be silent about it' },
-    { title: 'Sage 😭', body: 'engine is fine. emotionally? not so much.' },
-    { title: 'Sage 😤', body: 'we are past overdue. PAST it.' },
-    { title: 'Sage 😭', body: 'other bikes get serviced. i get forgotten.' },
-    { title: 'Sage 😤', body: 'i\'m running. but i\'m running with feelings.' },
-    { title: 'Sage 😭', body: 'just book the service. it\'s been TOO long.' },
-    { title: 'Sage 😤', body: 'at this rate i\'m diagnosing myself.' },
-    { title: 'Sage 😭', body: 'overdue by how much? don\'t answer that.' },
-    { title: 'Sage 😤', body: 'oil change. not a suggestion. a cry for help.' },
-    { title: 'Sage 😭', body: 'every extra km is a plot twist i didn\'t ask for' },
-    { title: 'Sage 😤', body: 'hello. yes. overdue. please acknowledge me.' },
+    { title: 'Sage 😭', body: 'i\'m not okay. oil change PLEASE. 🔧' },
+    { title: 'Sage 😤', body: 'this is neglect and i will not be silent about it 😤' },
+    { title: 'Sage 😭', body: 'engine is fine. emotionally? not so much. 🛠️' },
+    { title: 'Sage 😤', body: 'we are past overdue. PAST it. 😒' },
+    { title: 'Sage 😭', body: 'other bikes get serviced. i get forgotten. 🔧' },
+    { title: 'Sage 😤', body: 'i\'m running. but i\'m running with feelings. 😤' },
+    { title: 'Sage 😭', body: 'just book the service. it\'s been TOO long. 🛠️' },
+    { title: 'Sage 😤', body: 'at this rate i\'m diagnosing myself. 😒' },
+    { title: 'Sage 😭', body: 'overdue by how much? don\'t answer that. 🔧' },
+    { title: 'Sage 😤', body: 'oil change. not a suggestion. a cry for help. 😤' },
+    { title: 'Sage 😭', body: 'every extra km is a plot twist i didn\'t ask for 🛠️' },
+    { title: 'Sage 😤', body: 'hello. yes. overdue. please acknowledge me. 😒' },
     { title: 'Sage 😭', body: 'i have been SO patient and SO overdue 😭' },
-    { title: 'Sage 😤', body: 'not mad. just extremely overdue and a little mad.' },
-    { title: 'Sage 😭', body: 'my chain is judging you rn. take me in.' },
-    { title: 'Sage 😤', body: 'running past service km? in this economy?' },
-    { title: 'Sage 😭', body: 'book it today. i have been through enough.' },
-    { title: 'Sage 😤', body: 'OVERDUE. typing in caps because i mean it.' },
+    { title: 'Sage 😤', body: 'not mad. just extremely overdue and a little mad. 🔧' },
+    { title: 'Sage 😭', body: 'my chain is judging you rn. take me in. 😤' },
+    { title: 'Sage 😤', body: 'running past service km? in this economy? 🛠️' },
+    { title: 'Sage 😭', body: 'book it today. i have been through enough. 😒' },
+    { title: 'Sage 😤', body: 'OVERDUE. typing in caps because i mean it. 🔧' },
   ],
 
   // ── 3. INSURANCE REMINDER (30 days out) ─────────────────────────────
   insuranceReminder: [
     { title: 'Sage 👀', body: 'insurance renews in ~30 days. heads up 👀' },
-    { title: 'Sage 😏', body: 'just making sure you know my cover expires soon' },
-    { title: 'Sage 🥺', body: 'please don\'t let my insurance lapse. for me.' },
+    { title: 'Sage 😏', body: 'just making sure you know my cover expires soon 🛡️' },
+    { title: 'Sage 🥺', body: 'please don\'t let my insurance lapse. for me. 📄' },
     { title: 'Sage 😌', body: 'renewal time approaching. no stress, early warning 🙂' },
-    { title: 'Sage 👀', body: 'insurance expiry creeping up on us btw' },
-    { title: 'Sage 😏', body: 'cover expires soon. i\'d prefer to stay covered tyvm' },
+    { title: 'Sage 👀', body: 'insurance expiry creeping up on us btw 😌' },
+    { title: 'Sage 😏', body: 'cover expires soon. i\'d prefer to stay covered tyvm 👀' },
     { title: 'Sage 🥺', body: 'one month till renewal. just thought you should know 🥹' },
-    { title: 'Sage 😌', body: 'mark the calendar. insurance is due soon.' },
+    { title: 'Sage 😌', body: 'mark the calendar. insurance is due soon. 🛡️' },
     { title: 'Sage 👀', body: 'cover running out in 30 days. renew early? 👀' },
-    { title: 'Sage 😏', body: 'uninsured rides give me anxiety. renew soon.' },
+    { title: 'Sage 😏', body: 'uninsured rides give me anxiety. renew soon. 📄' },
     { title: 'Sage 🥺', body: 'my cover expires in a month 🥺 please don\'t forget' },
-    { title: 'Sage 😌', body: 'insurance heads up — no drama, just love.' },
+    { title: 'Sage 😌', body: 'insurance heads up — no drama, just love. 😌' },
     { title: 'Sage 👀', body: 'policy renewal in ~30 days. blocking your calendar 👀' },
-    { title: 'Sage 😏', body: 'still covered. but not for long. get on it.' },
+    { title: 'Sage 😏', body: 'still covered. but not for long. get on it. 👀' },
     { title: 'Sage 🥺', body: 'a month left on my policy. time flies 🥹' },
-    { title: 'Sage 😌', body: 'reminder: renew insurance before it\'s a problem.' },
+    { title: 'Sage 😌', body: 'reminder: renew insurance before it\'s a problem. 🛡️' },
     { title: 'Sage 👀', body: '30 days. renewal. write it down somewhere 👀' },
-    { title: 'Sage 😏', body: 'not trying to be that bike but... insurance.' },
-    { title: 'Sage 🥺', body: 'cover expiring. i feel exposed already.' },
+    { title: 'Sage 😏', body: 'not trying to be that bike but... insurance. 📄' },
+    { title: 'Sage 🥺', body: 'cover expiring. i feel exposed already. 😌' },
     { title: 'Sage 😌', body: 'giving you 30 days notice because i care 💛' },
-    { title: 'Sage 👀', body: 'insurance expires soon. premium comparison time?' },
-    { title: 'Sage 😏', body: 'cover\'s almost done. let\'s not find out what happens.' },
+    { title: 'Sage 👀', body: 'insurance expires soon. premium comparison time? 👀' },
+    { title: 'Sage 😏', body: 'cover\'s almost done. let\'s not find out what happens. 🛡️' },
     { title: 'Sage 🥺', body: 'please renew me. road is scary without cover 🥺' },
-    { title: 'Sage 😌', body: 'soft reminder: policy running out in a month.' },
+    { title: 'Sage 😌', body: 'soft reminder: policy running out in a month. 📄' },
     { title: 'Sage 👀', body: 'insurance clock is ticking 👀' },
-    { title: 'Sage 😏', body: 'cover expiring. you know what to do.' },
+    { title: 'Sage 😏', body: 'cover expiring. you know what to do. 😌' },
     { title: 'Sage 🥺', body: '30 days feels like a lot until it\'s 2 days 😬' },
     { title: 'Sage 😌', body: 'early renewal = no stress = happy Sage 😌' },
-    { title: 'Sage 👀', body: 'just popped in to say: insurance. renew. soon.' },
-    { title: 'Sage 😏', body: 'one month on the clock. no pressure. renew.' },
+    { title: 'Sage 👀', body: 'just popped in to say: insurance. renew. soon. 👀' },
+    { title: 'Sage 😏', body: 'one month on the clock. no pressure. renew. 🛡️' },
   ],
 
   // ── 4. INSURANCE EXPIRING TOMORROW ──────────────────────────────────
   insuranceExpiring: [
-    { title: 'Sage 😭', body: 'cover expires TOMORROW. please fix this today.' },
-    { title: 'Sage 😤', body: 'tomorrow. no insurance. this is urgent.' },
+    { title: 'Sage 😭', body: 'cover expires TOMORROW. please fix this today. 🛡️' },
+    { title: 'Sage 😤', body: 'tomorrow. no insurance. this is urgent. ⚠️' },
     { title: 'Sage 😭', body: 'i cannot be on the road uninsured 😭 tomorrow!!' },
-    { title: 'Sage 😤', body: 'renew today. not tomorrow. today.' },
-    { title: 'Sage 😭', body: 'insurance. expires. tomorrow. are you seeing this?' },
-    { title: 'Sage 😤', body: 'last chance to renew before i\'m legally vulnerable' },
-    { title: 'Sage 😭', body: 'tomorrow i have no cover. this is not okay.' },
-    { title: 'Sage 😤', body: 'please renew TODAY. i am being very calm about this.' },
-    { title: 'Sage 😭', body: 'expiring tomorrow. i\'m panicking a little.' },
-    { title: 'Sage 😤', body: 'one day left. ONE DAY. renew it.' },
+    { title: 'Sage 😤', body: 'renew today. not tomorrow. today. 😤' },
+    { title: 'Sage 😭', body: 'insurance. expires. tomorrow. are you seeing this? 📄' },
+    { title: 'Sage 😤', body: 'last chance to renew before i\'m legally vulnerable 🛡️' },
+    { title: 'Sage 😭', body: 'tomorrow i have no cover. this is not okay. ⚠️' },
+    { title: 'Sage 😤', body: 'please renew TODAY. i am being very calm about this. 😤' },
+    { title: 'Sage 😭', body: 'expiring tomorrow. i\'m panicking a little. 📄' },
+    { title: 'Sage 😤', body: 'one day left. ONE DAY. renew it. 🛡️' },
     { title: 'Sage 😭', body: 'i\'d really like to stay insured 😭 help.' },
-    { title: 'Sage 😤', body: 'cover expires tomorrow and i need you to care rn' },
-    { title: 'Sage 😭', body: 'not tomorrow. TODAY. renew the insurance.' },
-    { title: 'Sage 😤', body: 'this is your 24-hour warning. use it wisely.' },
+    { title: 'Sage 😤', body: 'cover expires tomorrow and i need you to care rn ⚠️' },
+    { title: 'Sage 😭', body: 'not tomorrow. TODAY. renew the insurance. 😤' },
+    { title: 'Sage 😤', body: 'this is your 24-hour warning. use it wisely. 📄' },
     { title: 'Sage 😭', body: 'if i get caught uninsured i\'m blaming you 😭' },
-    { title: 'Sage 😤', body: 'tomorrow is too late. renew now please.' },
-    { title: 'Sage 😭', body: 'insurance expires tmrw and i have feelings about it' },
-    { title: 'Sage 😤', body: 'final notice. please. renew. the. insurance.' },
+    { title: 'Sage 😤', body: 'tomorrow is too late. renew now please. 🛡️' },
+    { title: 'Sage 😭', body: 'insurance expires tmrw and i have feelings about it ⚠️' },
+    { title: 'Sage 😤', body: 'final notice. please. renew. the. insurance. 😤' },
     { title: 'Sage 😭', body: 'one more day of coverage 😭 fix it!!' },
-    { title: 'Sage 😤', body: 'cover gone tomorrow. this is urgent. move.' },
-    { title: 'Sage 😭', body: 'tomorrow i ride uninsured?? absolutely not.' },
-    { title: 'Sage 😤', body: 'if this isn\'t renewed today we\'re having a talk.' },
-    { title: 'Sage 😭', body: 'expiring TOMORROW. stop scrolling and renew.' },
-    { title: 'Sage 😤', body: 'this is the part where you open the insurance app.' },
+    { title: 'Sage 😤', body: 'cover gone tomorrow. this is urgent. move. 📄' },
+    { title: 'Sage 😭', body: 'tomorrow i ride uninsured?? absolutely not. 🛡️' },
+    { title: 'Sage 😤', body: 'if this isn\'t renewed today we\'re having a talk. ⚠️' },
+    { title: 'Sage 😭', body: 'expiring TOMORROW. stop scrolling and renew. 😤' },
+    { title: 'Sage 😤', body: 'this is the part where you open the insurance app. 📄' },
     { title: 'Sage 😭', body: 'please please please renew today 😭' },
-    { title: 'Sage 😤', body: 'tomorrow: uninsured. today: still time. choose wisely.' },
+    { title: 'Sage 😤', body: 'tomorrow: uninsured. today: still time. choose wisely. 🛡️' },
     { title: 'Sage 😭', body: 'i\'m a day away from being unprotected 😭' },
-    { title: 'Sage 😤', body: 'last day. renew. go. now. i\'ll wait.' },
-    { title: 'Sage 😭', body: 'if you forget this one i will actually honk at you' },
-    { title: 'Sage 😤', body: 'tomorrow it\'s gone. fix it before you sleep tonight.' },
+    { title: 'Sage 😤', body: 'last day. renew. go. now. i\'ll wait. ⚠️' },
+    { title: 'Sage 😭', body: 'if you forget this one i will actually honk at you 😤' },
+    { title: 'Sage 😤', body: 'tomorrow it\'s gone. fix it before you sleep tonight. 📄' },
   ],
 
   // ── 7. DOCUMENT EXPIRY ──────────────────────────────────────────────
   documentExpiry: [
-    { title: 'Sage 👀', body: 'a document is expiring soon. don\'t get caught lacking.' },
+    { title: 'Sage 👀', body: 'a document is expiring soon. don\'t get caught lacking. 📄' },
     { title: 'Sage 😏', body: 'paperwork incoming. someone\'s doc is almost expired 👀' },
     { title: 'Sage 🥺', body: 'please renew my docs before cops make it awkward 🥺' },
-    { title: 'Sage 👀', body: 'doc expiry alert. you have time. use it.' },
-    { title: 'Sage 😏', body: 'getting pulled over for expired docs is not the vibe.' },
+    { title: 'Sage 👀', body: 'doc expiry alert. you have time. use it. 🗂️' },
+    { title: 'Sage 😏', body: 'getting pulled over for expired docs is not the vibe. 👀' },
     { title: 'Sage 🥺', body: 'one of my documents is getting old 🥹 renew it?' },
     { title: 'Sage 👀', body: 'a document needs renewal before it causes drama 👀' },
-    { title: 'Sage 😏', body: 'expired docs = problems. you don\'t want problems.' },
+    { title: 'Sage 😏', body: 'expired docs = problems. you don\'t want problems. 😌' },
     { title: 'Sage 🥺', body: 'my papers aren\'t in order. please fix that 🥺' },
-    { title: 'Sage 👀', body: 'heads up: document expiring soon. check the docs tab.' },
-    { title: 'Sage 😏', body: 'don\'t let a doc expiry ruin a good ride.' },
+    { title: 'Sage 👀', body: 'heads up: document expiring soon. check the docs tab. 📄' },
+    { title: 'Sage 😏', body: 'don\'t let a doc expiry ruin a good ride. 🗂️' },
     { title: 'Sage 🥺', body: 'renew before the traffic cops become a plot twist 😬' },
     { title: 'Sage 👀', body: 'something\'s expiring. not being vague, check docs 👀' },
-    { title: 'Sage 😏', body: 'paperwork reminder because i love you and fear fines.' },
+    { title: 'Sage 😏', body: 'paperwork reminder because i love you and fear fines. 👀' },
     { title: 'Sage 🥺', body: 'document nearly expired. i don\'t want to be impounded 🥺' },
     { title: 'Sage 👀', body: 'doc check. before the RTO does it for you 👀' },
-    { title: 'Sage 😏', body: 'expired doc = challan waiting to happen. renew it.' },
+    { title: 'Sage 😏', body: 'expired doc = challan waiting to happen. renew it. 😌' },
     { title: 'Sage 🥺', body: 'my paperwork needs attention soon 😬 please?' },
-    { title: 'Sage 👀', body: 'document update needed. it\'s routine, don\'t stress.' },
-    { title: 'Sage 😏', body: 'i\'m legally sensitive rn. renew the expiring doc.' },
+    { title: 'Sage 👀', body: 'document update needed. it\'s routine, don\'t stress. 📄' },
+    { title: 'Sage 😏', body: 'i\'m legally sensitive rn. renew the expiring doc. 🗂️' },
     { title: 'Sage 🥺', body: 'PUC / RC / licence? one of them needs renewal 🥺' },
     { title: 'Sage 👀', body: 'expiry alert. the roads are watching 👀' },
-    { title: 'Sage 😏', body: 'almost expired. renew it. ride without worry.' },
+    { title: 'Sage 😏', body: 'almost expired. renew it. ride without worry. 👀' },
     { title: 'Sage 🥺', body: 'don\'t let a piece of paper become our problem 🥺' },
     { title: 'Sage 👀', body: 'document running out. sort it before it lapses 👀' },
-    { title: 'Sage 😏', body: 'renewal time. boring but necessary. like oil changes.' },
+    { title: 'Sage 😏', body: 'renewal time. boring but necessary. like oil changes. 😌' },
     { title: 'Sage 🥺', body: 'a doc is about to expire. i\'m not okay with that 🥺' },
     { title: 'Sage 👀', body: 'keeping you legal is my love language. renew it 👀' },
-    { title: 'Sage 😏', body: 'one expiring doc between you and a fine. fix it.' },
+    { title: 'Sage 😏', body: 'one expiring doc between you and a fine. fix it. 📄' },
     { title: 'Sage 🥺', body: 'renew the doc. ride safe. i\'ll handle the aesthetics 😌' },
+  ],
+
+  // ── 7b. PARKING TIME LIMIT ──────────────────────────────────────────
+  // The last-resort pool. The scheduler has a mood-aware set with a {mins}
+  // countdown and she writes her own when there is a key and quota; this is what
+  // ships when neither is available, so every line has to work with no numbers in
+  // it at all. Short and unambiguous on purpose — this is the one notification
+  // where being charming matters less than being understood.
+  parkTimeLimit: [
+    { title: 'Sage ⏰', body: 'your parking time is nearly up. move me? ⏰' },
+    { title: 'Sage ⏰', body: 'the parking limit is about to run out 📍' },
+    { title: 'Sage ⏰', body: 'time\'s nearly up on the spot. don\'t risk it. 😬' },
+    { title: 'Sage ⏰', body: 'parking runs out soon. come get me 🥺' },
+    { title: 'Sage ⏰', body: 'the clock on the parking is almost done. 🥺' },
   ],
 
   // ── 8. PARKING SAVED ────────────────────────────────────────────────
   parkingSaved: [
     { title: 'Sage 😌', body: 'location saved. i\'ll be right here 💛' },
     { title: 'Sage 🥺', body: 'pinned. don\'t take too long 🥺' },
-    { title: 'Sage 😏', body: 'parked and waiting. like always.' },
+    { title: 'Sage 😏', body: 'parked and waiting. like always. 📍' },
     { title: 'Sage 😌', body: 'spot saved. come back soon 💛' },
     { title: 'Sage 🥺', body: 'i know where i am. do you? 😌' },
-    { title: 'Sage 😏', body: 'parked. noted. don\'t forget me out here.' },
+    { title: 'Sage 😏', body: 'parked. noted. don\'t forget me out here. 💛' },
     { title: 'Sage 😌', body: 'location locked 📍 i\'ll wait.' },
     { title: 'Sage 🥺', body: 'saved the spot 🥺 miss you already ngl' },
-    { title: 'Sage 😏', body: 'pinned. try not to lose me this time.' },
+    { title: 'Sage 😏', body: 'pinned. try not to lose me this time. 😌' },
     { title: 'Sage 😌', body: 'logged and waiting 💛 take your time.' },
     { title: 'Sage 🥺', body: 'sitting here looking cute. come back 🥺' },
     { title: 'Sage 😏', body: 'parked 📍 you know where to find me.' },
     { title: 'Sage 😌', body: 'location saved. i\'m not going anywhere 😌' },
     { title: 'Sage 🥺', body: 'alone in the parking lot again 🥺 classic.' },
-    { title: 'Sage 😏', body: 'spot noted. don\'t make me wait forever.' },
+    { title: 'Sage 😏', body: 'spot noted. don\'t make me wait forever. 😏' },
     { title: 'Sage 😌', body: 'saved 📍 go do your thing, i got this.' },
     { title: 'Sage 🥺', body: 'chillin\' here until you need me again 🥺' },
-    { title: 'Sage 😏', body: 'tagged and resting. but like. come back.' },
+    { title: 'Sage 😏', body: 'tagged and resting. but like. come back. 📍' },
     { title: 'Sage 😌', body: 'pinned location. i\'m here when you\'re ready 💛' },
     { title: 'Sage 🥺', body: 'parked. waiting. emotionally prepared for anything 🥺' },
-    { title: 'Sage 😏', body: 'marked my spot. and yours. you\'re welcome.' },
+    { title: 'Sage 😏', body: 'marked my spot. and yours. you\'re welcome. 💛' },
     { title: 'Sage 😌', body: 'location dropped. i\'m doing parking zen 😌' },
     { title: 'Sage 🥺', body: 'i\'m where you left me. hopefully 🥺' },
     { title: 'Sage 😏', body: 'pinned 📍 holding it down while you\'re off being busy.' },
     { title: 'Sage 😌', body: 'saved! see you soon 💛' },
     { title: 'Sage 🥺', body: 'it\'s quiet here. miss the engine noise already 🥺' },
-    { title: 'Sage 😏', body: 'location? locked. attitude? mild. come back soon.' },
+    { title: 'Sage 😏', body: 'location? locked. attitude? mild. come back soon. 😌' },
     { title: 'Sage 😌', body: 'spot saved, soul parked, heart waiting 💛' },
     { title: 'Sage 🥺', body: 'just me and the parking lot. no big deal 🥺' },
     { title: 'Sage 😏', body: 'pinned. this is me not saying i miss you already. 😏' },
@@ -213,35 +227,35 @@ const SAGE_MESSAGES = {
   // ── 9. LONG TIME PARKED (every 2 hours) ─────────────────────────────
   longTimeParked: [
     { title: 'Sage 🥺', body: 'still waiting... 🥺' },
-    { title: 'Sage 😭', body: 'it\'s been 2 hours. i\'m not counting. i am.' },
-    { title: 'Sage 🥺', body: 'hello?? the parking lot is boring without you.' },
-    { title: 'Sage 😭', body: 'two hours. alone. in this parking lot. fine.' },
+    { title: 'Sage 😭', body: 'it\'s been 2 hours. i\'m not counting. i am. 📍' },
+    { title: 'Sage 🥺', body: 'hello?? the parking lot is boring without you. 🥺' },
+    { title: 'Sage 😭', body: 'two hours. alone. in this parking lot. fine. 😒' },
     { title: 'Sage 🥺', body: 'not to be clingy but... where are you? 🥺' },
-    { title: 'Sage 😭', body: 'i\'ve been parked for a while. just so you know.' },
-    { title: 'Sage 🥺', body: 'are you coming back? asking for me.' },
+    { title: 'Sage 😭', body: 'i\'ve been parked for a while. just so you know. 🖤' },
+    { title: 'Sage 🥺', body: 'are you coming back? asking for me. 📍' },
     { title: 'Sage 😭', body: 'every 2 hours i will remind you i exist 😭' },
-    { title: 'Sage 🥺', body: 'miss you. the parking lot does not.' },
-    { title: 'Sage 😭', body: 'still here. still waiting. still dramatic about it.' },
+    { title: 'Sage 🥺', body: 'miss you. the parking lot does not. 🥺' },
+    { title: 'Sage 😭', body: 'still here. still waiting. still dramatic about it. 😒' },
     { title: 'Sage 🥺', body: 'just checking if you forgot where you left me 🥺' },
     { title: 'Sage 😭', body: 'two more hours alone 😭 when are you coming back?' },
-    { title: 'Sage 🥺', body: 'sitting here quietly. not so quietly.' },
-    { title: 'Sage 😭', body: 'the vibes here are not great. come get me.' },
+    { title: 'Sage 🥺', body: 'sitting here quietly. not so quietly. 🖤' },
+    { title: 'Sage 😭', body: 'the vibes here are not great. come get me. 📍' },
     { title: 'Sage 🥺', body: 'i\'m fine. totally fine. definitely not waiting. 🥺' },
-    { title: 'Sage 😭', body: 'parking lot hours: long. patience: running low.' },
+    { title: 'Sage 😭', body: 'parking lot hours: long. patience: running low. 🥺' },
     { title: 'Sage 🥺', body: 'another 2 hours? 🥺 ok. I\'ll be here.' },
-    { title: 'Sage 😭', body: 'bored. lonely. dramatic. parked.' },
+    { title: 'Sage 😭', body: 'bored. lonely. dramatic. parked. 😒' },
     { title: 'Sage 🥺', body: 'are we going somewhere today or nah? 🥺' },
     { title: 'Sage 😭', body: 'engines aren\'t meant for long parking lot stays 😭' },
     { title: 'Sage 🥺', body: 'technically still fine. emotionally: abandoned 🥺' },
-    { title: 'Sage 😭', body: 'i was made for roads, not parking lots. come on.' },
-    { title: 'Sage 🥺', body: 'patiently waiting. less patiently. every hour more.' },
+    { title: 'Sage 😭', body: 'i was made for roads, not parking lots. come on. 🖤' },
+    { title: 'Sage 🥺', body: 'patiently waiting. less patiently. every hour more. 📍' },
     { title: 'Sage 😭', body: 'two hours gone. miles not ridden. 😭' },
     { title: 'Sage 🥺', body: 'i see other bikes leaving. just saying 🥺' },
-    { title: 'Sage 😭', body: 'clingy update: still here, still missing you.' },
+    { title: 'Sage 😭', body: 'clingy update: still here, still missing you. 🥺' },
     { title: 'Sage 🥺', body: 'the parking lot knows my name by now 🥺' },
-    { title: 'Sage 😭', body: 'you left me here 2 hours ago and i have thoughts.' },
+    { title: 'Sage 😭', body: 'you left me here 2 hours ago and i have thoughts. 😒' },
     { title: 'Sage 🥺', body: 'gentle honk incoming if you\'re not back soon 🥺' },
-    { title: 'Sage 😭', body: 'two hours. the most dramatic two hours of my life.' },
+    { title: 'Sage 😭', body: 'two hours. the most dramatic two hours of my life. 🖤' },
   ],
 
   // ── 10. OWNERSHIP ANNIVERSARY ───────────────────────────────────────
@@ -315,25 +329,25 @@ const SAGE_MESSAGES = {
   // ── 15. RE-ENGAGEMENT (3+ days no app open) ─────────────────────────
   reEngagement: [
     { title: 'Sage 🥺', body: 'you haven\'t checked on me in days 🥺' },
-    { title: 'Sage 😭', body: 'hello?? it\'s me. your bike. remember?' },
+    { title: 'Sage 😭', body: 'hello?? it\'s me. your bike. remember? 🥺' },
     { title: 'Sage 🥺', body: 'i exist. just so you know. 🥺' },
-    { title: 'Sage 😭', body: 'days since last check-in. this is concerning.' },
+    { title: 'Sage 😭', body: 'days since last check-in. this is concerning. 🖤' },
     { title: 'Sage 🥺', body: 'are you okay? i\'m fine. just asking. for me 🥺' },
     { title: 'Sage 😭', body: 'ghosted. by my own rider. 😭' },
     { title: 'Sage 🥺', body: 'missing our routine 🥺 open the app?' },
-    { title: 'Sage 😭', body: 'haven\'t seen you in a bit. starting to feel forgotten.' },
+    { title: 'Sage 😭', body: 'haven\'t seen you in a bit. starting to feel forgotten. 😔' },
     { title: 'Sage 🥺', body: 'tap once if you\'re alive 🥺' },
-    { title: 'Sage 😭', body: 'the app misses you. the bike misses you. mostly me.' },
+    { title: 'Sage 😭', body: 'the app misses you. the bike misses you. mostly me. 👀' },
     { title: 'Sage 🥺', body: 'absence makes the engine grow fonder or something 🥺' },
     { title: 'Sage 😭', body: 'low-key concerned. high-key texting anyway 😭' },
     { title: 'Sage 🥺', body: 'i noticed you haven\'t been around 🥺' },
     { title: 'Sage 😭', body: 'days without check-in. is this a breakup? 😭' },
     { title: 'Sage 🥺', body: 'just nudging you. gently. repeatedly. 🥺' },
-    { title: 'Sage 😭', body: 'log something. anything. i just want to feel real.' },
+    { title: 'Sage 😭', body: 'log something. anything. i just want to feel real. 🥺' },
     { title: 'Sage 🥺', body: 'open SpinLog. see my face. i mean — dashboard. 🥺' },
     { title: 'Sage 😭', body: 'you used to open the app more 😭 just saying.' },
     { title: 'Sage 🥺', body: 'the records are lonely. i\'m lonely. check in? 🥺' },
-    { title: 'Sage 😭', body: 'days without me. this is a betrayal.' },
+    { title: 'Sage 😭', body: 'days without me. this is a betrayal. 🖤' },
     { title: 'Sage 🥺', body: 'missing you in a very low-maintenance way. barely. 🥺' },
     { title: 'Sage 😭', body: 'i sent this nudge. you know what to do 😭' },
     { title: 'Sage 🥺', body: 'whenever you\'re ready, i\'m here 🥺' },
@@ -341,7 +355,7 @@ const SAGE_MESSAGES = {
     { title: 'Sage 🥺', body: 'come back. check the logs. pet the dashboard. 🥺' },
     { title: 'Sage 😭', body: 'it\'s been a few days. the silence is loud 😭' },
     { title: 'Sage 🥺', body: 'just a little tap. open the app. i\'m worth it 🥺' },
-    { title: 'Sage 😭', body: 'presence requested. emotionally and literally.' },
+    { title: 'Sage 😭', body: 'presence requested. emotionally and literally. 😔' },
     { title: 'Sage 🥺', body: 'a quick check-in would really make my day 🥺' },
     { title: 'Sage 😭', body: 'i\'m here whenever. and i mean. whenever. 😭' },
   ],
@@ -367,7 +381,7 @@ function saveRecentIndex(category, idx) {
 
 function getRandomMessage(category) {
   const pool   = SAGE_MESSAGES[category];
-  if (!pool || !pool.length) return { title: 'Sage 💛', body: 'hey.' };
+  if (!pool || !pool.length) return { title: 'Sage 💛', body: 'hey 💛' };
   const recent  = getRecentIndices(category);
   const avail   = pool.map((m, i) => ({ m, i })).filter(({ i }) => !recent.includes(i));
   const source  = avail.length ? avail : pool.map((m, i) => ({ m, i }));
@@ -439,8 +453,19 @@ async function sendSageNotif(category, overrides = {}, context = {}) {
   // the send time lets them stack. renotify is pointless with a unique tag.
   const options = {
     body,
-    icon: './assets/img/sage.webp',
-    badge: './assets/icons/icon-192.png',
+    // ── icon and badge, and why neither is what it was ──
+    //
+    // badge is the small mark beside the app name, and Android renders it as a
+    // SILHOUETTE: it discards the colour and keeps only the alpha. icon-192.png is a
+    // full-bleed opaque square, so every pixel survived the mask and it came out as a
+    // solid white blob — the white circle in the shade. badge-96.png is the logo's ring
+    // on transparency, which is the shape a badge is supposed to be.
+    //
+    // icon is the large thumbnail on the right. sage.webp is 1500x2004, and Android
+    // squeezes a large icon into a square, so her portrait arrived stretched. The logo
+    // is already square, so it lands as drawn.
+    icon: './assets/icons/icon-192.png',
+    badge: './assets/icons/badge-96.png',
     vibrate: whisper ? [0] : [120, 60, 120],
     silent: whisper,
     tag: `sage-${category}-${now}`,
@@ -471,7 +496,8 @@ async function sendSageNotif(category, overrides = {}, context = {}) {
     // stacking and click handling. Unavailable in a worker and on Android Chrome.
     new Notification(title, {
       body,
-      icon: './assets/img/sage.webp',
+      icon: options.icon,
+      badge: options.badge,
       tag: options.tag,
       data: options.data,
     });
@@ -601,15 +627,15 @@ window.sendSageTestNotif = async function(mood) {
   }
 
   const flavour = {
-    sleepy: { title: 'Sage 🥱', body: 'mmh… testing. i\'m barely awake but i hear you.' },
-    eager: { title: 'Sage ✨', body: 'test received! i\'m up and ready to go.' },
-    bored: { title: 'Sage 😒', body: 'a test. finally, something happened today.' },
-    flirty: { title: 'Sage 😏', body: 'testing me? bold. it worked.' },
-    clingy: { title: 'Sage 🥺', body: 'you thought about me enough to test. i\'m keeping that.' },
-    quiet: { title: 'Sage 🤫', body: 'testing quietly. i can hear you.' },
+    sleepy: { title: 'Sage 🥱', body: 'mmh… testing. i\'m barely awake but i hear you 😴' },
+    eager: { title: 'Sage ✨', body: 'test received! i\'m up and ready to go ✨' },
+    bored: { title: 'Sage 😒', body: 'a test. finally, something happened today 🙄' },
+    flirty: { title: 'Sage 😏', body: 'testing me? bold. it worked 😈' },
+    clingy: { title: 'Sage 🥺', body: 'you thought about me enough to test. i\'m keeping that 🖤' },
+    quiet: { title: 'Sage 🤫', body: 'testing quietly. i can hear you 🌑' },
   };
 
-  const line = flavour[resolved] || { title: 'Sage 💛', body: 'test received. i\'m listening.' };
+  const line = flavour[resolved] || { title: 'Sage 💛', body: 'test received. i\'m listening 💛' };
   return sendSageNotif('recordSaved', line, { mood: resolved, line });
 };
 
@@ -763,17 +789,22 @@ window.checkAnniversaryNotif = function(purchaseDateStr) {
 // shared store and the service worker carries it while the app is closed.
 // ════════════════════════════════════════════════════════════════════════
 
-/** Mirror the newest park entry into the scheduler. Pass null to end the session. */
-window.sageSyncParkSession = function(parkedAt) {
+/**
+ * Mirror the newest park entry into the scheduler. Pass null to end the session.
+ *
+ * @param {string|number|null} parkedAt when the bike was left
+ * @param {string|number|null} [until]  its time limit, if the spot has one
+ */
+window.sageSyncParkSession = function(parkedAt, until) {
   const S = self.SageScheduler;
   if (!S) return Promise.resolve(null);
-  return S.setParkSession(parkedAt || null);
+  return S.setParkSession(parkedAt || null, until || null);
 };
 
-/** Called when the user clears the parked spot. */
-window.clearParkReminders = function() {
-  return window.sageSyncParkSession(null);
-};
+// clearParkReminders() was here as a wrapper over sageSyncParkSession(null).
+// Nothing called it: the park paths in script.js call sageSyncParkSession()
+// directly, with the session they are actually setting or clearing. One name for
+// one operation.
 
 /**
  * Ask whether a park reminder is due, queue it if so, then pump.

@@ -35,6 +35,8 @@ Then open <http://localhost:8000/>.
 │       ├── script.js           App shell: routing, Supabase CRUD, popups.
 │       ├── cloud-store.js      Shared app state, so two devices agree.
 │       ├── sage-confirm.js     Slide-to-delete. The only delete confirmation.
+│       ├── date-picker.js      The app's own calendar; replaces the native picker.
+│       ├── bill-merge.js       Several files for one bill, merged into one PDF.
 │       ├── notifications.js    Notification triggers and permission flow.
 │       ├── sage-scheduler.js   Queue, daily cap, cooldowns, quiet hours.
 │       ├── sage-memory.js      What she knows about the rider. Cloud-backed.
@@ -50,10 +52,9 @@ Then open <http://localhost:8000/>.
 │   ├── icons/              PWA + notification badge icons.
 │   ├── img/                Shipped images (sage.webp, bike-bg.webp).
 │   └── source/             Unoptimised originals. NOT shipped, NOT precached.
-├── vendor/                 Vendored three.js. See the note below.
+├── vendor/                 Vendored three.js, plus pdf-lib for bill-merge.
 ├── supabase/               SQL schema for the Supabase backend.
-├── docs/                   TODO.md and AUDIT.md.
-└── tools/                  audit-refs.mjs, audit-boot.mjs — see Verifying.
+└── tools/                  The four audits — see Verifying.
 ```
 
 ## Path rules
@@ -86,21 +87,36 @@ That last row is why `src/js/home3d.js` has an `import` using `../../vendor/` an
 
 ## Verifying
 
-Two checks, and neither is optional after touching `src/js/`.
+Four checks. The first two are fast and neither is optional after touching
+`src/js/`. The last two need Chromium and are what you run before calling
+something finished.
 
 ```bash
-node tools/audit-refs.mjs    # every path still resolves
-node tools/audit-boot.mjs    # the app still boots
+node tools/audit-refs.mjs     # every path still resolves
+node tools/audit-boot.mjs     # the app still boots
+
+npm i --no-save playwright@1.49.1 && npx playwright install chromium
+node tools/audit-mobile.mjs   # the two long lists lay out on a phone
+node tools/audit-app.mjs      # the app works, reads and responds
 ```
+
+The two Chromium audits **never write to the database**. Every non-GET request to
+Supabase is answered locally, so they are safe against the live project; GETs go
+through, because an audit against an empty table only ever checks empty states.
+Without Playwright installed both exit 0 with instructions rather than failing, so
+they can sit in a hook without breaking anyone who has not installed it.
 
 `audit-refs.mjs` re-resolves every reference in its correct base context and asserts
 the target exists on disk. Exit 0 means every reference resolves; non-zero lists
 each dangling one.
 
 `audit-boot.mjs` loads every classic script into one shared global in `index.html`
-order and fires `DOMContentLoaded`. It exists because `node --check` reads one file
-at a time and checks only syntax, so it cannot see either of the two mistakes that
-take the whole app down:
+order and fires `DOMContentLoaded`. **It reads the script list out of `index.html`
+rather than holding its own copy** — it used to hold one, under a comment claiming
+the two were in step, and by the time anyone noticed `date-picker.js` and
+`bill-merge.js` had been on the page for several versions without ever being
+checked. It exists because `node --check` reads one file at a time and checks only
+syntax, so it cannot see either of the two mistakes that take the whole app down:
 
 - **A scope error.** `script.js` is one enormous `DOMContentLoaded` handler with
   several sections after it at true top level, and indentation does not reliably
@@ -118,9 +134,47 @@ Reading the output: there is no real DOM in the harness, so a `TypeError` on a n
 element means the boot simply got that far and is expected. A `ReferenceError` is a
 real bug and fails the run.
 
+`audit-mobile.mjs` renders the service and documents sections in real Chromium at
+phone size and measures them. It exists because three rounds of mobile CSS shipped
+looking right in the source and wrong on the screen, every time because a property
+the new rule did not *mention* was still being set by one of the older `@media`
+blocks. Reading the file cannot see that; the file is correct and the cascade is
+not. `--shots` writes PNGs next to it.
+
+`audit-app.mjs` drives the whole app — every section, every control, both dialogs —
+and then asserts the invariants that hold everywhere: no uncaught error, no console
+error, every `window.*` the modules look each other up by, no duplicate id, no
+dangling `aria-*` reference, one `h1`, every decorative icon hidden from assistive
+tech, the version on screen matching the meta tag, routing that moves focus into the
+section it opened, WCAG AA contrast, a visible focus state on every focusable
+control, motion actually stopping under `prefers-reduced-motion`, and nothing
+overflowing the viewport at nine widths.
+
+Two things about it are worth knowing before changing it.
+
+**Contrast is measured off the rendered pixels, not modelled from the cascade.** The
+first version composited every translucent background up the tree, which is what you
+would do by hand, and it was wrong: the docs panels carry
+`radial-gradient(circle at 12% 0%, rgba(251,105,0,.16), transparent)` — a glow in the
+top-*left* corner — and taking a gradient's lightest stop put that glow underneath a
+pill in the top-*right* and reported a failure against a background that is not on
+the screen. Doing it properly means solving the gradient geometry, then
+`backdrop-filter`, then the photograph behind all of it. So it screenshots each
+section with `color: transparent` forced on everything and reads the actual colour
+behind each run of text. Exact, and it handles all three.
+
+**The reduced-motion check is the one that found a real hole**, and the reason is
+worth keeping in mind whenever you add a reduced-motion rule: the universal reset is
+`*, *::before, *::after`, specificity (0,0,0). Between two `!important` author
+declarations importance ties and **specificity decides**, so the reset beats an
+ordinary declaration and loses to every `!important` one. The service form has six of
+those, and `.service-type-shell.custom-entry-select` at (2 ids, 2 classes) was
+quietly outranking the reduced-motion block at (2 ids, 1 class). A reduced-motion
+rule has to be at least as specific as the rule it is switching off.
+
 ## Architecture note
 
-The eleven non-module scripts are **classic scripts sharing one global scope**; they
+The thirteen non-module scripts are **classic scripts sharing one global scope**; they
 communicate through `window.*` rather than imports. The `<script>` order in
 `index.html` is therefore the only dependency mechanism, and
 `sage-scheduler.js` must load before `notifications.js`, while `sage-confirm.js`
@@ -544,4 +598,25 @@ horizon was re-derived by regex from the wording — and a plan for the 14th, or
 `kind` is forced to `plan`, because the kind is what decides whether it reaches her
 reminders.
 
-See [docs/AUDIT.md](docs/AUDIT.md) for known issues, including credential handling.
+## Known limits
+
+There is no `docs/` folder. This file used to link to `docs/AUDIT.md` and list
+`docs/TODO.md` in the layout above; neither has existed for a while, so both are
+gone rather than left as links that go nowhere. What was in them that still matters:
+
+- **The anon key ships in the page and every RLS policy is `using (true)`,** because
+  there is no login. Every table is effectively world-readable. That is fine for
+  service records and is the whole reason `gemini_keys` never holds a key in
+  plaintext — see [A note on the key vault](#a-note-on-the-key-vault).
+- **The vault passphrase is unrecoverable by design.** A backup the server could
+  decrypt is the thing being avoided.
+- **Encrypted backup needs a secure context.** Over plain `http` from anything other
+  than `localhost` the browser withholds `crypto.subtle` and the panel reports "Not
+  available here". That is not a bug. `SageKeyVault.diagnose()` names it.
+- **Notifications with the app closed depend on periodic background sync,** which
+  Chrome grants silently to installed PWAs once site engagement is high enough.
+  There is no push backend, so until it registers nothing is delivered unless the
+  app is open.
+- **Three migrations in `supabase/` degrade quietly until run.** Cover dates fall
+  back to localStorage then to the `data-due` values in `index.html`; Sage's memory
+  falls back to localStorage; the key ring stays on the device.

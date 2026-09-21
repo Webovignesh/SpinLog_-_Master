@@ -2,9 +2,24 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
-  <meta name="version" content="1.7.2"/>
+  <!-- interactive-widget=resizes-content: the on-screen keyboard shrinks the LAYOUT
+       viewport, not just the visual one. Without it the page keeps its full height
+       behind the keyboard, so `dvh` never changes, `scrollIntoView` aims at a point
+       underneath it, and the chat composer sat behind half a screen of keys with no
+       way to scroll to it. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"/>
+  <!-- THE app version, and the only place it is written as a literal. Script copies it
+       into every [data-app-version] element on load, so adding another place to show it
+       needs no JS change. Keep the version segment of CACHE_NAME in service-worker.js
+       in step with this — that file cannot read a meta tag, and a mismatch means the
+       number on screen is not the number that is actually cached. -->
+  <meta name="version" content="1.9.1"/>
   <title>SpinLog</title>
+  <!-- Not decoration. This is what an install prompt, a shared link and a
+       browser's own history entry show underneath the title, and without it they
+       show the first text the parser finds — which here is the database status
+       chip. The manifest has its own description; this one is for the page. -->
+  <meta name="description" content="SpinLog — service, document and insurance tracker for a KTM Duke 250 Gen 3. Offline-capable, with Sage, the bike's own AI companion."/>
   <link rel="preload" href="assets/img/sage.webp" as="image" fetchpriority="high">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
   <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;600&display=swap" rel="stylesheet">
@@ -24,6 +39,15 @@
        gradient on <body> is the fallback if WebGL is unavailable. -->
   <canvas id="dkScene" class="dk-scene" aria-hidden="true"></canvas>
   <div class="container">
+    <!-- THE DOCUMENT'S ONE h1, AND WHY IT IS NOT ON SCREEN.
+         Every routed section opens with an h2 (#home-header, #service-header,
+         #docs-header, #sage-header), so the outline started at level 2 with no
+         level 1 above it — a screen reader's heading list had four peers and no
+         document title. The old fixed header that carried the wordmark is gone
+         and nothing replaced it visually, which is a deliberate design choice;
+         the accessible name of the app is not optional though. .sr-only is the
+         existing helper in styles.css. -->
+    <h1 class="sr-only">SpinLog — Duke 250 service, documents and insurance</h1>
     <main role="main">
       <!-- ═══════════════════════════════════════════════════════════════
            SpinLog v1.7 | Home / Command Center
@@ -118,7 +142,7 @@
               <span class="dk-stat-ico"><i class="fas fa-location-dot" aria-hidden="true"></i></span>
               <span class="dk-stat-label">Last Parked</span>
               <strong class="dk-stat-value" id="parkValueMobile">Tap to save</strong>
-              <span class="dk-stat-foot">Hold for history</span>
+              <span class="dk-stat-foot" id="parkFootMobile">Hold for history</span>
             </article>
 
             <article class="dk-stat">
@@ -338,6 +362,18 @@
           <span id="home-odo-mobile" class="dk-hidden">0 km</span>
           <span id="home-last-mobile" class="dk-hidden">N/A</span>
           <span id="home-next-mobile" class="dk-hidden">N/A</span>
+
+          <!-- Build number, at the foot of the page rather than beside the database
+               chip. It is a fact you go looking for once, not something to monitor, so
+               it does not belong in the hero next to live status. Filled from the
+               version meta tag via [data-app-version]. -->
+          <!-- The glyph is a branch, because that is what a version IS — a point on
+               one. Decorative, so aria-hidden: a screen reader reads "SpinLog v1.9.0"
+               and gains nothing from being told there is a small drawing next to it. -->
+          <p class="dk-build">
+            <i class="fas fa-code-branch" aria-hidden="true"></i>
+            <span class="dk-build-text">SpinLog <span data-app-version>&mdash;</span></span>
+          </p>
         </div>
       </section>
 
@@ -345,14 +381,22 @@
       <section id="service" aria-labelledby="service-header">
         <div class="section-topline">
           <h2 id="service-header" class="service-title">
-            <i class="fas fa-screwdriver-wrench"></i> Service Records
+            <i class="fas fa-screwdriver-wrench" aria-hidden="true"></i> Service Records
           </h2>
-          <button type="button" class="section-home-pill" data-home-section="home"><i class="fas fa-house"></i> Home</button>
+          <button type="button" class="section-home-pill" data-home-section="home"><i class="fas fa-house" aria-hidden="true"></i> Home</button>
         </div>
         <div class="service-placeholder-card">
           <div class="service-placeholder-icon">
+            <!-- Was: "Track your bike's service history, schedule upcoming
+                 maintenance, and set reminders for regular checkups." Three lines
+                 on a phone, above the form, saying what the panel titled SERVICE
+                 RECORDS containing a form headed TYPE / DATE / ODO / COST already
+                 says. It described the section to someone who had already found
+                 it, and it pushed the first field below the fold. One line now,
+                 and it earns that line by saying something the fields do not:
+                 that a bill is worth attaching. -->
             <div class="service-management-desc">
-              Track your bike's service history, schedule upcoming maintenance, and set reminders for regular checkups.
+              Log what was done. Attach the bill and Sage can read the rest off it.
             </div>
           </div>
           <form id="serviceEntryForm" autocomplete="off" enctype="multipart/form-data" novalidate>
@@ -396,8 +440,12 @@
                   <input type="number" name="odo" min="0" inputmode="numeric" placeholder="Enter ODO" required>
                 </div>
               </label>
-            </div>
-            <div class="form-in-card-row">
+              <!-- Cost lives up here with the other typed facts rather than alone
+                   above the upload. All five are things he reads off the bill in one
+                   pass, and grouping by proximity is what makes them read as one
+                   task instead of four. It also frees the row below to be nothing
+                   but the dropzone, at full width, which is the shape that pattern
+                   actually wants. -->
               <label class="service-field service-field-cost">
                 <span>Cost (₹)</span>
                 <div class="field-shell">
@@ -405,16 +453,25 @@
                   <input type="number" name="cost" min="0" step="0.01" inputmode="decimal" placeholder="Enter amount" required>
                 </div>
               </label>
+            </div>
+            <div class="form-in-card-row">
               <div class="custom-file-label service-upload-field" role="group" aria-labelledby="billFieldLabel">
                 <span id="billFieldLabel">Bill</span>
+                <!-- multiple: a garage invoice is routinely two sheets, or a
+                     printed bill plus a photo of the handwritten parts list. Any
+                     mix of images and PDFs is merged into one PDF, in the order
+                     picked, before it reaches the form — see src/js/bill-merge.js.
+                     The column holds one bill, so one file is what has to arrive. -->
                 <input 
                   type="file" 
                   name="bill" 
                   id="fileInput" 
                   hidden 
+                  multiple
                   accept="image/*,application/pdf,.pdf" 
                   required
                 >
+                <p class="bill-merge-state" id="billMergeState" role="status" aria-live="polite" hidden></p>
                 <button 
                   type="button" 
                   id="customFileButton" 
@@ -431,24 +488,37 @@
               <span>Notes</span>
               <div class="field-shell textarea-shell">
                 <i class="fas fa-pen field-leading" aria-hidden="true"></i>
-                <textarea name="notes" rows="3" placeholder="Describe the work — Sage can fill in the rest from it..." required></textarea>
+                <!-- Short enough for one line on a 360px phone. The old copy —
+                     "Describe the work — Sage can fill in the rest from it..." —
+                     wrapped to two lines and made the tallest field on the form look
+                     like it already had content in it. What Sage does with the bill
+                     is said by her own button, twice over, right underneath. -->
+                <textarea name="notes" rows="3" placeholder="What was done?" required></textarea>
               </div>
             </label>
-            <!-- Autofill sits in its own row rather than beside Add Entry: the
-                 mobile rules stretch .drawer-submit to the full width, so a
-                 sibling in that flex row would fight it. Nothing here submits —
-                 she drafts, you check, you press Add Entry. -->
-            <div class="sage-fill-row">
-              <button type="button" class="sage-fill-btn" id="serviceAutofill"
-                      aria-describedby="serviceAutofillHint">
-                <span class="sage-fill-face" aria-hidden="true">
-                  <img src="./assets/img/sage.webp" alt="" decoding="async" />
-                </span>
-                <span class="sage-fill-label">Let Sage fill it in</span>
-              </button>
-              <p class="sage-fill-hint" id="serviceAutofillHint" role="status" aria-live="polite"></p>
-            </div>
+            <!-- One footer, two actions, ranked. Her draft button and Add Entry used
+                 to sit in separate rows at opposite corners with dead space between
+                 them, so the form had two endings and neither looked like the end.
+
+                 They belong together: both finish the form, and only one of them
+                 submits it. Add Entry is the sole filled control on the panel — it
+                 is the primary action, and an accent that is also on every field
+                 icon is an accent that points at nothing.
+
+                 The mobile rules stretch .drawer-submit to full width, which is why
+                 this was split in the first place; the redesign block wraps them
+                 instead of fighting that. -->
             <div class="form-in-card-actions">
+              <div class="sage-fill-row">
+                <button type="button" class="sage-fill-btn" id="serviceAutofill"
+                        aria-describedby="serviceAutofillHint">
+                  <span class="sage-fill-face" aria-hidden="true">
+                    <img src="./assets/img/sage.webp" alt="" decoding="async" />
+                  </span>
+                  <span class="sage-fill-label">Let Sage fill it in</span>
+                </button>
+                <p class="sage-fill-hint" id="serviceAutofillHint" role="status" aria-live="polite"></p>
+              </div>
               <button type="submit" class="drawer-submit">Add Entry</button>
             </div>
           </form>
@@ -555,14 +625,53 @@
                 <tbody id="serviceTableBody"></tbody>
               </table>
             </div>
+
+            <!-- ── PAGE CONTROLS ────────────────────────────────────────
+                 The same component as the one under the media table on the Documents
+                 page, down to the class names — one stylesheet block and one script
+                 module serve both. Only the ids differ, and the nouns in the count.
+
+                 This table renders from an array rather than from the DOM, so here the
+                 pager slices `filteredEntries` and the rows for other pages are never
+                 built at all.
+
+                 `hidden` is toggled from script; see the note beside the docs copy. -->
+            <div class="dk-pager" id="serviceHistoryPager" hidden>
+              <div class="dk-pager-size">
+                <span class="dk-pager-shell">
+                  <label class="dk-pager-label" for="serviceHistoryPerPage">Rows per page</label>
+                  <select id="serviceHistoryPerPage" class="dk-pager-per">
+                    <option value="10" selected>10</option>
+                    <option value="25">25</option>
+                    <option value="50">50</option>
+                    <option value="0">All</option>
+                  </select>
+                </span>
+                <span class="dk-pager-size-text">per page</span>
+              </div>
+              <!-- "Range", not "Count": #serviceHistoryCount was already taken by a
+                   dead rule in styles.css, left behind by a service-history toolbar
+                   that no longer exists in this markup, and it painted this line as an
+                   orange pill. -->
+              <p class="dk-pager-count" id="serviceHistoryRange" aria-live="polite"></p>
+              <div class="dk-pager-nav" id="serviceHistoryNav" role="group" aria-label="Service record pages">
+                <button type="button" class="dk-pager-step" id="serviceHistoryPrev" aria-label="Previous page">
+                  <i class="fas fa-chevron-left" aria-hidden="true"></i>
+                </button>
+                <div class="dk-pager-pages" id="serviceHistoryPages"></div>
+                <button type="button" class="dk-pager-step" id="serviceHistoryNext" aria-label="Next page">
+                  <i class="fas fa-chevron-right" aria-hidden="true"></i>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </section>
 
    <section id="docs" aria-labelledby="docs-header" class="docs-management-section">
   <div class="section-topline">
-    <h2 id="docs-header"><i class="fas fa-folder-open"></i> Documents & Media</h2>
-    <button type="button" class="section-home-pill" data-home-section="home"><i class="fas fa-house"></i> Home</button>
+    <h2 id="docs-header"><i class="fas fa-folder-open" aria-hidden="true"></i> Documents & Media</h2>
+    <button type="button" class="section-home-pill" data-home-section="home"><i class="fas fa-house" aria-hidden="true"></i> Home</button>
   </div>
   <p class="docs-section-desc">Store vehicle documents, historic ride media, engine sounds, and notes in one clean garage vault.</p>
 
@@ -570,70 +679,70 @@
   <div class="docs-panel docs-vehicle-panel">
     <div class="docs-panel-header">
       <div>
-        <h3><i class="fas fa-file-shield"></i> Vehicle Related Documents</h3>
+        <h3><i class="fas fa-file-shield" aria-hidden="true"></i> Vehicle Related Documents</h3>
         <p>Keep your legal and ownership files clean, private, and quick to open or delete.</p>
       </div>
-      <span class="docs-panel-pill"><i class="fas fa-lock"></i> Private vault</span>
+      <span class="docs-panel-pill"><i class="fas fa-lock" aria-hidden="true"></i> Private vault</span>
     </div>
 
     <div class="vehicle-docs-grid">
       <div class="doc-card" data-type="Driving License">
         <div class="doc-card-top">
-          <div class="doc-icon"><i class="fas fa-id-card"></i></div>
+          <div class="doc-icon"><i class="fas fa-id-card" aria-hidden="true"></i></div>
           <button class="doc-delete-btn" title="Delete Driving License" aria-label="Delete Driving License">
-            <i class="fas fa-trash"></i>
+            <i class="fas fa-trash" aria-hidden="true"></i>
           </button>
         </div>
         <h4>Driving License</h4>
         <p>Rider identity and licence proof.</p>
         <span class="doc-status-chip">ID proof</span>
         <input type="file" accept="image/*,.pdf" hidden />
-        <button class="upload-btn angled-btn" type="button"><i class="fas fa-cloud-arrow-up"></i> Upload Document</button>
+        <button class="upload-btn angled-btn" type="button"><i class="fas fa-cloud-arrow-up" aria-hidden="true"></i> Upload Document</button>
         <div class="doc-preview"></div>
       </div>
 
       <div class="doc-card" data-type="Registration Certificate">
         <div class="doc-card-top">
-          <div class="doc-icon"><i class="fas fa-file-contract"></i></div>
+          <div class="doc-icon"><i class="fas fa-file-contract" aria-hidden="true"></i></div>
           <button class="doc-delete-btn" title="Delete Registration Certificate" aria-label="Delete Registration Certificate">
-            <i class="fas fa-trash"></i>
+            <i class="fas fa-trash" aria-hidden="true"></i>
           </button>
         </div>
         <h4>Registration Certificate</h4>
         <p>Vehicle registration and ownership record.</p>
         <span class="doc-status-chip">Ownership</span>
         <input type="file" accept="image/*,.pdf" hidden />
-        <button class="upload-btn angled-btn" type="button"><i class="fas fa-cloud-arrow-up"></i> Upload Document</button>
+        <button class="upload-btn angled-btn" type="button"><i class="fas fa-cloud-arrow-up" aria-hidden="true"></i> Upload Document</button>
         <div class="doc-preview"></div>
       </div>
 
       <div class="doc-card" data-type="Pollution Certificate">
         <div class="doc-card-top">
-          <div class="doc-icon"><i class="fas fa-leaf"></i></div>
+          <div class="doc-icon"><i class="fas fa-leaf" aria-hidden="true"></i></div>
           <button class="doc-delete-btn" title="Delete Pollution Certificate" aria-label="Delete Pollution Certificate">
-            <i class="fas fa-trash"></i>
+            <i class="fas fa-trash" aria-hidden="true"></i>
           </button>
         </div>
         <h4>Pollution Certificate</h4>
         <p>PUC certificate and emission compliance.</p>
         <span class="doc-status-chip">Compliance</span>
         <input type="file" accept="image/*,.pdf" hidden />
-        <button class="upload-btn angled-btn" type="button"><i class="fas fa-cloud-arrow-up"></i> Upload Document</button>
+        <button class="upload-btn angled-btn" type="button"><i class="fas fa-cloud-arrow-up" aria-hidden="true"></i> Upload Document</button>
         <div class="doc-preview"></div>
       </div>
 
       <div class="doc-card" data-type="Insurance Policy">
         <div class="doc-card-top">
-          <div class="doc-icon"><i class="fas fa-shield-halved"></i></div>
+          <div class="doc-icon"><i class="fas fa-shield-halved" aria-hidden="true"></i></div>
           <button class="doc-delete-btn" title="Delete Insurance Policy" aria-label="Delete Insurance Policy">
-            <i class="fas fa-trash"></i>
+            <i class="fas fa-trash" aria-hidden="true"></i>
           </button>
         </div>
         <h4>Insurance Policy</h4>
         <p>Own damage, liability, and policy proof.</p>
         <span class="doc-status-chip">Coverage</span>
         <input type="file" accept="image/*,.pdf" hidden />
-        <button class="upload-btn angled-btn" type="button"><i class="fas fa-cloud-arrow-up"></i> Upload Document</button>
+        <button class="upload-btn angled-btn" type="button"><i class="fas fa-cloud-arrow-up" aria-hidden="true"></i> Upload Document</button>
         <div class="doc-preview"></div>
       </div>
 
@@ -653,29 +762,29 @@
   <div class="docs-panel docs-historic-panel docs-media-record-panel">
     <div class="docs-panel-header">
       <div>
-        <h3><i class="fas fa-history"></i> Historic Audio & Images</h3>
+        <h3><i class="fas fa-history" aria-hidden="true"></i> Historic Audio & Images</h3>
         <p>Upload ride media with notes, then manage the same records below.</p>
       </div>
-      <span class="docs-panel-pill"><i class="fas fa-pen"></i> Notes required</span>
+      <span class="docs-panel-pill"><i class="fas fa-pen" aria-hidden="true"></i> Notes required</span>
     </div>
 
     <div class="historic-upload-grid">
       <div class="drop-zone" data-type="audio">
-        <div class="drop-zone-icon"><i class="fas fa-wave-square"></i></div>
+        <div class="drop-zone-icon"><i class="fas fa-wave-square" aria-hidden="true"></i></div>
         <h4>Engine Sound Archives</h4>
         <input type="file" accept=".mp3,.wav,.m4a" hidden />
         <p>Tap or drag audio files. Notes open before upload.</p>
         <span>MP3 · WAV · M4A</span>
       </div>
       <div class="drop-zone" data-type="image">
-        <div class="drop-zone-icon"><i class="fas fa-image"></i></div>
+        <div class="drop-zone-icon"><i class="fas fa-image" aria-hidden="true"></i></div>
         <h4>Historic Images</h4>
         <input type="file" accept=".jpg,.jpeg,.png,.webp" hidden />
         <p>Tap or drag images. Add the story behind the shot.</p>
         <span>JPG · PNG · WEBP</span>
       </div>
       <div class="drop-zone" data-type="video">
-        <div class="drop-zone-icon"><i class="fas fa-video"></i></div>
+        <div class="drop-zone-icon"><i class="fas fa-video" aria-hidden="true"></i></div>
         <h4>Historic Videos</h4>
         <input type="file" accept=".mp4,.mov,.avi,.webm" hidden />
         <p>Tap or drag videos. Notes are saved with the file.</p>
@@ -687,18 +796,37 @@
     <div class="docs-record-inner">
       <div class="service-history-panel" aria-labelledby="docsHistoryTitle">
         <div class="service-history-header">
-          <div>
-            <h4 class="record-history-title" id="docsHistoryTitle">Record History</h4>
-            <p class="service-history-subtitle">Preview media, edit notes, or delete historic uploads.</p>
+          <!-- A glyph in a tinted chip, the title beside it, the line about what you can
+               do underneath. The service title draws its chip from a ::before because it
+               only wants one on a phone; this one is real markup because it is there at
+               every width, and a pseudo-element cannot hold a sibling for the copy. -->
+          <div class="docs-history-head">
+            <span class="docs-history-mark" aria-hidden="true">
+              <i class="fas fa-clock-rotate-left" aria-hidden="true"></i>
+            </span>
+            <div class="docs-history-head-copy">
+              <!-- Two tones, one heading. The span is the only reason this is not a bare
+                   text node; nothing reads the text, it is referenced by id for the
+                   panel's aria-labelledby. -->
+              <h4 class="record-history-title" id="docsHistoryTitle">Record <span>History</span></h4>
+              <p class="service-history-subtitle">Preview media, edit notes, or delete historic uploads.</p>
+            </div>
           </div>
           <div class="history-header-actions">
             <button type="button" class="history-filter-toggle" id="docsHistoryFilterToggle" aria-expanded="false" aria-controls="docsHistoryFilters">
               <i class="fas fa-filter" aria-hidden="true"></i>
               Filters
             </button>
-            <button type="button" class="history-clear-btn" id="docsHistoryClearFilters">
-              <i class="fas fa-rotate-left" aria-hidden="true"></i>
-              Clear
+            <!-- CLEAR ALL CLEARS THE FILTERS, and the glyph says so.
+                 The reference this was built from shows a dust bin here, which reads as
+                 "delete every upload". Nothing in this app deletes in bulk, and if
+                 something did it would sit behind confirmDeleteWithHold() rather than
+                 loose in a panel header next to a search box. So: the filter-clearing
+                 glyph, at the size and in the position the reference puts the button. -->
+            <button type="button" class="history-clear-btn" id="docsHistoryClearFilters"
+                    title="Clear all filters" aria-label="Clear all filters">
+              <i class="fas fa-filter-circle-xmark" aria-hidden="true"></i>
+              Clear All
             </button>
           </div>
         </div>
@@ -743,19 +871,79 @@
             </div>
           </label>
         </div>
+        <!-- THE PREVIEW COLUMN IS NOW A TYPE COLUMN.
+             It held an eye button that opened the file, which is the job the thumbnail
+             at the start of the row does — and a thumbnail does it better, because a
+             frame of the actual video reads as pressable in a way a file-type glyph
+             never did. That was the whole reason the eye existed for a mouse. So the
+             column it lived in goes to the thing the row could not say before: what
+             kind of file this is, as a badge, at a glance down the column. -->
         <div class="service-table-wrap docs-history-wrap">
         <table class="service-table docs-history-table" id="mediaRecordTable">
           <thead>
+            <!-- Type and Size exist from 769px up and are hidden below it. On a card
+                 both are already in the grey "VIDEO · 1.6 MB" line under the filename,
+                 and the card grid has named areas — an unplaced cell would be
+                 auto-placed into it and shove the layout around. -->
             <tr>
               <th scope="col">File</th>
+              <th scope="col" class="docs-col-type">Type</th>
+              <th scope="col" class="docs-col-size">Size</th>
               <th scope="col">Notes</th>
-              <th scope="col">Preview</th>
-              <th scope="col">Uploaded</th>
-              <th scope="col">Action</th>
+              <!-- The one sortable column, and the arrow is the control rather than a
+                   decoration beside one. Supabase hands the rows over newest-first, so
+                   that is the state this starts in; pressing it flips to oldest-first
+                   and back. aria-sort is on the th because that is where a screen
+                   reader looks for it. -->
+              <th scope="col" class="docs-col-when" aria-sort="descending">
+                <button type="button" class="docs-sort-btn" id="docsHistorySort" data-dir="desc"
+                        title="Sort by upload date">
+                  Uploaded <i class="fas fa-arrow-down" aria-hidden="true"></i>
+                </button>
+              </th>
+              <th scope="col">Actions</th>
             </tr>
           </thead>
           <tbody></tbody>
         </table>
+      </div>
+
+      <!-- ── PAGE CONTROLS ──────────────────────────────────────────────
+           Twenty-four uploads was twenty-four rows, always, and the only way to reach
+           the oldest one was to scroll past every newer one. Ten at a time instead,
+           with the count stated so the number you are not looking at is still a known
+           quantity.
+
+           `hidden` is toggled from script and the rule at the top of this stylesheet
+           makes that stick, which is why nothing below may set `display: … !important`
+           on .dk-pager — see the note beside `[hidden]`.
+
+           The select is a real <select>: it holds four numbers, it never needs an icon
+           per option, and the custom listbox the filters use exists because THOSE need
+           both. -->
+      <div class="dk-pager" id="docsHistoryPager" hidden>
+        <div class="dk-pager-size">
+          <span class="dk-pager-shell">
+            <label class="dk-pager-label" for="docsHistoryPerPage">Rows per page</label>
+            <select id="docsHistoryPerPage" class="dk-pager-per">
+              <option value="10" selected>10</option>
+              <option value="25">25</option>
+              <option value="50">50</option>
+              <option value="0">All</option>
+            </select>
+          </span>
+          <span class="dk-pager-size-text">per page</span>
+        </div>
+        <p class="dk-pager-count" id="docsHistoryRange" aria-live="polite"></p>
+        <div class="dk-pager-nav" id="docsHistoryNav" role="group" aria-label="Media record pages">
+          <button type="button" class="dk-pager-step" id="docsHistoryPrev" aria-label="Previous page">
+            <i class="fas fa-chevron-left" aria-hidden="true"></i>
+          </button>
+          <div class="dk-pager-pages" id="docsHistoryPages"></div>
+          <button type="button" class="dk-pager-step" id="docsHistoryNext" aria-label="Next page">
+            <i class="fas fa-chevron-right" aria-hidden="true"></i>
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -769,10 +957,21 @@
   <div id="historicNotesModal" class="docs-modal" aria-hidden="true">
     <div class="docs-modal-card" role="dialog" aria-modal="true" aria-labelledby="historicNotesTitle">
       <button type="button" class="docs-modal-close" id="historicNotesCancel" aria-label="Close notes dialog">×</button>
-      <div class="docs-modal-icon"><i class="fas fa-note-sticky"></i></div>
+      <div class="docs-modal-icon"><i class="fas fa-note-sticky" aria-hidden="true"></i></div>
       <h3 id="historicNotesTitle">Add upload notes</h3>
       <p id="historicNotesHelp">Write what this file is about. Notes are required.</p>
       <textarea id="historicNotesInput" rows="5" maxlength="600" placeholder="Example: Cold start after 5,999 km service, new exhaust tone, highway ride photo..."></textarea>
+
+      <!-- Only shown when EDITING an existing upload, which is why it lives here
+           rather than in a second dialog. Holding a row used to need two separate
+           popups — a pencil for the note and another pencil for the date — so the
+           date joins the note in the one sheet the gesture already opens. During an
+           upload there is nothing to correct yet, so it stays hidden. -->
+      <label class="docs-notes-date" id="historicNotesDateField" hidden>
+        <span><i class="fas fa-calendar-days" aria-hidden="true"></i> Uploaded on</span>
+        <input type="date" id="historicNotesDate" />
+      </label>
+
       <!-- Hidden until the upload flow tells autofill which file this is, so it
            never appears when there is nothing for her to write about. -->
       <div class="sage-fill-row sage-fill-row--modal">
@@ -786,29 +985,69 @@
       </div>
       <div class="docs-modal-actions">
         <button type="button" class="docs-secondary-btn" id="historicNotesSkip">Cancel</button>
-        <button type="button" class="docs-primary-btn" id="historicNotesSave"><i class="fas fa-check"></i> Save</button>
+        <button type="button" class="docs-primary-btn" id="historicNotesSave"><i class="fas fa-check" aria-hidden="true"></i> Save</button>
       </div>
     </div>
   </div>
 
-  <!-- Fullscreen Image Preview -->
-  <div id="imagePreviewModal" style="display:none;position:fixed;z-index:99999;left:0;top:0;width:100vw;height:100vh;background:rgba(0,0,0,0.93);justify-content:center;align-items:center;">
-    <img id="fullPreviewImg" src="" style="max-width:92vw;max-height:92vh;box-shadow:0 0 40px #000;border-radius:14px;display:block;margin:auto;" alt="Preview" />
-  </div>
+  <!-- The four single-file preview modals that sat here are all gone — image, PDF,
+       audio and video. The media player below is one viewer for every kind, opened
+       at the file you tapped and swipeable through the rest, and a vehicle document
+       opens in a new tab through _openVehicleDoc(). #imagePreviewModal and
+       #pdfPreviewModal outlived their last caller by several versions: two
+       full-viewport fixed overlays at z-index 99999, precached and parsed on every
+       load, that nothing could open. Their JS went with them. -->
 
-  <!-- PDF Preview Modal -->
-  <div id="pdfPreviewModal" style="display:none;position:fixed;z-index:99999;left:0;top:0;width:100vw;height:100vh;background:rgba(0,0,0,0.97);justify-content:center;align-items:center;">
-    <iframe id="fullPreviewPdf" src="" style="width:90vw;height:90vh;border:0;border-radius:18px;background:#fff;"></iframe>
-  </div>
+  <!-- ═══════════════════════════════════════════════════════════════
+       MEDIA PLAYER
+       One viewer for the whole of Record History instead of four separate
+       single-file modals (image / pdf / audio / video), each of which opened on
+       one file and closed back to the list. You open at the file you tapped and
+       swipe through the rest.
 
-  <!-- Audio Preview Modal -->
-  <div id="audioPreviewModal" style="display:none;position:fixed;z-index:99999;left:0;top:0;width:100vw;height:100vh;background:rgba(0,0,0,0.95);justify-content:center;align-items:center;">
-    <audio id="fullPreviewAudio" controls style="width:60vw;max-width:420px;box-shadow:0 0 40px #000;border-radius:18px;display:block;margin:auto;background:#111;"></audio>
-  </div>
+       The track is a scroll-snap container, so the swipe is the browser's own
+       horizontal scrolling — momentum, rubber-banding and accessibility included —
+       rather than hand-rolled touch maths that fights the video controls. The
+       arrows are for a mouse and a keyboard.
 
-  <!-- Video Preview Modal -->
-  <div id="videoPreviewModal" style="display:none;position:fixed;z-index:99999;left:0;top:0;width:100vw;height:100vh;background:rgba(0,0,0,0.96);justify-content:center;align-items:center;">
-    <video id="fullPreviewVideo" controls style="width:80vw;max-width:700px;max-height:82vh;box-shadow:0 0 40px #000;border-radius:16px;display:block;margin:auto;background:#111;"></video>
+       IT FOLLOWS THE FILTER. The set is the rows currently showing, so searching
+       for "tunnel" and opening the first hit gives you a carousel of the matches,
+       not of everything.
+       ═══════════════════════════════════════════════════════════════ -->
+  <div id="docsPlayer" class="docs-player" aria-hidden="true" role="dialog" aria-modal="true"
+       aria-label="Media viewer">
+    <div class="docs-player-bar">
+      <span class="docs-player-count" id="docsPlayerCount">1 / 1</span>
+      <span class="docs-player-name" id="docsPlayerName"></span>
+      <!-- Every record is reachable here, so one Save button covers all of them. It
+           fetches the file and saves it through a blob — the download attribute is
+           ignored on a cross-origin signed URL. See save() in script.js. -->
+      <button type="button" class="docs-player-save" id="docsPlayerSave" aria-label="Download this file">
+        <i class="fas fa-download" aria-hidden="true"></i>
+      </button>
+      <button type="button" class="docs-player-close" id="docsPlayerClose" aria-label="Close viewer">
+        <i class="fas fa-xmark" aria-hidden="true"></i>
+      </button>
+    </div>
+
+    <div class="docs-player-body">
+      <button type="button" class="docs-player-nav docs-player-nav--prev" id="docsPlayerPrev"
+              aria-label="Previous file">
+        <i class="fas fa-chevron-left" aria-hidden="true"></i>
+      </button>
+      <!-- tabindex so the arrow keys reach it without a click first -->
+      <div class="docs-player-stage" id="docsPlayerStage" tabindex="0"></div>
+      <button type="button" class="docs-player-nav docs-player-nav--next" id="docsPlayerNext"
+              aria-label="Next file">
+        <i class="fas fa-chevron-right" aria-hidden="true"></i>
+      </button>
+    </div>
+
+    <div class="docs-player-foot">
+      <p class="docs-player-meta" id="docsPlayerMeta"></p>
+      <p class="docs-player-note" id="docsPlayerNote"></p>
+      <div class="docs-player-dots" id="docsPlayerDots" aria-hidden="true"></div>
+    </div>
   </div>
 </section>
 
@@ -928,22 +1167,136 @@
       <div id="customPopup" class="popup-overlay">
         <div class="popup-content">
           <div class="popup-icon">
-            <i class="fas fa-circle-notch fa-spin" id="popupSpinner"></i>
-            <i class="fas fa-thumbs-up" id="popupSuccess" style="display: none;"></i>
-            <i class="fas fa-exclamation-triangle" id="popupError" style="display: none;"></i>
+            <i class="fas fa-circle-notch fa-spin" id="popupSpinner" aria-hidden="true"></i>
+            <i class="fas fa-thumbs-up" id="popupSuccess" style="display: none;" aria-hidden="true"></i>
+            <i class="fas fa-exclamation-triangle" id="popupError" style="display: none;" aria-hidden="true"></i>
           </div>
           <div class="popup-message" id="popupMessage">Processing...</div>
         </div>
       </div>
       
-      <!-- Park History Modal -->
-      <div id="parkHistoryModal" class="sl-modal-overlay" aria-hidden="true" role="dialog" aria-modal="true">
-        <div class="sl-modal-card">
-          <div class="sl-modal-header">
-            <span><i class="fas fa-clock-rotate-left"></i> Park History</span>
+      <!-- ═══════════════════════════════════════════════════════════════
+           PARKING SHEET
+           Two panes in one overlay rather than two overlays. Tapping a spot
+           swaps to its detail pane and the header grows a back arrow; nothing
+           stacks, nothing has to be dismissed twice, and on a phone it is the
+           bottom sheet .sl-modal-overlay already gives every dialog here.
+
+           Was a read-only list of coordinates. A street address is not how you
+           find a bike in a basement, so a spot now carries what actually finds
+           it again — what the place is called, which level, a photo of the
+           pillar, and when it has to be moved by.
+           ═══════════════════════════════════════════════════════════════ -->
+      <div id="parkHistoryModal" class="sl-modal-overlay" aria-hidden="true" role="dialog"
+           aria-modal="true" aria-labelledby="parkSheetTitle">
+        <div class="sl-modal-card park-sheet">
+          <div class="sl-modal-header park-sheet-head">
+            <button type="button" class="park-back" id="parkBack" aria-label="Back to the list" hidden>
+              <i class="fas fa-arrow-left" aria-hidden="true"></i>
+            </button>
+            <span id="parkSheetTitle"><i class="fas fa-location-dot" aria-hidden="true"></i> <span id="parkSheetLabel">Parking</span></span>
             <button type="button" class="sl-modal-close" id="parkHistoryClose" aria-label="Close">×</button>
           </div>
-          <div id="parkHistoryList" class="park-history-list"></div>
+
+          <!-- ── Pane 1: the history ── -->
+          <div class="park-pane" id="parkListPane">
+            <button type="button" class="park-save-now" id="parkSaveNow">
+              <i class="fas fa-crosshairs" aria-hidden="true"></i>
+              <span>
+                <strong>Save this spot</strong>
+                <small id="parkSaveNowHint">Waits for a sharp GPS fix</small>
+              </span>
+            </button>
+            <div id="parkHistoryList" class="park-history-list"></div>
+            <p class="park-migrate-note" id="parkMigrateNote" hidden>
+              <i class="fas fa-circle-info" aria-hidden="true"></i>
+              Run <code>supabase/park_locations.sql</code> once to give parking its own table.
+            </p>
+          </div>
+
+          <!-- ── Pane 2: one spot ── -->
+          <form class="park-pane park-edit" id="parkEditPane" autocomplete="off" novalidate hidden>
+            <!-- Distance and a walking route beat a pin: the coordinates are
+                 ±15m and you are on foot, so "120 m north-east" is the useful
+                 form of the same fact. -->
+            <div class="park-walk" id="parkWalk">
+              <!-- Caps in the render, so every string written into it is a stat and
+                   not a sentence. See refreshWalk(). -->
+              <span class="park-walk-dist" id="parkWalkDist">Finding you…</span>
+              <div class="park-walk-btns">
+                <a href="#" class="park-walk-btn park-walk-btn--go" id="parkWalkGo" target="_blank" rel="noopener">
+                  <i class="fas fa-person-walking" aria-hidden="true"></i> Walk there
+                </a>
+                <a href="#" class="park-walk-btn" id="parkWalkMap" target="_blank" rel="noopener">
+                  <i class="fas fa-map-location-dot" aria-hidden="true"></i> Map
+                </a>
+              </div>
+            </div>
+
+            <p class="park-meta" id="parkEditMeta"></p>
+
+            <div class="park-edit-grid">
+              <label class="park-field">
+                <span>Place</span>
+                <input type="text" class="sage-set-input" id="parkFieldLabel" maxlength="60"
+                       placeholder="Phoenix Mall" />
+              </label>
+              <label class="park-field">
+                <span>Level / bay</span>
+                <input type="text" class="sage-set-input" id="parkFieldLevel" maxlength="40"
+                       placeholder="P2, row C" />
+              </label>
+            </div>
+
+            <!-- A time limit is a real moment, not a duration, because the
+                 reminder has to survive the app being closed. The chips only
+                 write into the field below. -->
+            <div class="park-field park-limit">
+              <span>Move it by <small class="park-field-opt">optional</small></span>
+              <div class="park-chips" id="parkLimitChips" role="group" aria-label="Quick time limits">
+                <button type="button" class="park-chip" data-mins="30">30m</button>
+                <button type="button" class="park-chip" data-mins="60">1h</button>
+                <button type="button" class="park-chip" data-mins="120">2h</button>
+                <button type="button" class="park-chip" data-mins="240">4h</button>
+                <button type="button" class="park-chip park-chip--off" data-mins="0">None</button>
+              </div>
+              <input type="datetime-local" class="sage-set-input" id="parkFieldUntil" />
+              <small class="park-limit-read" id="parkLimitRead"></small>
+            </div>
+
+            <label class="park-field park-field--wide">
+              <span>Notes <small class="park-field-opt">optional</small></span>
+              <textarea class="sage-set-input park-notes" id="parkFieldNotes" rows="2" maxlength="300"
+                        placeholder="Behind the blue pillar, near the lift"></textarea>
+            </label>
+
+            <div class="park-field park-field--wide">
+              <span>Photo <small class="park-field-opt">optional</small></span>
+              <div class="park-photo-row">
+                <button type="button" class="park-photo-btn" id="parkPhotoPick">
+                  <i class="fas fa-camera" aria-hidden="true"></i> <span id="parkPhotoBtnText">Add a photo</span>
+                </button>
+                <button type="button" class="park-photo-drop" id="parkPhotoDrop" hidden aria-label="Remove the photo">
+                  <i class="fas fa-xmark" aria-hidden="true"></i>
+                </button>
+              </div>
+              <input type="file" id="parkPhotoInput" accept="image/*" capture="environment" hidden />
+              <a class="park-photo-view" id="parkPhotoView" target="_blank" rel="noopener" hidden>
+                <img alt="The parked bike" id="parkPhotoImg" />
+              </a>
+            </div>
+
+            <p class="park-edit-status" id="parkEditStatus" role="status" aria-live="polite"></p>
+
+            <div class="park-edit-actions">
+              <button type="button" class="sage-btn park-edit-del" id="parkEditDelete">
+                <i class="fas fa-trash" aria-hidden="true"></i> Forget
+              </button>
+              <button type="submit" class="sage-btn sage-btn--primary" id="parkEditSave">
+                <i class="fas fa-check" aria-hidden="true"></i> Save
+              </button>
+            </div>
+          </form>
         </div>
       </div>
 
@@ -1031,7 +1384,7 @@
             <!-- The calendar-with-pen variant would be apter, but it is Font
                  Awesome Pro and was rendering as an empty box on this kit.
                  script.js rewrites this header on open; keep the two in step. -->
-            <span id="coverEditTitle"><i class="fas fa-calendar-days"></i> Edit Date</span>
+            <span id="coverEditTitle"><i class="fas fa-calendar-days" aria-hidden="true"></i> Edit Date</span>
             <button type="button" class="sl-modal-close" id="coverEditClose" aria-label="Close">×</button>
           </div>
           <div class="cover-edit-body">
@@ -1157,7 +1510,7 @@
               <div class="sage-glass sage-sync-card" id="sageSyncCard">
                 <div class="sage-sync-head">
                   <span class="sage-sync-icon" id="sageSyncIcon" aria-hidden="true">
-                    <i class="fas fa-cloud"></i>
+                    <i class="fas fa-cloud" aria-hidden="true"></i>
                   </span>
                   <div class="sage-sync-copy">
                     <strong id="sageSyncTitle">Memory bank</strong>
@@ -1388,7 +1741,7 @@
                 <div class="sage-glass sage-vault-card">
                   <div class="sage-vault-head">
                     <span class="sage-vault-icon" id="sageVaultIcon" aria-hidden="true">
-                      <i class="fas fa-lock"></i>
+                      <i class="fas fa-lock" aria-hidden="true"></i>
                     </span>
                     <div class="sage-vault-copy">
                       <strong id="sageVaultTitle">Backup</strong>
@@ -1548,7 +1901,7 @@
               <div class="sage-glass sage-perm-card" id="sagePermCard">
                 <div class="sage-perm-head">
                   <span class="sage-perm-icon" id="sagePermIcon" aria-hidden="true">
-                    <i class="fas fa-bell"></i>
+                    <i class="fas fa-bell" aria-hidden="true"></i>
                   </span>
                   <div class="sage-perm-copy">
                     <strong id="sagePermTitle">Notifications</strong>
@@ -1587,6 +1940,14 @@
           </div>
           <p class="sage-set-status sage-set-status--footer" id="sageSettingsStatus"
              role="status" aria-live="polite"></p>
+
+          <!-- The second place, because this dialog is the nearest thing the app has to
+               an About screen and a version is the first thing anyone reports with a
+               bug. Same [data-app-version] hook as the home chip. -->
+          <p class="sage-set-version">
+            <i class="fas fa-code-branch" aria-hidden="true"></i>
+            <span>SpinLog <span data-app-version>&mdash;</span></span>
+          </p>
         </div>
       </div>
 
@@ -1611,6 +1972,16 @@
            delete paths in script.js call, and it must win over nothing else —
            there is no second definition left to race with. -->
       <script src="src/js/sage-confirm.js"></script>
+
+      <!-- The calendar, in the app's own skin. Before script.js: setupDateUI()
+           there checks for window.dkDatePicker and hands the field over rather
+           than wiring the browser's picker to it. -->
+      <script src="src/js/date-picker.js"></script>
+
+      <!-- Several files for one bill, merged into one PDF. Before script.js, whose
+           file input handler calls it. pdf-lib itself is NOT loaded here — this
+           fetches it the first time a merge needs it. -->
+      <script src="src/js/bill-merge.js"></script>
 
       <!-- Shared with the service worker via importScripts, so the page and the
            background checks agree on one queue, cap and cooldown set. Must load
