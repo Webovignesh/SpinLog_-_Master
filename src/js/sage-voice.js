@@ -11,9 +11,10 @@
 //          and a 500ms supervisor that guarantees the mic — no stall survives
 //          it. Where the browser recognition service dies on contact (blocked
 //          permission, hardened browsers), Gemini ears take over: a tap-to-talk
-//          MediaRecorder capture transcribed by gemini-2.0-flash, Tamil and
-//          English alike. Interim results drive the live "you:" caption; the
-//          energy gate tells a real utterance apart from room noise.
+//          MediaRecorder capture transcribed VERBATIM by gemini-2.5-flash —
+//          street Tanglish included, never cleaned up. Interim results drive
+//          the live "you:" caption; the energy gate tells a real utterance
+//          apart from room noise.
 //   BRAIN  window.SageAI.askSage — the SAME persona, tools and memory as
 //          typed chat, with a smaller token ceiling so she starts talking
 //          sooner. Every turn lands in the same chat history, untouched in
@@ -262,18 +263,16 @@
   }
 
   /**
-   * The style line is what makes her speak Tamil instead of spelling it.
-   * The model auto-detects language from the text, and Latin-script Tanglish
-   * detects as English — so the accent is stated outright. Tamil script is
-   * named too, so a mixed reply does not flip voices mid-sentence.
+   * ONE identity, every language, every sentence. Branching the style per
+   * text ("speak Tamil" vs "Tanglish accent") is what made her sound like
+   * two different people — and per-sentence calls already drift prosody, so
+   * the only thing holding her together is a fixed direction. Same woman in
+   * Tamil, English and Tanglish; the words carry the language, not her.
    */
-  function gemStyleFor(text) {
-    const said = String(text || '');
-    if (TAMIL_SCRIPT.test(said)) {
-      return 'Speak in Tamil, warm and a little playful, like a young woman talking to someone she likes, at a natural pace';
-    }
-    return 'Speak in a natural Tamil-English Tanglish accent, warm and a little playful, like a young woman talking to someone she likes, at a natural pace';
-  }
+  const GEM_VOICE_STYLE =
+    'Speak in one consistent voice: a warm young Indian woman talking to someone '
+    + 'she likes, natural Tamil-English Tanglish accent, conversational pace, a little '
+    + 'playful. Sound like the same person no matter which language the words are in.';
 
   // One sentence of audio. Never rejects for a dead sentence — a 429 on
   // sentence 3 must skip sentence 3, not kill the whole reply. One retry,
@@ -381,41 +380,55 @@
     const key = gemKey();
     if (!key) throw new Error('no-key');
     if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new Error('offline');
-    const style = gemStyleFor(text);
+    const style = GEM_VOICE_STYLE;
 
-    const results = new Array(sentences.length).fill(null);
-    const fetching = mapPool(sentences, 3, async i => {
-      results[i] = await fetchSentenceAudio(sentences[i], style, key, my);
-    });
+    // One full pass: fetch (2 in flight — kinder to the per-minute quota
+    // than 3) and play in order. A second pass runs only on TOTAL failure,
+    // so a lone dead sentence never doubles the quota burn.
+    const runOnce = async () => {
+      const results = new Array(sentences.length).fill(null);
+      const fetching = mapPool(sentences, 2, async i => {
+        results[i] = await fetchSentenceAudio(sentences[i], style, key, my);
+      });
 
-    let playedAny = false;
-    let firstErr = null;
-    for (let i = 0; i < sentences.length; i++) {
-      while (results[i] === null) {
-        if (my !== voiceSession || !S.open) { dropUrls(results); return playedAny; }
-        await sleep(120);
-      }
-      const r = results[i];
-      if (!r.url) {
-        if (r.error && !firstErr) firstErr = r.error;
-        continue; // a dead sentence is skipped, not fatal
-      }
-      if (my !== voiceSession || !S.open) { dropUrls(results); return playedAny; }
-      try {
-        if (await playOneUrl(r.url, my)) playedAny = true;
-      } catch (err) {
-        if (!firstErr) firstErr = err;
+      let playedAny = false;
+      let firstErr = null;
+      for (let i = 0; i < sentences.length; i++) {
+        while (results[i] === null) {
+          if (my !== voiceSession || !S.open) { dropUrls(results); return { playedAny, firstErr }; }
+          await sleep(120);
+        }
+        const r = results[i];
+        if (!r.url) {
+          if (r.error && !firstErr) firstErr = r.error;
+          continue; // a dead sentence is skipped, not fatal
+        }
+        if (my !== voiceSession || !S.open) { dropUrls(results); return { playedAny, firstErr }; }
+        try {
+          if (await playOneUrl(r.url, my)) playedAny = true;
+        } catch (err) {
+          if (!firstErr) firstErr = err;
+          try { URL.revokeObjectURL(r.url); } catch { /* ignore */ }
+          // A blocked play means the device refuses audio — no point trying more.
+          if (err && (err.message === 'play-blocked' || err.message === 'play-failed')) break;
+          continue;
+        }
         try { URL.revokeObjectURL(r.url); } catch { /* ignore */ }
-        // A blocked play means the device refuses audio — no point trying more.
-        if (err && (err.message === 'play-blocked' || err.message === 'play-failed')) break;
-        continue;
+        if (my !== voiceSession || !S.open) return { playedAny, firstErr };
       }
-      try { URL.revokeObjectURL(r.url); } catch { /* ignore */ }
-      if (my !== voiceSession || !S.open) return playedAny;
+      await fetching;
+      dropUrls(results);
+      return { playedAny, firstErr };
+    };
+
+    let out = await runOnce();
+    // Second chance: quota windows and hiccups clear in seconds, and a
+    // text-only reply is the worst outcome — silence with words on screen.
+    if (!out.playedAny && my === voiceSession && S.open) {
+      await sleep(2000);
+      if (my === voiceSession && S.open) out = await runOnce();
     }
-    await fetching;
-    dropUrls(results);
-    if (!playedAny) throw firstErr || new Error('no-audio');
+    if (!out.playedAny) throw out.firstErr || new Error('no-audio');
     return true;
   }
 
@@ -686,7 +699,10 @@
   // only the transcription. Tap-to-talk by nature — tap mic/orb to record,
   // quiet for 2s (or tap again) to send. Same brain path after that.
   // ════════════════════════════════════════════════════════════════════
-  const GEM_STT_MODEL = 'gemini-2.0-flash';
+  // 2.5-flash hears colloquial speech far better than 2.0 — and the prompt
+  // below is the other half: formal transcription models "clean up" street
+  // Tamil into textbook sentences and drop the exact words he said.
+  const GEM_STT_MODEL = 'gemini-2.5-flash';
   const GEM_API = 'https://generativelanguage.googleapis.com/v1beta';
 
   let mediaRec = null;
@@ -1050,8 +1066,8 @@
         signal: controller.signal,
         body: JSON.stringify({
           contents: [{ parts: [{ inlineData: { mimeType: mime || 'audio/webm', data: b64 } },
-            { text: 'Transcribe exactly what the person said, in Tamil or English as spoken. Reply with ONLY the transcription, no commentary, no quotes.' }] }],
-          generationConfig: { temperature: 0, maxOutputTokens: 300 },
+            { text: 'Transcribe the speech VERBATIM. The speaker uses colloquial Chennai Tamil mixed with English (Tanglish) — street words, half-sentences, fillers and all. Write Tamil words as spoken (Tamil script), English words in Latin. Do NOT formalize, do NOT translate anything to English, do NOT drop filler words, do NOT summarize. Reply with ONLY the transcription, no commentary, no quotes.' }] }],
+          generationConfig: { temperature: 0, maxOutputTokens: 500 },
         }),
       });
       clearTimeout(timer);
