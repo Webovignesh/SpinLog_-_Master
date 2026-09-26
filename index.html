@@ -13,7 +13,7 @@
        needs no JS change. Keep the version segment of CACHE_NAME in service-worker.js
        in step with this — that file cannot read a meta tag, and a mismatch means the
        number on screen is not the number that is actually cached. -->
-  <meta name="version" content="1.9.20"/>
+  <meta name="version" content="1.9.21"/>
   <title>SpinLog</title>
   <!-- Not decoration. This is what an install prompt, a shared link and a
        browser's own history entry show underneath the title, and without it they
@@ -1155,6 +1155,16 @@
                  aria-live="polite" aria-label="Conversation with Sage"></div>
 
             <div class="sage-chat-suggest" id="sageChatSuggest"></div>
+            <div class="sage-voice-entry">
+              <span>Some things are easier to say.</span>
+              <button type="button" class="sage-chat-mic" id="sageChatMic"
+                      aria-label="Start a voice conversation with Sage" aria-haspopup="dialog" aria-controls="sageVoiceOverlay">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" aria-hidden="true">
+                  <path d="M4 10v4m4-7v10m4-13v16m4-13v10m4-7v4" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+                </svg>
+                <span>Talk to Sage</span>
+              </button>
+            </div>
 
             <!-- One composer group: the clipped file, the input row and the status
                  line. They used to be three siblings of the log with three
@@ -1189,10 +1199,6 @@
                 <textarea id="sageChatInput" class="sage-chat-input" rows="1"
                           maxlength="500" placeholder="Say something to her…"
                           spellcheck="true"></textarea>
-                <button type="button" class="sage-chat-mic" id="sageChatMic"
-                        aria-label="Talk with Sage out loud" title="Talk with Sage out loud">
-                  <i class="fas fa-wave-square" aria-hidden="true"></i>
-                </button>
                 <button type="submit" class="sage-chat-send" id="sageChatSend"
                         aria-label="Send message">
                   <i class="fas fa-paper-plane" aria-hidden="true"></i>
@@ -1219,18 +1225,17 @@
       <div id="sageVoiceOverlay" class="sl-modal-overlay sage-voice-overlay" aria-hidden="true"
            role="dialog" aria-modal="true" aria-labelledby="sageVoiceTitle" data-voice-mode="idle" hidden>
         <div class="sl-modal-card sage-voice-card">
-          <!-- No title bar, no X: the room IS the UI. End hangs up, Escape
-               and the back gesture leave the same way. -->
+          <div class="sage-voice-top">
+            <div class="sage-voice-who"><strong id="sageVoiceTitle">Sage</strong><span>Voice conversation</span></div>
+            <button type="button" class="sage-voice-close" data-sl-close id="sageVoiceClose" aria-label="Close voice conversation">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            </button>
+          </div>
           <div class="sage-voice-stage">
             <button type="button" class="sage-voice-orb" id="sageVoiceOrb" data-voice-mode="idle"
                     aria-label="Voice orb — tap to interrupt her and talk">
-              <span class="sage-voice-ring" aria-hidden="true"></span>
-              <span class="sage-voice-ring is-2" aria-hidden="true"></span>
-              <span class="sage-voice-ring is-3" aria-hidden="true"></span>
-              <span class="sage-voice-core" aria-hidden="true">
-                <img src="./assets/img/sage.webp" alt="" decoding="async" />
-              </span>
-              <span class="sage-voice-spin" aria-hidden="true"></span>
+              <span class="sage-voice-aura" aria-hidden="true"></span>
+              <span class="sage-voice-core" aria-hidden="true"></span>
             </button>
             <p class="sage-voice-state" id="sageVoiceState" role="status" aria-live="polite">Voice</p>
             <!-- What she is doing inside the site right now — her tool, in
@@ -1241,7 +1246,7 @@
               <span class="sage-voice-dots" aria-hidden="true"><span></span><span></span><span></span></span>
             </div>
             <div class="sage-voice-bars" id="sageVoiceBars" aria-hidden="true">
-              <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+              <span></span><span></span><span></span><span></span><span></span>
             </div>
           </div>
 
@@ -1249,18 +1254,23 @@
                exchange slides up over the last and fades. The real
                conversation is written to the chat log untouched. -->
           <div class="sage-voice-captions">
-            <p class="sage-voice-caption" id="sageVoiceCaption" aria-live="polite"></p>
-            <div class="sage-voice-lines" id="sageVoiceLines" aria-live="polite"></div>
+            <div class="sage-voice-lines" id="sageVoiceLines" role="log" aria-live="polite" aria-label="Latest four voice turns"></div>
+            <p class="sage-voice-caption" id="sageVoiceCaption"></p>
           </div>
 
+          <form id="sageVoiceReview" class="sage-voice-review" hidden>
+            <label for="sageVoiceDraft">What I heard</label>
+            <textarea id="sageVoiceDraft" rows="2" maxlength="4000" dir="auto"></textarea>
+            <div><button type="button" id="sageVoiceRetry">Say it again</button><button type="submit">Send to Sage <span aria-hidden="true">↗</span></button></div>
+          </form>
           <div class="sage-voice-controls" role="group" aria-label="Voice controls">
             <button type="button" class="sage-voice-btn" id="sageVoiceMic"
-                    aria-label="Mute microphone" aria-pressed="true" title="Mic on/off">
+                    aria-label="Mute microphone" aria-pressed="false" title="Mic on/off">
               <i class="fas fa-microphone" aria-hidden="true"></i>
             </button>
             <button type="button" class="sage-voice-btn is-end" id="sageVoiceEnd"
                     aria-label="End voice session" title="End">
-              <i class="fas fa-phone-slash" aria-hidden="true"></i>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span>End</span>
             </button>
           </div>
 
@@ -1765,6 +1775,21 @@
             <!-- ══ VOICE ══ -->
             <div class="sage-set-panel" id="sagePanelVoice" role="tabpanel"
                  aria-labelledby="sageTabVoice" tabindex="0" hidden>
+              <div class="sage-set-group sage-listening-settings" role="group" aria-labelledby="sageListeningTitle">
+                <h3 id="sageListeningTitle">Speaking &amp; listening</h3>
+                <p>Your words, your way. Tamil, Tanglish or English.</p>
+                <label for="sageVoiceRecognition">Recognition</label>
+                <select id="sageVoiceRecognition">
+                  <option value="gemini">Tamil + Tanglish · Gemini audio</option>
+                  <option value="browser">Browser recognition</option>
+                </select>
+                <label for="sageVoiceLanguage">Browser language</label>
+                <select id="sageVoiceLanguage"><option value="ta-IN">தமிழ் · Tamil (India)</option><option value="en-IN">English (India)</option></select>
+                <label for="sageVoicePause">Pause before sending</label>
+                <select id="sageVoicePause"><option value="patient">Relaxed · 2.2 seconds</option><option value="quick">Quick · 1.2 seconds</option></select>
+                <label class="sage-voice-review-choice"><input type="checkbox" id="sageVoiceReviewSetting"/>Let me check every transcript before sending</label>
+                <small>Saved automatically for your next voice session. Gemini receives each audio turn using your API key; usage counts toward its quota. Unclear speech is shown for review.</small>
+              </div>
               <!-- Today's usage first. On the free tier the reason she has gone
                    quiet is almost always the day's allowance, so that answer
                    belongs above the key list rather than in a sentence under it. -->

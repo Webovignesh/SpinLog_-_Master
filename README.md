@@ -880,3 +880,62 @@ gone rather than left as links that go nowhere. What was in them that still matt
 - **Three migrations in `supabase/` degrade quietly until run.** Cover dates fall
   back to localStorage then to the `data-due` values in `index.html`; Sage's memory
   falls back to localStorage; the key ring stays on the device.
+
+## Sage voice — v1.9.21
+
+Open **Talk to Sage** inside the chat card. Voice mode shows a responsive orb and
+keeps the latest four speaker turns on screen, moving older turns out as new ones
+arrive. Completed voice turns remain in the normal chat history. Tap the orb to
+send a recording early or interrupt a spoken reply; use the microphone button to
+mute, and End, Close, Escape or app Back to leave.
+
+In **Sage settings → Voice → Speaking & listening**:
+
+- **Tamil + Tanglish · Gemini audio** is the default when a Gemini key and audio
+  recording are available. Each complete recording is converted locally to mono
+  16 kHz PCM WAV and sent to the existing Gemini API using the configured key.
+  The transcription instruction preserves regional Tamil and English mixing,
+  slang, names and numbers. It does not force a Chennai dialect or translate
+  Tamil into English. Audio requests count toward the provider's quota.
+- **Browser recognition** is available as an explicit fallback. The default
+  language is Tamil (`ta-IN`); English (India) can be selected. Silence never
+  changes the selected language. Browser support and recognition quality vary.
+- Choose a 2.2-second or 1.2-second pause before sending. Audio turns are capped at
+  45 seconds; 15 seconds without detected speech pauses the microphone without
+  uploading silence. Tap the orb to submit quiet speech manually.
+- Enable **Let me check every transcript before sending** to edit each transcript.
+  Gemini-marked unclear speech and low-confidence browser results require review
+  even when that preference is off. These signals are imperfect; they cannot
+  guarantee a correct transcript.
+
+Preferences save immediately and apply to the next voice session. Hands-free
+capture resumes after a reply. Permission, recording, transcription and quota
+failures pause with a retry action. Muting disables the shared microphone tracks;
+closing the room or backgrounding the page releases them and cancels outstanding
+voice audio requests. Results from a closed session cannot appear in a new one.
+Closing voice mode does not roll back a tool action already submitted to SageAI.
+
+The Gemini path transcribes a completed utterance, then uses the existing SageAI
+chat/tools and Gemini TTS pipeline. It is not a streaming speech-to-speech service.
+Real Tamil/slang accuracy and audio latency still depend on the microphone,
+provider, network and actual speech, and need testing on the target device.
+
+### Voice checks
+
+```sh
+node --test tools/audit-sage-voice.mjs
+node tools/audit-refs.mjs
+node tools/audit-boot.mjs
+# With Playwright and Chromium installed:
+node tools/audit-sage-voice-ui.mjs
+```
+
+The deterministic regression suite covers final recorder chunks, WAV payloads,
+review/correction, four-turn history, silence, permissions, mute, cancellation,
+late results, browser fallback, quota failures, and speech interruption. The UI
+audit renders the actual page markup and styles at 1280×900, 390×844 and 320×568
+with mocked voice services and no external requests. It checks control visibility,
+keyboard focus and settings typography and writes screenshots to
+`/tmp/sage-voice-preview` (override with `SAGE_SCREENSHOT_DIR`). Set
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE` to use an existing Chromium binary. Neither audit
+verifies real provider responses or subjective recognition accuracy.
