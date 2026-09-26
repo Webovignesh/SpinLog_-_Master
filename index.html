@@ -113,7 +113,12 @@
               <!-- The only way into the Sage section now. Her own face rather
                    than a generic speech bubble, so the button reads as a person
                    and not a menu item. -->
-              
+              <button type="button" class="dk-btn sage-call-nav" data-home-section="sage">
+                <span class="sage-nav-avatar" aria-hidden="true">
+                  <img src="./assets/img/sage.webp" alt="" decoding="async" />
+                </span>
+                <span>Talk to Sage</span>
+              </button>
             </div>
 
             <p class="dk-quote">Good maintenance, greater miles.</p>
@@ -1092,7 +1097,109 @@
            markup moved here verbatim: same IDs, so initSearch() in
            script.js binds to it exactly as before and nothing was lost.
            ═══════════════════════════════════════════════════════════════ -->
-      
+      <section id="sage" aria-labelledby="sage-header">
+        <div class="section-topline">
+          <h2 id="sage-header"><i class="fas fa-comment-dots" aria-hidden="true"></i> Sage</h2>
+          <button type="button" class="section-home-pill" data-home-section="home">
+            <i class="fas fa-house" aria-hidden="true"></i> Home
+          </button>
+        </div>
+
+        <div class="sage-chat-wrap">
+          <!-- Search, moved out of the hero -->
+          <div class="dk-search sage-chat-search" role="search">
+            <i class="fas fa-magnifying-glass dk-search-ico" aria-hidden="true"></i>
+            <input type="search" id="dkSearchInput" class="dk-search-input"
+                   placeholder="Search service history, documents, or anything…"
+                   autocomplete="off" spellcheck="false" role="combobox"
+                   aria-expanded="false" aria-controls="dkSearchPanel"
+                   aria-autocomplete="list" aria-label="Search SpinLog">
+            <button type="button" class="dk-search-clear" id="dkSearchClear" aria-label="Clear search" hidden>
+              <i class="fas fa-xmark" aria-hidden="true"></i>
+            </button>
+            <div class="dk-search-panel" id="dkSearchPanel" role="listbox" aria-label="Search results" hidden></div>
+          </div>
+
+          <div class="sage-chat-card">
+            <div class="sage-chat-head">
+              <span class="sage-chat-avatar" aria-hidden="true">
+                <img src="./assets/img/sage.webp" alt="" decoding="async" />
+              </span>
+              <span class="sage-chat-who">
+                <strong>Sage</strong>
+                <small id="sageChatMood">Duke 250 Gen 3</small>
+              </span>
+              <!-- A gear, not fa-sliders. Sliders is a legitimate "preferences"
+                   glyph but at this size it reads as an audio equaliser, and the
+                   one thing a settings button must not be is a guess. -->
+              <button type="button" class="sage-icon-btn" id="sageChatSettings"
+                      aria-label="Sage settings" title="Sage settings">
+                <i class="fas fa-gear" aria-hidden="true"></i>
+              </button>
+              <!-- Clears the visible log only, which rules out most of the obvious
+                   glyphs. Not fa-trash-can: a bin is this app's mark for "destroy
+                   this data", and her memory survives this. Not fa-eraser either —
+                   that is "Forget everything" in settings, and the two must not look
+                   like the same button. fa-comment-slash was the first attempt and is
+                   unreadable at 13px; it came out looking like a crossed-out eye.
+                   A counter-clockwise arrow is two strokes at any size and says what
+                   this actually does: start the conversation over. -->
+              <button type="button" class="sage-icon-btn" id="sageChatClear"
+                      aria-label="Clear this conversation — she still remembers you"
+                      title="Clear this conversation (she still remembers you)">
+                <i class="fas fa-rotate-left" aria-hidden="true"></i>
+              </button>
+            </div>
+
+            <div class="sage-chat-log" id="sageChatLog" role="log"
+                 aria-live="polite" aria-label="Conversation with Sage"></div>
+
+            <div class="sage-chat-suggest" id="sageChatSuggest"></div>
+
+            <!-- One composer group: the clipped file, the input row and the status
+                 line. They used to be three siblings of the log with three
+                 different paddings and margins of their own, which is why the
+                 attachment read as a loose bar floating between the two and the
+                 status line sat squashed against the bottom of the card. The
+                 group owns the spacing now; the children set none. -->
+            <div class="sage-chat-composer">
+              <!-- The files clipped to the next message. She reads all of them, and
+                   her upload controls take them one at a time PICKING BY KIND — so
+                   clipping a PDF bill and a photo together works: attach_bill gets
+                   the PDF, upload_media gets the image, and neither has to be told
+                   which. The chips are built by sage-ui.js. -->
+              <div class="sage-attach" id="sageAttachBar" hidden>
+                <div class="sage-attach-top">
+                  <span class="sage-attach-count" id="sageAttachCount"></span>
+                  <button type="button" class="sage-attach-clear" id="sageAttachClear">
+                    <i class="fas fa-xmark" aria-hidden="true"></i> Clear all
+                  </button>
+                </div>
+                <ul class="sage-attach-list" id="sageAttachList"></ul>
+              </div>
+
+              <form class="sage-chat-form" id="sageChatForm" autocomplete="off">
+                <label class="sr-only" for="sageChatInput">Message Sage</label>
+                <input type="file" id="sageChatFile" hidden multiple
+                       accept="image/*,application/pdf,.pdf,.mp3,.wav,.m4a,.mp4,.mov,.webm" />
+                <button type="button" class="sage-chat-clip" id="sageChatAttach"
+                        aria-label="Attach a file" title="Attach a bill, document or photo">
+                  <i class="fas fa-paperclip" aria-hidden="true"></i>
+                </button>
+                <textarea id="sageChatInput" class="sage-chat-input" rows="1"
+                          maxlength="500" placeholder="Say something to her…"
+                          spellcheck="true"></textarea>
+                <button type="submit" class="sage-chat-send" id="sageChatSend"
+                        aria-label="Send message">
+                  <i class="fas fa-paper-plane" aria-hidden="true"></i>
+                </button>
+              </form>
+
+              <p class="sage-set-status" id="sageChatStatus" role="status" aria-live="polite"></p>
+            </div>
+          </div>
+        </div>
+      </section>
 
 </main>
       </div>
