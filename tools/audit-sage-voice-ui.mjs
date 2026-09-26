@@ -12,7 +12,7 @@ catch {
   if (!process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES) throw new Error('Install playwright to run the voice UI audit.');
   ({ chromium } = await import(pathToFileURL(path.join(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES, 'playwright/index.mjs')).href));
 }
-const root = path.resolve(fileURLToPath(new URL('..', import.meta.url))); 
+const root = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const output = process.env.SAGE_SCREENSHOT_DIR || '/tmp/sage-voice-preview';
 await mkdir(output, { recursive: true });
 const server = http.createServer(async (req,res) => {
