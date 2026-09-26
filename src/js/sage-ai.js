@@ -2969,6 +2969,11 @@
    */
   function readLanguage(text) {
     const src = String(text || '').toLowerCase();
+    // Tamil in its own script never survives the Latin filter below — every
+    // character becomes a space and a Tamil sentence reads as English. Voice
+    // input lands here verbatim, so the script itself is the signal: if he
+    // spoke Tamil, answer Thanglish whatever the transliteration says.
+    const tamilScript = /[\u0B80-\u0BFF]/.test(String(text || ''));
     // Money, dates and part names are not evidence of anything, and `en` inside
     // "engine" is not the question word — \b handles the second, this the first.
     const words = src.replace(/[^a-z\s'-]+/g, ' ');
@@ -2979,7 +2984,8 @@
     // At least one load-bearing Tamil word. A pile of address terms is not a
     // sentence in Tamil, it is an English sentence with a friend's name on it.
     return {
-      thanglish: strong.length > 0,
+      thanglish: strong.length > 0 || tamilScript,
+      tamilScript,
       count: strong.length + weak.length,
       words: [...strong, ...weak],
     };
@@ -3008,9 +3014,14 @@
       ].filter(Boolean).join('\n');
     }
 
+    // Tamil-script input carries no Latin words to quote, so name it plainly
+    // instead of interpolating an empty pair of quotes.
+    const heard = read.tamilScript && !read.words.length
+      ? 'He spoke in Tamil this turn'
+      : `He wrote Thanglish this turn — "${read.words.join('", "')}"`;
     return [
       'THE LANGUAGE OF THIS ONE REPLY',
-      `He wrote Thanglish this turn — "${read.words.join('", "')}". Answer in`,
+      `${heard}. Answer in`,
       'Thanglish, about as heavily as he did.',
       '',
       'FINISH EVERY CLAUSE IN THE LANGUAGE IT STARTED IN. That is the only rule,',
@@ -3144,7 +3155,10 @@
       },
       history: [...(opts.history || []).slice(-CHAT_MAX_TURNS), { role: 'user', parts: askParts }],
       temperature: 1.0,
-      maxOutputTokens: CHAT_MAX_TOKENS,
+      // Voice passes a smaller ceiling: spoken replies are a sentence or two,
+      // and a full 1100-token budget is paid for in latency before she starts
+      // talking. Typed chat keeps the default.
+      maxOutputTokens: Number(opts.maxTokens) > 0 ? Number(opts.maxTokens) : CHAT_MAX_TOKENS,
       meta,
       // You asked, so this is never rationed against the background allowance.
       purpose: 'chat',

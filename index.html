@@ -13,7 +13,7 @@
        needs no JS change. Keep the version segment of CACHE_NAME in service-worker.js
        in step with this — that file cannot read a meta tag, and a mismatch means the
        number on screen is not the number that is actually cached. -->
-  <meta name="version" content="1.9.8"/>
+  <meta name="version" content="1.9.19"/>
   <title>SpinLog</title>
   <!-- Not decoration. This is what an install prompt, a shared link and a
        browser's own history entry show underneath the title, and without it they
@@ -1189,6 +1189,10 @@
                 <textarea id="sageChatInput" class="sage-chat-input" rows="1"
                           maxlength="500" placeholder="Say something to her…"
                           spellcheck="true"></textarea>
+                <button type="button" class="sage-chat-mic" id="sageChatMic"
+                        aria-label="Talk with Sage out loud" title="Talk with Sage out loud">
+                  <i class="fas fa-wave-square" aria-hidden="true"></i>
+                </button>
                 <button type="submit" class="sage-chat-send" id="sageChatSend"
                         aria-label="Send message">
                   <i class="fas fa-paper-plane" aria-hidden="true"></i>
@@ -1200,6 +1204,69 @@
           </div>
         </div>
       </section>
+
+      <!-- ═══════════════════════════════════════════════════════════════
+            SAGE VOICE
+            Hands-free conversation: the ChatGPT-style voice mode. A live
+            orb that breathes with the mic, captions of both sides, and the
+            last exchanges — then the whole thing lands in the normal chat
+            log, so nothing spoken is lost. Not a <section>: the router
+            scans `main section` and would treat one as a page. Owned by
+            src/js/sage-voice.js; styled at the SAGE VOICE block in
+            src/css/styles.css. Back and Escape close it through the same
+            .sl-modal-overlay contract as every other dialog.
+            ═══════════════════════════════════════════════════════════════ -->
+      <div id="sageVoiceOverlay" class="sl-modal-overlay sage-voice-overlay" aria-hidden="true"
+           role="dialog" aria-modal="true" aria-labelledby="sageVoiceTitle" data-voice-mode="idle" hidden>
+        <div class="sl-modal-card sage-voice-card">
+          <!-- No title bar, no X: the room IS the UI. End hangs up, Escape
+               and the back gesture leave the same way. -->
+          <div class="sage-voice-stage">
+            <button type="button" class="sage-voice-orb" id="sageVoiceOrb" data-voice-mode="idle"
+                    aria-label="Voice orb — tap to interrupt her and talk">
+              <span class="sage-voice-ring" aria-hidden="true"></span>
+              <span class="sage-voice-ring is-2" aria-hidden="true"></span>
+              <span class="sage-voice-ring is-3" aria-hidden="true"></span>
+              <span class="sage-voice-core" aria-hidden="true">
+                <img src="./assets/img/sage.webp" alt="" decoding="async" />
+              </span>
+              <span class="sage-voice-spin" aria-hidden="true"></span>
+            </button>
+            <p class="sage-voice-state" id="sageVoiceState" role="status" aria-live="polite">Voice</p>
+            <!-- What she is doing inside the site right now — her tool, in
+                 her own icon, alive while she works. Owned by SageVoice. -->
+            <div class="sage-voice-activity" id="sageVoiceActivity" role="status" aria-live="polite" hidden>
+              <i class="fas fa-gear" id="sageVoiceActivityIcon" aria-hidden="true"></i>
+              <span id="sageVoiceActivityText"></span>
+              <span class="sage-voice-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+            </div>
+            <div class="sage-voice-bars" id="sageVoiceBars" aria-hidden="true">
+              <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+            </div>
+          </div>
+
+          <!-- Live caption of what she hears, then ephemeral lines: each new
+               exchange slides up over the last and fades. The real
+               conversation is written to the chat log untouched. -->
+          <div class="sage-voice-captions">
+            <p class="sage-voice-caption" id="sageVoiceCaption" aria-live="polite"></p>
+            <div class="sage-voice-lines" id="sageVoiceLines" aria-live="polite"></div>
+          </div>
+
+          <div class="sage-voice-controls" role="group" aria-label="Voice controls">
+            <button type="button" class="sage-voice-btn" id="sageVoiceMic"
+                    aria-label="Mute microphone" aria-pressed="true" title="Mic on/off">
+              <i class="fas fa-microphone" aria-hidden="true"></i>
+            </button>
+            <button type="button" class="sage-voice-btn is-end" id="sageVoiceEnd"
+                    aria-label="End voice session" title="End">
+              <i class="fas fa-phone-slash" aria-hidden="true"></i>
+            </button>
+          </div>
+
+          <p class="sage-voice-hint" id="sageVoiceHint" role="status" aria-live="polite"></p>
+        </div>
+      </div>
 
 </main>
       </div>
@@ -2045,6 +2112,10 @@
       <script src="src/js/sage-autofill.js"></script>
       <!-- Settings modal. After script.js so the app shell exists first. -->
       <script src="src/js/sage-ui.js"></script>
+      <!-- Hands-free voice mode: ears + mouth around the same brain.
+           After sage-ai.js (the brain) and sage-ui.js (the chat log it
+           appends to). Classic script, one global: window.SageVoice. -->
+      <script src="src/js/sage-voice.js"></script>
       <script type="module" src="src/js/home3d.js"></script>
       <!-- Animates the three Documents archive drop zones. Injects its own
            canvas and only takes over once it has proven it can paint, so the
