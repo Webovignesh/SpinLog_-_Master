@@ -372,3 +372,30 @@ test('missing Gemini key pauses explicitly without switching recognizers', async
     assert.match(h.nodes.get('sageVoiceHint').textContent,/Gemini key/);
   } finally { h.cleanup(); }
 });
+
+
+test('fast recognition and a 900ms pause are defaults; careful preferences remain available', async () => {
+  const h=harness();
+  const careful=harness({storage:{sage_voice_speed:'careful',sage_voice_pause:'patient'}});
+  try {
+    assert.equal(h.root.SageVoice.settings.pauseMs,900);
+    await h.open(); await h.finish();
+    assert.match(h.requests[0].url,/gemini-2.5-flash-lite:generateContent/);
+    assert.equal(careful.root.SageVoice.settings.pauseMs,2200);
+    await careful.open(); await careful.finish();
+    assert.match(careful.requests[0].url,/gemini-2.5-flash:generateContent/);
+  } finally {h.cleanup();careful.cleanup();}
+});
+
+test('a successful replay clears the obsolete playback failure hint', async () => {
+  const options={silentAudio:true}, h=harness(options);
+  try {
+    await h.open(); await h.root.SageVoice.sendVoiceText('reply');
+    assert.equal(h.nodes.get('sageVoiceReplay').hidden,false);
+    options.silentAudio=false;
+    h.nodes.get('sageVoiceReplay').emit('click');
+    await until(()=>h.playback.length===1);
+    await until(()=>h.nodes.get('sageVoiceHint').textContent.includes('Mic off'));
+    assert.equal(h.nodes.get('sageVoiceReplay').hidden,true);
+  } finally {h.cleanup();}
+});

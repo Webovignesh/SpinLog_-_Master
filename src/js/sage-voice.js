@@ -23,10 +23,6 @@
     try { localStorage.setItem(key, String(value)); } catch { /* private mode */ }
   }
 
-  function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
-
   const settings = {
     get engine() { return 'gemini'; }, // Gemini-only. The ring key is her voice.
     get gemVoice() { return load(LS_GEM_VOICE, 'Kore'); },
@@ -37,7 +33,8 @@
     get sttLang() { return load(LS_STT_LANG, 'ta-IN') === 'en-IN' ? 'en-IN' : 'ta-IN'; },
     get recognition() { return load('sage_voice_recognition', 'gemini'); },
     get review() { return load('sage_voice_review', 'false') === 'true'; },
-    get pauseMs() { return load('sage_voice_pause', 'patient') === 'quick' ? 1200 : 2200; },
+    get speed() { return load('sage_voice_speed', 'fast') === 'careful' ? 'careful' : 'fast'; },
+    get pauseMs() { return load('sage_voice_pause', 'quick') === 'patient' ? 2200 : 900; },
     set sttLang(v) { save(LS_STT_LANG, v); },
   };
 
@@ -72,7 +69,6 @@
       lines: $('sageVoiceLines'),
       mic: $('sageVoiceMic'),
       end: $('sageVoiceEnd'),
-      close: $('sageVoiceClose'),
       hint: $('sageVoiceHint'),
     };
   }
@@ -141,7 +137,7 @@
     for (const sentence of sentences) {
       let part = '';
       for (const word of sentence.trim().split(/\s+/)) {
-        if (part && part.length + word.length > 160) { out.push(part); part = ''; }
+        if (part && part.length + word.length > (out.length === 0 ? 96 : 180)) { out.push(part); part = ''; }
         part += (part ? ' ' : '') + word;
       }
       if (part) out.push(part);
@@ -296,6 +292,7 @@
   // One capture owner per turn. Stopping waits for MediaRecorder's final data
   // event; closing/muting invalidates every pending permission and transcription.
   const GEM_STT_MODEL = 'gemini-2.5-flash';
+  const GEM_STT_FAST_MODEL = 'gemini-2.5-flash-lite';
   const GEM_API = 'https://generativelanguage.googleapis.com/v1beta';
   let rec = null;
   let endTimer = null;
@@ -568,7 +565,7 @@
     const timer = setTimeout(() => controller.abort(), 25000);
     try {
       if (!current(owner)) throw new Error('cancelled');
-      const res = await fetch(`${GEM_API}/models/${GEM_STT_MODEL}:generateContent`, {
+      const res = await fetch(`${GEM_API}/models/${settings.speed === 'fast' ? GEM_STT_FAST_MODEL : GEM_STT_MODEL}:generateContent`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
         signal: controller.signal,
         body: JSON.stringify({
@@ -836,6 +833,7 @@
       S.lastSaid = null;
       S.busy = false;
       setMode('idle');
+      setHint(S.muted ? 'Mic off. Tap the mic when you’re ready.' : '');
       if (!S.muted) startListening();
       return completed;
     } catch (err) {
@@ -902,7 +900,7 @@
       result = await AI.askSage(said, {
         history,
         voice: true,
-        maxTokens: 240, // spoken replies are short; the ceiling is latency
+        maxTokens: 480, // leave room for complete replies; brevity belongs in the prompt
         onTool: name => {
           if (S.open && owner === S.session) setActivity(name);
         },
@@ -951,7 +949,7 @@
     S.muted = false;
     S.sttMode = settings.recognition === 'browser' ? 'web' : 'gemini';
     const method = $('sageVoiceMethod');
-    if (method) method.textContent = S.sttMode === 'gemini' ? 'Tamil + Tanglish · Gemini' : (settings.sttLang === 'ta-IN' ? 'Tamil · Browser' : 'English · Browser');
+    if (method) method.textContent = S.sttMode === 'gemini' ? `Tamil + Tanglish · ${settings.speed === 'fast' ? 'Fast' : 'Careful'}` : (settings.sttLang === 'ta-IN' ? 'Tamil · Browser' : 'English · Browser');
     e.overlay.setAttribute('data-recognition', S.sttMode);
     S.lastSaid = null;
     S.reviewing = false;
@@ -961,7 +959,7 @@
     S.finalText = '';
     S.speechSeen = false;
     e.overlay.hidden = false;
-    requestAnimationFrame(() => { if (S.open) { e.overlay.classList.add('sl-modal--open'); e.close?.focus(); } });
+    requestAnimationFrame(() => { if (S.open) { e.overlay.classList.add('sl-modal--open'); e.end?.focus(); } });
     e.overlay.setAttribute('aria-hidden', 'false');
     paintMic();
     paintCaption('', false);
@@ -1021,10 +1019,6 @@
     if (mic && !mic._sageVoiceWired) {
       mic._sageVoiceWired = true;
       mic.addEventListener('click', () => open());
-    }
-    if (e.close && !e.close._wired) {
-      e.close._wired = true;
-      e.close.addEventListener('click', close);
     }
     if (e.end && !e.end._wired) {
       e.end._wired = true;
@@ -1106,7 +1100,8 @@
     const preferences = [
       ['sageVoiceRecognition', 'sage_voice_recognition', settings.recognition],
       ['sageVoiceLanguage', LS_STT_LANG, settings.sttLang],
-      ['sageVoicePause', 'sage_voice_pause', load('sage_voice_pause', 'patient')],
+      ['sageVoicePause', 'sage_voice_pause', load('sage_voice_pause', 'quick')],
+      ['sageVoiceSpeed', 'sage_voice_speed', settings.speed],
       ['sageVoiceReviewSetting', 'sage_voice_review', settings.review],
     ];
     preferences.forEach(([id, key, value]) => {

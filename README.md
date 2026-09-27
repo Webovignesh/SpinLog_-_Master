@@ -881,13 +881,14 @@ gone rather than left as links that go nowhere. What was in them that still matt
   back to localStorage then to the `data-due` values in `index.html`; Sage's memory
   falls back to localStorage; the key ring stays on the device.
 
-## Sage voice — v1.9.22
+## Sage voice — v1.9.23
 
 Open **Talk to Sage** inside the chat card. The fullscreen voice room uses a fluid amber orb (blue while speaking) and
 keeps the latest four speaker turns on screen, moving older turns out as new ones
 arrive. Completed voice turns remain in the normal chat history. Tap the orb to
 send a recording early or interrupt a spoken reply; use the microphone button to
-mute, and End, Close, Escape or app Back to leave.
+mute, and End, Escape or app Back to leave. The transcript is centered; there is
+no duplicate close button in the header.
 
 In **Sage settings → Voice → Speaking & listening**:
 
@@ -900,7 +901,11 @@ In **Sage settings → Voice → Speaking & listening**:
 - **Browser recognition** is available as an explicit fallback. The default
   language is Tamil (`ta-IN`); English (India) can be selected. Silence never
   changes the selected language. Browser support and recognition quality vary.
-- Choose a 2.2-second or 1.2-second pause before sending. Audio turns are capped at
+- **Fast transcription** uses Gemini 2.5 Flash-Lite by default. Choose **Careful**
+  to use Gemini 2.5 Flash for difficult speech. Both keep the same Tamil/Tanglish
+  instructions and transcript-review safeguards; compare accuracy with your own audio.
+- The default pause is 0.9 seconds; a saved **Relaxed · 2.2 seconds** preference
+  is preserved. Audio turns are capped at
   45 seconds; 15 seconds without detected speech pauses the microphone without
   uploading silence. Tap the orb to submit quiet speech manually.
 - Enable **Let me check every transcript before sending** to edit each transcript.
@@ -917,8 +922,16 @@ voice audio requests. Results from a closed session cannot appear in a new one.
 Closing voice mode does not roll back a tool action already submitted to SageAI.
 
 Replies use a gesture-unlocked Web Audio context. The first short sentence plays
-while the next is prepared; the default playback speed is 1.08×. Voice answers
-are brief, and failed speech is never silently skipped. Versioned CSS and scripts
+while the next is prepared (the opening chunk is limited to about 96 characters
+at a word boundary); the default playback speed is 1.08×. Voice answers
+are brief, and failed speech is never silently skipped. Voice replies have a
+separate serial request queue so background generation cannot hold them up.
+The shared 1.5-second request-start spacing and quota checks still apply. Voice
+requests time out after 12 seconds per attempt, with at most three attempts per
+model turn, including config retries. Tool results still precede the final answer.
+Gemini 3 voice requests use low thinking via the supported level parameter;
+2.5 requests use a zero thinking budget. These are latency controls, not a
+promise of instant responses. Versioned CSS and scripts
 prevent older cached voice assets from being mixed with the new markup.
 
 The Gemini path transcribes a completed utterance, then uses the existing SageAI
@@ -929,7 +942,7 @@ provider, network and actual speech, and need testing on the target device.
 ### Voice checks
 
 ```sh
-node --test tools/audit-sage-voice.mjs
+node --test tools/audit-sage-voice.mjs tools/audit-sage-voice-latency.mjs
 node tools/audit-refs.mjs
 node tools/audit-boot.mjs
 # With Playwright and Chromium installed:
@@ -947,3 +960,5 @@ simulated stale service-worker cache, and writes screenshots to
 `/tmp/sage-voice-preview` (override with `SAGE_SCREENSHOT_DIR`). Set
 `PLAYWRIGHT_CHROMIUM_EXECUTABLE` to use an existing Chromium binary. Neither audit
 verifies real provider responses or subjective recognition accuracy.
+
+Model references: [Flash-Lite audio support](https://ai.google.dev/gemini-api/docs/models/gemini-2.5-flash-lite), [thinking controls](https://ai.google.dev/gemini-api/docs/thinking).

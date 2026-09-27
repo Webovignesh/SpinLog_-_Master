@@ -30,7 +30,7 @@ const server = http.createServer(async (req,res) => {
   try {
     let content = await readFile(filename);
     if (rel === 'index.html') content = content.toString().replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'')
-      .replace('</body>','<script src="src/js/sage-voice.js?v=1.9.22"></script></body>');
+      .replace('</body>','<script src="src/js/sage-voice.js?v=1.9.23"></script></body>');
     res.setHeader('Content-Type', ({'.html':'text/html','.js':'text/javascript','.css':'text/css','.woff2':'font/woff2','.webp':'image/webp'})[path.extname(filename)] || 'application/octet-stream');
     res.end(content);
   } catch {res.writeHead(404).end();}
@@ -73,7 +73,7 @@ try {
     await page.locator('#sageChatMic').click();
     assert.equal(await page.locator('.sage-voice-core').evaluate(el=>getComputedStyle(el).display),'block','new orb CSS bypasses stale unversioned cache');
     for (const asset of ['src/css/styles.css','src/css/home.css','src/css/sage-voice.css','src/js/sage-voice.js']) {
-      assert.ok(await page.evaluate(asset=>[...document.querySelectorAll('link[href],script[src]')].some(el=>(el.href||el.src).endsWith(asset+'?v=1.9.22')),asset),'voice assets use versioned URLs');
+      assert.ok(await page.evaluate(asset=>[...document.querySelectorAll('link[href],script[src]')].some(el=>(el.href||el.src).endsWith(asset+'?v=1.9.23')),asset),'voice assets use versioned URLs');
     }
     await page.evaluate(async()=>{
       await SageVoice.sendVoiceText('Bro, நேத்து petrol போட்டேன்.');
@@ -82,15 +82,17 @@ try {
     });
     await page.waitForTimeout(350);
     assert.equal(await page.locator('#sageVoiceLines > p').count(),4);
+    assert.equal(await page.locator('#sageVoiceClose').count(),0);
+    assert.equal(await page.locator('.sage-voice-line').first().evaluate(el=>getComputedStyle(el).textAlign),'center');
     const bounds = await page.locator('.sage-voice-card').boundingBox();
     assert.ok(bounds.x >= -1 && bounds.y >= -1 && bounds.x+bounds.width <= width+1 && bounds.y+bounds.height <= height+1, `${name}: card fits screen`);
-    for (const selector of ['#sageVoiceEnd','#sageVoiceMic','#sageVoiceClose']) {
+    for (const selector of ['#sageVoiceEnd','#sageVoiceMic']) {
       const b = await page.locator(selector).boundingBox();
       assert.ok(b.y >= 0 && b.y+b.height <= height,`${name}: ${selector} visible`);
     }
     await page.screenshot({path:path.join(output,`sage-voice-${name}.png`)});
     await page.locator('#sageVoiceEnd').focus(); await page.keyboard.press('Tab');
-    assert.equal(await page.evaluate(()=>document.activeElement.id),'sageVoiceClose');
+    assert.equal(await page.evaluate(()=>document.activeElement.id),'sageVoiceOrb');
     await page.keyboard.press('Escape');
     assert.equal(await page.evaluate(()=>SageVoice.isOpen()),false);
     assert.equal(await page.evaluate(()=>document.activeElement.id),'sageChatMic');
