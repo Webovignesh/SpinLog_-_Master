@@ -5,6 +5,8 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 
+const speechPCM = Buffer.alloc(4800);
+for (let i=0;i<2400;i++) speechPCM.writeInt16LE(Math.round(Math.sin(i / 6) * 5000), i*2);
 const source = await readFile(new URL('../src/js/sage-voice.js', import.meta.url), 'utf8');
 const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -14,7 +16,7 @@ async function until(check) {
 }
 function harness(options = {}) {
   const timers = new Set(), intervals = new Map(), nodes = new Map(), streams = [], recordings = [], recognition = [];
-  const asks = [], requests = [], decoded = [];
+  const asks = [], requests = [], decoded = [], playback = [];
   let history = [], now = 100000;
   class Element {
     constructor(id = '') { this.id = id; this.children = []; this.events = {}; this.attrs = {}; this.hidden = false; this.value = ''; this.type = ''; this.isConnected = true; this.style = { setProperty() {} }; this.classList = { add() {}, remove() {}, toggle() {} }; }
@@ -57,8 +59,15 @@ function harness(options = {}) {
     }
   }
   class AudioContext {
-    state = 'running';
+    state = options.audioBlocked ? 'suspended' : 'running';
     resume() { return Promise.resolve(); }
+    createBuffer(channels,length,rate) { return {duration:length/rate,copyToChannel() {}}; }
+    createBufferSource() {
+      const source = {playbackRate:{value:1},connect(){},disconnect(){},
+        start(){playback.push(source); if (!options.holdPlayback) setTimeout(()=>source.onended?.(),5);},
+        stop(){}, end(){source.onended?.();}};
+      return source;
+    }
     close() { return Promise.resolve(); }
     createMediaStreamSource() { return { connect() {} }; }
     createAnalyser() { return { fftSize: 1024, getByteTimeDomainData(data) { data.fill(128); } }; }
@@ -87,17 +96,17 @@ function harness(options = {}) {
     Date: class extends Date { static now() { return now; } },
     dkReduceMotion: () => true,
     dkCloudStore: { chatHistory: () => history.slice(), setChat: rows => { history = rows; } },
-    SageAI: { availableKeys: () => [{ key: 'test-only' }], askSage: options.askSage || (async text => { asks.push(text); return { ok: true, text: 'சரி bro, service history பார்க்கலாம்.' }; }) },
+    SageAI: { availableKeys: () => options.noKey ? [] : [{ key: 'test-only' }], askSage: options.askSage || (async text => { asks.push(text); return { ok: true, text: 'சரி bro, service history பார்க்கலாம்.' }; }) },
     fetch: async (url, init) => {
       const body = JSON.parse(init.body); requests.push({url,body,signal:init.signal});
-      if (body.generationConfig.responseModalities) return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ inlineData: { data: 'AAAAAA==' } }] } }] }) };
+      if (body.generationConfig.responseModalities) return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ inlineData: { data: options.emptyAudio ? 'AAAAAA==' : (options.silentAudio ? Buffer.alloc(speechPCM.length) : speechPCM).toString('base64'), mimeType:'audio/L16;rate=24000' } }] } }] }) };
       if (options.transcribe) return options.transcribe(init);
       return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify(options.transcript || { transcript: 'நேத்து petrol போட்டேன் bro', unclear: false }) }] } }] }) };
     }, console,
   };
   root.self = root;
   vm.runInNewContext(source, root, { filename: 'sage-voice.js' });
-  return { root, nodes, streams, recordings, recognition, asks, requests, decoded, storage,
+  return { root, nodes, streams, recordings, recognition, asks, requests, decoded, storage, playback,
     get history() { return history; },
     tick(ms) { now += ms; [...intervals.values()].forEach(fn => fn()); },
     async open() { root.SageVoice.open(); await until(() => recordings.length || recognition.length); },
@@ -298,6 +307,68 @@ test('interrupt aborts pending speech audio and immediately resumes listening', 
     await speaking;
     await until(()=>h.recordings.length===2);
     assert.equal(signal.aborted,true);
-    assert.equal(h.nodes.get('sageVoiceState').textContent,'Listening…');
+    assert.equal(h.nodes.get('sageVoiceState').textContent,'I’m listening');
+  } finally { h.cleanup(); }
+});
+
+
+test('microphone stays stopped until the audio source actually ends', async () => {
+  const h = harness({holdPlayback:true});
+  try {
+    await h.open();
+    const reply = h.root.SageVoice.sendVoiceText('play the reply');
+    await until(()=>h.playback.length===1);
+    assert.equal(h.nodes.get('sageVoiceState').textContent,'Sage is speaking');
+    assert.equal(h.recordings.length,1);
+    assert.equal(h.recordings[0].state,'inactive');
+    await delay(40);
+    assert.equal(h.recordings.length,1);
+    h.playback[0].end(); await reply;
+    await until(()=>h.recordings.length===2);
+  } finally { h.cleanup(); }
+});
+
+for (const [name,option] of [['silent PCM','silentAudio'],['empty PCM','emptyAudio'],['blocked audio context','audioBlocked']]) {
+  test(`${name} pauses capture and offers Play reply`, async () => {
+    const h = harness({[option]:true});
+    try {
+      await h.open(); await h.root.SageVoice.sendVoiceText('test failed playback');
+      assert.equal(h.recordings.length,1);
+      assert.equal(h.playback.length,0);
+      assert.equal(h.nodes.get('sageVoiceReplay').hidden,false);
+      assert.equal(h.nodes.get('sageVoiceMic').getAttribute('aria-pressed'),'true');
+      assert.match(h.nodes.get('sageVoiceHint').textContent,/Play reply/);
+    } finally { h.cleanup(); }
+  });
+}
+
+test('first sentence plays while the next sentence is still being generated', async () => {
+  const h = harness({holdPlayback:true,askSage:async()=>({ok:true,text:'First sentence. Second sentence.'})});
+  try {
+    await h.open();
+    const originalFetch=h.root.fetch;
+    let completeSecond, calls=0;
+    h.root.fetch=(...args)=>++calls===2 ? new Promise(resolve=>{completeSecond=()=>resolve(originalFetch(...args));}) : originalFetch(...args);
+    const reply=h.root.SageVoice.sendVoiceText('short response');
+    await until(()=>h.playback.length===1 && completeSecond);
+    assert.equal(h.recordings.length,1);
+    h.playback[0].end();
+    await delay(20);
+    assert.equal(h.playback.length,1);
+    assert.equal(h.recordings.length,1);
+    completeSecond(); await until(()=>h.playback.length===2);
+    h.playback[1].end(); await reply;
+    await until(()=>h.recordings.length===2);
+  } finally { h.cleanup(); }
+});
+
+test('missing Gemini key pauses explicitly without switching recognizers', async () => {
+  const h=harness({noKey:true});
+  try {
+    h.root.SageVoice.open(); await delay(20);
+    assert.equal(h.recognition.length,0);
+    assert.equal(h.recordings.length,0);
+    assert.equal(h.nodes.get('sageVoiceOverlay').getAttribute('data-recognition'),'gemini');
+    assert.match(h.nodes.get('sageVoiceHint').textContent,/Gemini key/);
   } finally { h.cleanup(); }
 });

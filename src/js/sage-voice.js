@@ -31,7 +31,7 @@
     get engine() { return 'gemini'; }, // Gemini-only. The ring key is her voice.
     get gemVoice() { return load(LS_GEM_VOICE, 'Kore'); },
     get rate() {
-      const n = parseFloat(load(LS_RATE, '1'));
+      const n = parseFloat(load(LS_RATE, '1.08'));
       return Number.isFinite(n) ? Math.min(1.3, Math.max(0.7, n)) : 1;
     },
     get sttLang() { return load(LS_STT_LANG, 'ta-IN') === 'en-IN' ? 'en-IN' : 'ta-IN'; },
@@ -101,366 +101,196 @@
     return out;
   }
 
-  // ── Audio unlock ──────────────────────────────────────────────────────
-  // <audio> playback can stay blocked until a user gesture "allows" sound —
-  // and a slow brain turn can outlast that gesture, muting her reply with
-  // play-blocked. So the tap does three synchronous things: resume the
-  // shared context, resume the meter context, and play a silent blip through
-  // a real <audio> element, warming the exact pipeline her replies use.
+  // One gesture-unlocked Web Audio context owns playback for the entire session.
+  // A new HTMLAudioElement per sentence does not inherit another element's unlock.
   let actx = null;
-  let unlockUrl = null;
-
-  function silentClipUrl() {
-    if (unlockUrl) return unlockUrl;
-    try {
-      const len = 2400; // 0.1s of silence at 24kHz mono 16-bit
-      const buf = new ArrayBuffer(44 + len);
-      const v = new DataView(buf);
-      const ws = (off, s) => { for (let i = 0; i < s.length; i++) v.setUint8(off + i, s.charCodeAt(i)); };
-      ws(0, 'RIFF'); v.setUint32(4, 36 + len, true); ws(8, 'WAVE'); ws(12, 'fmt ');
-      v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
-      v.setUint32(24, 24000, true); v.setUint32(28, 48000, true);
-      v.setUint16(32, 2, true); v.setUint16(34, 16, true); ws(36, 'data');
-      v.setUint32(40, len, true);
-      unlockUrl = URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
-    } catch { /* no blob URLs here */ }
-    return unlockUrl;
-  }
+  let playbackSource = null;
+  let playbackSettle = null;
+  let cancelSpeech = null;
+  let voiceSession = 0;
+  const ttsRequests = new Set();
+  const GEM_TTS_MODEL = 'gemini-2.5-flash-preview-tts';
+  const GEM_VOICE_STYLE = 'Read only the following words, naturally and directly, in one consistent warm Indian female voice. Preserve Tamil and English pronunciation. Do not add greetings or commentary.';
 
   function unlockAudio() {
+    const AC = root.AudioContext || root.webkitAudioContext;
+    if (!AC) return;
     try {
-      const AC = root.AudioContext || root.webkitAudioContext;
-      if (!AC) return;
-      if (!actx) actx = new AC();
+      if (!actx || actx.state === 'closed') actx = new AC();
       if (actx.state === 'suspended') actx.resume().catch(() => {});
-    } catch { /* no WebAudio here */ }
-    // The meter context suspends the same way — a suspended Analyser reads
-    // all zeros, so voice-detection would never trip and every take would be
-    // discarded as "heard nothing". Same gesture, same fix.
-    try {
-      if (typeof meterCtx !== 'undefined' && meterCtx && meterCtx.state === 'suspended') {
-        meterCtx.resume().catch(() => {});
-      }
-    } catch { /* ignore */ }
-    // And the <audio> pipeline itself, with real silence.
-    try {
-      const url = silentClipUrl();
-      if (url) {
-        const a = new Audio(url);
-        a.volume = 0;
-        const p = a.play();
-        if (p && p.catch) p.catch(() => {});
-      }
-    } catch { /* ignore */ }
+      if (meterCtx?.state === 'suspended') meterCtx.resume().catch(() => {});
+    } catch { /* playback will report the actual error */ }
   }
-
-  function chunkForSpeech(text) {
-    const clean = String(text || '').trim();
-    if (!clean) return [];
-    const parts = clean.match(/[^.!?…\n]+[.!?…]+["'”’)]?\s*|\S[^.!?…\n]*$/g) || [clean];
-    const out = [];
-    let buf = '';
-    parts.forEach(p => {
-      if ((buf + ' ' + p).trim().length > 220) { if (buf.trim()) out.push(buf.trim()); buf = p; }
-      else buf = `${buf} ${p}`;
-    });
-    if (buf.trim()) out.push(buf.trim());
-    return out.slice(0, 10);
-  }
-
-  // Sentence splitter, shared by the parallel TTS fetch below. One audio
-  // request per sentence keeps each one short and reliable; the parallelism
-  // is what makes a long answer start talking fast.
-
-  // ════════════════════════════════════════════════════════════════════
-  // MOUTH — Gemini TTS through the existing key ring
-  // ════════════════════════════════════════════════════════════════════
-  const GEM_TTS_MODEL = 'gemini-2.5-flash-preview-tts';
-  const GEM_TTS_RATE = 24000;
-
-  const ttsRequests = new Set();
-  let cancelSpeech = null;
-  let gemAudio = null;
-  let gemSettle = null; // resolve of the in-flight Gemini line, if any
-
-  function gemKey() {
+  function gemKeys() {
     const AI = root.SageAI;
-    if (!AI) return '';
+    if (!AI) return [];
     try {
-      if (AI.availableKeys) {
-        const list = AI.availableKeys();
-        if (list && list.length) return list[0].key;
-      }
-      if (AI.getKeys) {
-        const list = AI.getKeys();
-        if (list && list.length) return list[0].key;
-      }
-    } catch { /* ignore */ }
-    return '';
+      const keys = AI.availableKeys?.() || AI.getKeys?.() || [];
+      return [...new Set(keys.map(item => item.key).filter(Boolean))];
+    } catch { return []; }
   }
+  function gemKey() { return gemKeys()[0] || ''; }
 
-  function base64ToBytes(b64) {
-    const bin = atob(b64);
-    const out = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  // Start generating the first short sentence immediately. Decimal values are
+  // never split at the dot, and Tamil graphemes are not truncated for a deadline.
+  function chunkForSpeech(text) {
+    const clean = speakable(text);
+    if (!clean) return [];
+    const sentences = clean.match(/.+?(?:[!?。…]+(?:\s+|$)|\.(?!\d)(?:\s+|$)|$)/gu) || [clean];
+    const out = [];
+    for (const sentence of sentences) {
+      let part = '';
+      for (const word of sentence.trim().split(/\s+/)) {
+        if (part && part.length + word.length > 160) { out.push(part); part = ''; }
+        part += (part ? ' ' : '') + word;
+      }
+      if (part) out.push(part);
+    }
     return out;
   }
 
-  function pcmToWavUrl(pcm, rate) {
-    const len = pcm.length;
-    const buf = new ArrayBuffer(44 + len);
-    const v = new DataView(buf);
-    const writeStr = (off, s) => { for (let i = 0; i < s.length; i++) v.setUint8(off + i, s.charCodeAt(i)); };
-    writeStr(0, 'RIFF');
-    v.setUint32(4, 36 + len, true);
-    writeStr(8, 'WAVE');
-    writeStr(12, 'fmt ');
-    v.setUint32(16, 16, true);
-    v.setUint16(20, 1, true);
-    v.setUint16(22, 1, true);
-    v.setUint32(24, rate, true);
-    v.setUint32(28, rate * 2, true);
-    v.setUint16(32, 2, true);
-    v.setUint16(34, 16, true);
-    writeStr(36, 'data');
-    v.setUint32(40, len, true);
-    new Uint8Array(buf, 44).set(pcm);
-    return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
-  }
-
-  function stopGemini() {
-    // pause() fires neither ended nor error, so a cut-off line would hang its
-    // promise (and the whole loop with it) for ever. Settle it by hand.
-    const settle = gemSettle;
-    gemSettle = null;
-    try { if (gemAudio) { gemAudio.pause(); gemAudio.removeAttribute('src'); } }
-    catch { /* ignore */ }
-    gemAudio = null;
-    if (settle) {
-      try { settle(false); } catch { /* ignore */ }
+  function decodeSpeech(inline) {
+    const mime = inline.mimeType || 'audio/L16;rate=24000';
+    if (!/^audio\/(?:L16|pcm)(?:;|$)/i.test(mime)) throw new Error('audio-format');
+    const rate = Number(mime.match(/rate=(\d+)/i)?.[1] || 24000);
+    if (rate < 8000 || rate > 48000) throw new Error('audio-format');
+    const raw = atob(inline.data);
+    if (raw.length < 96 || raw.length % 2) throw new Error('empty-audio');
+    const bytes = Uint8Array.from(raw, c => c.charCodeAt(0));
+    const pcm = new DataView(bytes.buffer);
+    let first = -1, last = -1;
+    for (let i = 0; i < raw.length / 2; i++) {
+      if (Math.abs(pcm.getInt16(i * 2, true)) > 96) { if (first < 0) first = i; last = i; }
     }
+    // A successful HTTP response with silence must never count as a spoken reply.
+    if (first < 0 || last - first < rate * 0.02) throw new Error('silent-audio');
+    first = Math.max(0, first - Math.floor(rate * 0.06));
+    last = Math.min(raw.length / 2, last + Math.floor(rate * 0.12));
+    const samples = new Float32Array(last - first);
+    for (let i = 0; i < samples.length; i++) samples[i] = pcm.getInt16((first + i) * 2, true) / 32768;
+    return { samples, rate };
   }
 
-  /**
-   * ONE identity, every language, every sentence. Branching the style per
-   * text ("speak Tamil" vs "Tanglish accent") is what made her sound like
-   * two different people — and per-sentence calls already drift prosody, so
-   * the only thing holding her together is a fixed direction. Same woman in
-   * Tamil, English and Tanglish; the words carry the language, not her.
-   */
-  const GEM_VOICE_STYLE =
-    'Speak in one consistent voice: a warm young Indian woman talking to someone '
-    + 'she likes, natural Tamil-English Tanglish accent, conversational pace, a little '
-    + 'playful. Sound like the same person no matter which language the words are in.';
-
-  // One sentence of audio. Never rejects for a dead sentence — a 429 on
-  // sentence 3 must skip sentence 3, not kill the whole reply. One retry,
-  // because a burst of parallel requests can trip the per-minute limit once.
-  async function fetchSentenceAudio(sentence, style, key, my) {
-    let firstErr = null;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      if (my !== voiceSession || !S.open) return { url: null };
+  async function fetchSentenceAudio(sentence, my) {
+    const keys = gemKeys().slice(0, 2);
+    if (!keys.length) return { error: new Error('no-key') };
+    for (let i = 0; i < keys.length; i++) {
+      if (!S.open || my !== voiceSession) return { cancelled: true };
       const controller = new AbortController();
       ttsRequests.add(controller);
-      const timer = setTimeout(() => controller.abort(), 20000);
+      const timer = setTimeout(() => controller.abort(), 15000);
       try {
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEM_TTS_MODEL}:generateContent?key=${encodeURIComponent(key)}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: controller.signal,
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEM_TTS_MODEL}:generateContent`, {
+          method: 'POST', signal: controller.signal,
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': keys[i] },
           body: JSON.stringify({
-            contents: [{ parts: [{ text: `${style}: ${sentence}` }] }],
-            generationConfig: {
-              responseModalities: ['AUDIO'],
-              speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: settings.gemVoice || 'Kore' } } },
-            },
+            contents: [{ parts: [{ text: `${GEM_VOICE_STYLE}\n\n${sentence}` }] }],
+            generationConfig: { responseModalities: ['AUDIO'],
+              speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: settings.gemVoice } } } },
           }),
         });
-        clearTimeout(timer);
-        if (res.status === 429) {
-          firstErr = firstErr || new Error('quota');
-          if (attempt === 0) { await sleep(900); continue; }
-          return { url: null, error: firstErr };
+        if (!res.ok) {
+          if ([401, 403, 429].includes(res.status) && i + 1 < keys.length) continue;
+          throw new Error(res.status === 429 ? 'quota' : `tts-${res.status}`);
         }
-        if (!res.ok) return { url: null, error: new Error(`tts-${res.status}`) };
         const json = await res.json();
-        const parts = (json && json.candidates && json.candidates[0]
-          && json.candidates[0].content && json.candidates[0].content.parts) || [];
-        const inline = parts.map(p => p && p.inlineData).find(d => d && d.data);
-        if (!inline) return { url: null, error: new Error('no-audio') };
-        const url = pcmToWavUrl(base64ToBytes(inline.data), GEM_TTS_RATE);
-        if (my !== voiceSession || !S.open) {
-          try { URL.revokeObjectURL(url); } catch { /* ignore */ }
-          return { url: null };
-        }
-        return { url };
-      } catch (err) {
-        clearTimeout(timer);
-        const wrapped = err && err.name === 'AbortError' ? new Error('timeout') : err;
-        firstErr = firstErr || wrapped;
-        if (attempt === 0 && S.open && my === voiceSession) { await sleep(700); continue; }
-        return { url: null, error: firstErr };
-      } finally {
-        clearTimeout(timer);
-        ttsRequests.delete(controller);
-      }
+        if (!S.open || my !== voiceSession) return { cancelled: true };
+        const data = json.candidates?.[0]?.content?.parts?.find(p => p.inlineData?.data)?.inlineData;
+        if (!data) throw new Error('no-audio');
+        return { audio: decodeSpeech(data) };
+      } catch (error) {
+        return { error: error.name === 'AbortError' ? new Error('timeout') : error };
+      } finally { clearTimeout(timer); ttsRequests.delete(controller); }
     }
-    return { url: null, error: firstErr };
+    return { error: new Error('quota') };
   }
 
-  /** N items through fn, at most `n` in flight. Results stay in order. */
-  async function mapPool(items, n, fn) {
-    const out = new Array(items.length).fill(null);
-    let at = 0;
-    const workers = Array.from({ length: Math.min(n, items.length) }, async () => {
-      while (at < items.length) {
-        const i = at++;
-        out[i] = await fn(i);
-      }
-    });
-    await Promise.all(workers);
-    return out;
+  function stopPlayback() {
+    const source = playbackSource;
+    playbackSource = null;
+    if (source) { source.onended = null; try { source.stop(); source.disconnect(); } catch { /* already ended */ } }
+    if (playbackSettle) { const done = playbackSettle; playbackSettle = null; done(false); }
   }
-
-  function playOneUrl(url, my) {
+  async function playSpeech(audio, my) {
+    if (!actx || actx.state !== 'running') throw new Error('play-blocked');
+    if (!S.open || my !== voiceSession) return false;
+    const buffer = actx.createBuffer(1, audio.samples.length, audio.rate);
+    buffer.copyToChannel(audio.samples, 0);
+    const source = actx.createBufferSource();
+    source.buffer = buffer;
+    source.playbackRate.value = settings.rate;
+    source.connect(actx.destination);
+    playbackSource = source;
     return new Promise((resolve, reject) => {
-      stopGemini(); // clears any previous line (settles it by hand)
-      if (my !== voiceSession || !S.open) return resolve(false);
-      const audio = new Audio(url);
-      gemAudio = audio;
-      gemSettle = value => {
-        gemSettle = null;
-        if (gemAudio === audio) gemAudio = null;
-        resolve(value);
+      let settled = false;
+      let timer;
+      const finish = (played, error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        source.onended = null;
+        try { source.disconnect(); } catch { /* released */ }
+        if (playbackSource === source) playbackSource = null;
+        if (playbackSettle === finish) playbackSettle = null;
+        error ? reject(error) : resolve(played);
       };
-      audio.playbackRate = settings.rate;
-      setMode('speaking');
-      audio.onended = () => {
-        const s = gemSettle;
-        gemSettle = null;
-        if (gemAudio === audio) gemAudio = null;
-        if (s) s(true); else resolve(true);
-      };
-      audio.onerror = () => { gemSettle = null; reject(new Error('play-failed')); };
-      const play = audio.play();
-      if (play && play.catch) play.catch(() => { gemSettle = null; reject(new Error('play-blocked')); });
+      playbackSettle = finish;
+      source.onended = () => finish(true);
+      try {
+        source.start();
+        setMode('speaking');
+        // onended is the only successful completion. A suspended or stuck audio
+        // device is an error; a watchdog must never silently resume the mic.
+        timer = setTimeout(() => {
+          finish(false, new Error('play-failed'));
+          try { source.stop(); } catch { /* stopped */ }
+        }, (buffer.duration / settings.rate + 5) * 1000);
+      } catch { finish(false, new Error('play-failed')); }
     });
   }
 
-  function dropUrls(results) {
-    (results || []).forEach(r => {
-      if (r && r.url) { try { URL.revokeObjectURL(r.url); } catch { /* ignore */ } }
-    });
-  }
-
-  /**
-   * The speed workaround: every sentence fetches at once (3 in flight), and
-   * sentence 1 starts playing the moment IT lands — the rest arrive while it
-   * talks. A 3-sentence answer costs ~1 sentence of waiting, not 3.
-   */
-  async function speakGeminiParallel(text, my) {
-    const sentences = chunkForSpeech(speakable(text)).slice(0, 6);
-    if (!sentences.length) return false;
-    const key = gemKey();
-    if (!key) throw new Error('no-key');
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new Error('offline');
-    const style = GEM_VOICE_STYLE;
-
-    // One full pass: fetch (2 in flight — kinder to the per-minute quota
-    // than 3) and play in order. A second pass runs only on TOTAL failure,
-    // so a lone dead sentence never doubles the quota burn.
-    const runOnce = async () => {
-      const results = new Array(sentences.length).fill(null);
-      const fetching = mapPool(sentences, 2, async i => {
-        results[i] = await fetchSentenceAudio(sentences[i], style, key, my);
-      });
-
-      let playedAny = false;
-      let firstErr = null;
-      for (let i = 0; i < sentences.length; i++) {
-        while (results[i] === null) {
-          if (my !== voiceSession || !S.open) { dropUrls(results); return { playedAny, firstErr }; }
-          await sleep(120);
-        }
-        const r = results[i];
-        if (!r.url) {
-          if (r.error && !firstErr) firstErr = r.error;
-          continue; // a dead sentence is skipped, not fatal
-        }
-        if (my !== voiceSession || !S.open) { dropUrls(results); return { playedAny, firstErr }; }
-        try {
-          if (await playOneUrl(r.url, my)) playedAny = true;
-        } catch (err) {
-          if (!firstErr) firstErr = err;
-          try { URL.revokeObjectURL(r.url); } catch { /* ignore */ }
-          // A blocked play means the device refuses audio — no point trying more.
-          if (err && (err.message === 'play-blocked' || err.message === 'play-failed')) break;
-          continue;
-        }
-        try { URL.revokeObjectURL(r.url); } catch { /* ignore */ }
-        if (my !== voiceSession || !S.open) return { playedAny, firstErr };
-      }
-      await fetching;
-      dropUrls(results);
-      return { playedAny, firstErr };
-    };
-
-    let out = await runOnce();
-    // Second chance: quota windows and hiccups clear in seconds, and a
-    // text-only reply is the worst outcome — silence with words on screen.
-    if (!out.playedAny && my === voiceSession && S.open) {
-      await sleep(2000);
-      if (my === voiceSession && S.open) out = await runOnce();
+  async function speakChunks(text, my) {
+    const chunks = chunkForSpeech(text);
+    if (!chunks.length) throw new Error('no-audio');
+    let next = fetchSentenceAudio(chunks[0], my);
+    for (let i = 0; i < chunks.length; i++) {
+      const result = await next;
+      if (!S.open || my !== voiceSession || result.cancelled) return false;
+      if (result.error) throw result.error;
+      // Only one chunk ahead; quota-friendly, no polling delay or repeat passes.
+      next = i + 1 < chunks.length ? fetchSentenceAudio(chunks[i + 1], my) : null;
+      if (!await playSpeech(result.audio, my)) return false;
     }
-    if (!out.playedAny) throw out.firstErr || new Error('no-audio');
     return true;
   }
-
-  // Bumped to abort: every fetch and every play checks it and walks away.
-  let voiceSession = 0;
-
   function stopAllAudio() {
     voiceSession++;
     S.speaking = false;
     ttsRequests.forEach(controller => controller.abort());
     ttsRequests.clear();
-    stopGemini();
+    stopPlayback();
     if (cancelSpeech) { cancelSpeech(); cancelSpeech = null; }
   }
-
   async function speak(text) {
     S.speaking = true;
     setMode('thinking', 'Preparing voice…');
     const my = ++voiceSession;
-    // A stuck line (plays never, fails never) must never wedge the loop:
-    // cap it, cut the audio, move on.
-    let timer = 0;
     let cancel;
     const interrupted = new Promise(resolve => { cancel = () => resolve(false); cancelSpeech = cancel; });
-    const cap = new Promise((_, reject) => {
-      timer = setTimeout(() => {
-        if (my !== voiceSession) return;
-        reject(new Error('timeout'));
-        stopAllAudio();
-      }, 60000);
-    });
     try {
-      await Promise.race([speakGeminiParallel(text, my), cap, interrupted]);
-      return true;
+      return await Promise.race([speakChunks(text, my), interrupted]);
     } finally {
-      clearTimeout(timer);
       if (cancelSpeech === cancel) cancelSpeech = null;
-      if (my === voiceSession) S.speaking = false;
+      if (my === voiceSession) {
+        S.speaking = false;
+        ttsRequests.forEach(controller => controller.abort());
+        ttsRequests.clear();
+      }
     }
   }
-
   function interrupt() {
     stopAllAudio();
-    S.speaking = false;
-    if (S.open && !S.busy) {
-      setMode('listening');
-      startListening();
-    }
+    if (S.open && !S.busy && !S.muted) startListening();
   }
 
   // One capture owner per turn. Stopping waits for MediaRecorder's final data
@@ -888,11 +718,14 @@
       idle: 'Tap the mic to talk',
       transcribing: 'Hearing you…',
       reviewing: 'Check what I heard',
-      listening: 'Listening…',
+      listening: 'I’m listening',
       thinking: 'Thinking…',
-      speaking: 'Speaking… tap orb to cut in',
+      speaking: 'Sage is speaking',
     }[mode] || 'Voice';
     if (e.state) e.state.textContent = label;
+    const instruction = $('sageVoiceInstruction');
+    if (instruction) instruction.textContent = { listening: 'Speak naturally. Pause when you’re done.', thinking: 'You’ll hear the reply as soon as it’s ready.', transcribing: 'Catching every word.', speaking: 'Tap the orb to interrupt.', reviewing: 'Make sure these are your words.', idle: 'Take your time. I’m here.' }[mode] || '';
+    if (e.orb) e.orb.setAttribute('aria-label', mode === 'speaking' ? 'Interrupt Sage' : mode === 'listening' ? 'Finish speaking and send' : S.lastSaid ? 'Replay Sage’s reply' : 'Sage voice orb');
     paintMic();
   }
 
@@ -987,11 +820,30 @@
   }
 
   function audioProblem(err) {
-    const m = err && err.message;
-    if (m === 'no-key') return 'Her voice needs a Gemini key — add one in settings.';
-    if (m === 'quota') return 'Her voice quota ran dry — tap her to retry.';
-    if (m === 'offline') return 'You are offline, so her voice cannot load.';
-    return 'Her voice failed to load — tap her to try again.';
+    if (err?.message === 'quota') return 'Voice quota reached. Try again shortly.';
+    if (err?.message === 'play-blocked') return 'Sound is blocked. Tap Play reply to enable audio.';
+    if (err?.message === 'silent-audio') return 'The voice service returned silence. Tap Play reply to retry.';
+    if (err?.message === 'no-key') return 'A Gemini key is needed for spoken replies.';
+    return 'The reply could not play. Tap Play reply to retry.';
+  }
+  async function deliverReply(text, owner) {
+    S.lastSaid = text;
+    $('sageVoiceReplay').hidden = true;
+    try {
+      const completed = await speak(text);
+      if (!current(owner)) return;
+      // An explicit interruption also ends the reply, but never a playback error.
+      S.lastSaid = null;
+      S.busy = false;
+      setMode('idle');
+      if (!S.muted) startListening();
+      return completed;
+    } catch (err) {
+      if (!current(owner)) return;
+      S.busy = false;
+      pauseListening(audioProblem(err));
+      $('sageVoiceReplay').hidden = false;
+    }
   }
 
   /**
@@ -1049,7 +901,8 @@
     try {
       result = await AI.askSage(said, {
         history,
-        maxTokens: 450, // spoken replies are short; the ceiling is latency
+        voice: true,
+        maxTokens: 240, // spoken replies are short; the ceiling is latency
         onTool: name => {
           if (S.open && owner === S.session) setActivity(name);
         },
@@ -1065,14 +918,7 @@
       setHint(line);
       addLine('her', line);
       setActivity(null);
-      S.lastSaid = line;
-      await speak(line).then(() => { if (current(owner)) S.lastSaid = null; }).catch(err => {
-        if (current(owner)) setHint(audioProblem(err));
-      });
-      if (!S.open || owner !== S.session) return;
-      S.busy = false;
-      setMode('idle');
-      if (S.open && !S.muted) startListening();
+      await deliverReply(line, owner);
       return;
     }
 
@@ -1088,16 +934,7 @@
     addLine('her', result.text);
     setHint('');
     setActivity(null);
-    S.lastSaid = result.text;
-    await speak(result.text).then(() => { if (current(owner)) S.lastSaid = null; }).catch(err => {
-      if (current(owner)) setHint(audioProblem(err));
-    });
-    if (!S.open || owner !== S.session) return;
-    S.busy = false;
-    // Resume only when the session is still open and the user has not muted it.
-    setMode('idle');
-    if (S.lastSaid) pauseListening('Audio couldn’t play. Tap the orb to retry, or the mic to continue.');
-    else if (S.open && !S.muted) startListening();
+    await deliverReply(result.text, owner);
   }
 
   // ════════════════════════════════════════════════════════════════════
@@ -1112,10 +949,14 @@
     S.session++;
     restarts = 0;
     S.muted = false;
-    S.sttMode = settings.recognition !== 'browser' && audioCaptureSupported() && gemKey() ? 'gemini' : 'web';
+    S.sttMode = settings.recognition === 'browser' ? 'web' : 'gemini';
+    const method = $('sageVoiceMethod');
+    if (method) method.textContent = S.sttMode === 'gemini' ? 'Tamil + Tanglish · Gemini' : (settings.sttLang === 'ta-IN' ? 'Tamil · Browser' : 'English · Browser');
+    e.overlay.setAttribute('data-recognition', S.sttMode);
     S.lastSaid = null;
     S.reviewing = false;
     $('sageVoiceReview').hidden = true;
+    $('sageVoiceReplay').hidden = true;
     S.busy = false;
     S.finalText = '';
     S.speechSeen = false;
@@ -1130,8 +971,11 @@
     unlockAudio(); // synchronous: this tap is the gesture that allows sound
 
     // The next capture starts after each completed spoken reply.
-    setMode('listening');
-    startListening();
+    if (S.sttMode === 'gemini' && !gemKey()) {
+      pauseListening('Add or unlock your Gemini key in Sage settings to use Tamil + Tanglish audio.');
+    } else if (S.sttMode === 'gemini' && !audioCaptureSupported()) {
+      pauseListening('Audio recording is unavailable in this browser. Choose Browser recognition with Tamil in Sage settings.');
+    } else { setMode('listening'); startListening(); }
     return true;
   }
 
@@ -1217,18 +1061,8 @@
         }
         if (S.busy || S.transcribing || S.reviewing) return;
         if (S.lastSaid) {
-          const owner = S.session;
-          const retry = S.lastSaid;
           S.busy = true;
-          setHint('');
-          speak(retry).then(() => { if (current(owner)) S.lastSaid = null; }).catch(err => {
-            if (current(owner)) setHint(audioProblem(err));
-          }).then(() => {
-            if (!current(owner)) return;
-            S.busy = false;
-            setMode('idle');
-            if (!S.muted) startListening();
-          });
+          deliverReply(S.lastSaid, S.session);
           return;
         }
         if (S.mode === 'idle' && !S.muted) startListening();
@@ -1248,6 +1082,12 @@
         paintMic();
       });
     }
+    $('sageVoiceReplay')?.addEventListener('click', () => {
+      if (!S.open || S.busy || !S.lastSaid) return;
+      unlockAudio();
+      S.busy = true;
+      deliverReply(S.lastSaid, S.session);
+    });
     $('sageVoiceReview')?.addEventListener('submit', ev => {
       ev.preventDefault();
       const text = $('sageVoiceDraft').value.trim();

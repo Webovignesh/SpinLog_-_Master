@@ -57,7 +57,8 @@ const FILES = [...html.matchAll(/<script\b([^>]*)>/g)]
   .map(attrs => (attrs.match(/\bsrc\s*=\s*["']([^"']+)["']/) || [])[1])
   .filter(Boolean)
   // Ours only. The Supabase client comes off a CDN and is stubbed below.
-  .filter(src => !/^https?:/.test(src));
+  .filter(src => !/^https?:/.test(src))
+  .map(src => src.split('?')[0]);
 
 if (!FILES.length) {
   console.error('✗ no classic scripts found in index.html — has the markup changed?');

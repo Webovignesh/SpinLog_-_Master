@@ -3132,7 +3132,8 @@
       recallFor: asked,
       // The language line goes LAST, after the chat rules, because personaFor puts
       // the state block at the end and the end is what she weighs most.
-      state: [held, contextBlock(context), CHAT_RULES, languageDirective(asked)]
+      state: [held, contextBlock(context), CHAT_RULES, languageDirective(asked),
+        opts.voice ? 'This is a spoken voice conversation. Answer directly in one or two short sentences unless detail is essential. No markdown, emojis, greeting preamble or read-out of tool activity. Preserve important numbers and facts.' : null]
         .filter(Boolean).join('\n\n'),
     });
 

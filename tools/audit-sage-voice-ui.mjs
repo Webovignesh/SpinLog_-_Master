@@ -16,13 +16,21 @@ const root = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const output = process.env.SAGE_SCREENSHOT_DIR || '/tmp/sage-voice-preview';
 await mkdir(output, { recursive: true });
 const server = http.createServer(async (req,res) => {
+  // Simulate an installed older worker retaining exact unversioned asset URLs.
+  if (req.url === '/stale-worker.js') {
+    res.setHeader('Content-Type','text/javascript');
+    res.end(`self.addEventListener('install',()=>self.skipWaiting());
+      self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));
+      self.addEventListener('fetch',e=>e.respondWith(caches.open('old-voice-assets').then(async c=>(await c.match(e.request)) || fetch(e.request))));`);
+    return;
+  }
   const rel = decodeURIComponent(req.url.split('?')[0]).replace(/^\/+/, '') || 'index.html';
   const filename = path.resolve(root,rel);
   if (!filename.startsWith(root + '/')) { res.writeHead(403).end(); return; }
   try {
     let content = await readFile(filename);
     if (rel === 'index.html') content = content.toString().replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'')
-      .replace('</body>','<script src="src/js/sage-voice.js"></script></body>');
+      .replace('</body>','<script src="src/js/sage-voice.js?v=1.9.22"></script></body>');
     res.setHeader('Content-Type', ({'.html':'text/html','.js':'text/javascript','.css':'text/css','.woff2':'font/woff2','.webp':'image/webp'})[path.extname(filename)] || 'application/octet-stream');
     res.end(content);
   } catch {res.writeHead(404).end();}
@@ -40,10 +48,20 @@ try {
     let history = [];
     window.dkCloudStore = {chatHistory:()=>history.slice(),setChat:rows=>history=rows};
     window.SageAI = {availableKeys:()=>[{key:'test-only'}],askSage:async()=>({ok:true,text:'சரி bro, உன் Duke-க்கு next service எப்போன்னு பார்க்கலாம். Last service reading சொல்லு.'})};
-    window.fetch = async()=>({ok:true,json:async()=>({candidates:[{content:{parts:[{inlineData:{data:'AAAAAA=='}}]}}]})});
-    window.Audio = class {play(){setTimeout(()=>this.onended?.(),1);return Promise.resolve()} pause(){} removeAttribute(){}};
+    const samples=new Int16Array(2400); for(let i=0;i<samples.length;i++) samples[i]=Math.sin(i/6)*5000;
+    const speech=btoa(String.fromCharCode(...new Uint8Array(samples.buffer)));
+    window.fetch = async()=>({ok:true,json:async()=>({candidates:[{content:{parts:[{inlineData:{data:speech,mimeType:'audio/L16;rate=24000'}}]}}]})});
     window.SpeechRecognition = class {start(){} abort(){} stop(){}};
     localStorage.setItem('sage_voice_recognition','browser');
+  });
+  await page.goto(base,{waitUntil:'domcontentloaded'});
+  await page.evaluate(async()=>{
+    const cache=await caches.open('old-voice-assets');
+    await cache.put('/src/css/styles.css',new Response('.sage-voice-core { display:none!important; }',{headers:{'Content-Type':'text/css'}}));
+    await cache.put('/src/js/sage-voice.js',new Response('window.SageVoice=undefined;',{headers:{'Content-Type':'text/javascript'}}));
+    await navigator.serviceWorker.register('/stale-worker.js');
+    await navigator.serviceWorker.ready;
+    if (!navigator.serviceWorker.controller) await new Promise(resolve=>navigator.serviceWorker.addEventListener('controllerchange',resolve,{once:true}));
   });
   for (const [name,width,height] of [['desktop',1280,900],['mobile',390,844],['small',320,568]]) {
     await page.setViewportSize({width,height});
@@ -53,6 +71,10 @@ try {
       document.querySelector('#sage').style.display='block';
     });
     await page.locator('#sageChatMic').click();
+    assert.equal(await page.locator('.sage-voice-core').evaluate(el=>getComputedStyle(el).display),'block','new orb CSS bypasses stale unversioned cache');
+    for (const asset of ['src/css/styles.css','src/css/home.css','src/css/sage-voice.css','src/js/sage-voice.js']) {
+      assert.ok(await page.evaluate(asset=>[...document.querySelectorAll('link[href],script[src]')].some(el=>(el.href||el.src).endsWith(asset+'?v=1.9.22')),asset),'voice assets use versioned URLs');
+    }
     await page.evaluate(async()=>{
       await SageVoice.sendVoiceText('Bro, நேத்து petrol போட்டேன்.');
       await SageVoice.sendVoiceText('அடுத்த service எப்போ பண்ணணும்?');
@@ -85,6 +107,28 @@ try {
     await page.screenshot({path:path.join(output,`sage-settings-${name}.png`)});
     console.log(`✓ ${name}: four turns, viewport, controls, keyboard focus and settings font`);
   }
+  // Failure and correction controls must also fit on the smallest viewport.
+  await page.evaluate(()=>{const modal=document.getElementById('sageSettingsModal');modal.classList.remove('sl-modal--open');modal.hidden=true;modal.setAttribute('aria-hidden','true');});
+  await page.locator('#sageChatMic').click();
+  await page.evaluate(()=>{
+    window.fetch=async()=>({ok:true,json:async()=>({candidates:[{content:{parts:[{inlineData:{data:'AAAAAA==',mimeType:'audio/L16;rate=24000'}}]}}]})});
+    return SageVoice.sendVoiceText('Try an audio failure');
+  });
+  await page.locator('#sageVoiceReplay').waitFor({state:'visible'});
+  await page.waitForTimeout(300);
+  for (const selector of ['#sageVoiceReplay','#sageVoiceEnd','#sageVoiceMic']) {
+    const b=await page.locator(selector).boundingBox();
+    assert.ok(b.x>=0 && b.x+b.width<=320 && b.y+b.height<=568,`${selector} fits with replay`);
+  }
+  await page.screenshot({path:path.join(output,'sage-voice-replay-small.png')});
+  await page.evaluate(()=>{
+    document.getElementById('sageVoiceReview').hidden=false;
+    document.getElementById('sageVoiceDraft').value='நாளைக்கு service போகணும்';
+  });
+  const submit=await page.locator('#sageVoiceReview button[type="submit"]').boundingBox();
+  assert.ok(submit.y>=0 && submit.y+submit.height<=568,'transcript review controls fit');
+  await page.screenshot({path:path.join(output,'sage-voice-review-small.png')});
+  console.log('✓ Simulated stale worker cache bypassed; audio failure and transcript review controls fit');
   assert.deepEqual(errors,[]);
   console.log(`✓ No voice UI runtime errors. Screenshots: ${output}`);
 } finally { await browser?.close(); server.close(); }
