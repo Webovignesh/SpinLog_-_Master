@@ -44,6 +44,7 @@
     mode: 'idle',      // idle | listening | thinking | speaking
     session: 0,        // bumped on close; stale async work aborts on mismatch
     muted: false,
+    resumeAfterReply: false, // automatic audio hold; never overrides a manual mute
     recognising: false,
     speaking: false,   // TTS audio actually playing
     transcribing: false,
@@ -458,8 +459,11 @@
           }
         }
         // Bytes alone are not speech: silence also produces compressed data.
-        if (!take.heard && now - take.started >= 15000) {
-          pauseListening('No speech detected. Tap the mic to try again, then tap the orb to send if your voice is quiet.');
+        if (!take.heard && !take.loudAt && now - take.started >= 15000) {
+          // Bound the silent buffer, not the hands-free session. Discard it
+          // locally and keep the same microphone stream enabled.
+          cancelGeminiListen();
+          startListening();
         } else if (now - take.started >= 45000) finishGeminiListen(true);
       }, 100);
       return true;
@@ -590,7 +594,12 @@
   }
   function acceptTranscript(result) {
     const text = String(result.transcript || '').trim();
-    if (!text) { pauseListening('I didn’t catch clear speech. Tap the mic and try again.'); return; }
+    if (!text) {
+      // An empty transcript is not a microphone failure. Wait for the next
+      // utterance; VAD still prevents silent recordings from being uploaded.
+      if (canListen()) startListening();
+      return;
+    }
     if (settings.review || result.unclear) {
       S.reviewing = true;
       $('sageVoiceReview').hidden = false;
@@ -616,6 +625,8 @@
     let final = '';
     let interim = '';
     let uncertain = false;
+    let silentEnd = false;
+    const startedAt = Date.now();
     const valid = () => current(owner) && rec === r && canListen();
     const submit = () => {
       if (!valid()) return;
@@ -651,11 +662,16 @@
       }
       if (final.trim()) { submit(); return; }
       rec = null;
+      // Browsers end recognition after normal periods of silence. Those ends
+      // are healthy; only repeated immediate failures consume the retry limit.
+      if (silentEnd || Date.now() - startedAt >= 5000) restarts = 0;
       if (++restarts > 4) { pauseListening('Recognition keeps stopping. Tap to retry or choose Tamil + Tanglish in settings.'); return; }
       restartTimer = setTimeout(() => { if (current(owner)) startListening(); }, Math.min(3000, restarts * 500));
     };
     r.onerror = event => {
-      if (!valid() || event.error === 'no-speech' || event.error === 'aborted') return;
+      if (!valid()) return;
+      if (event.error === 'no-speech') { silentEnd = true; return; }
+      if (event.error === 'aborted') return;
       const message = event.error === 'not-allowed' ? 'Allow microphone access, then tap to retry.'
         : event.error === 'language-not-supported' ? 'This browser does not support the selected language. Choose Tamil + Tanglish in settings.'
         : 'Browser recognition failed. Check your connection or choose Tamil + Tanglish in settings.';
@@ -832,6 +848,12 @@
       // An explicit interruption also ends the reply, but never a playback error.
       S.lastSaid = null;
       S.busy = false;
+      if (S.resumeAfterReply) {
+        S.resumeAfterReply = false;
+        S.muted = false;
+        meterStream?.getTracks().forEach(t => { t.enabled = true; });
+        paintMic();
+      }
       setMode('idle');
       setHint(S.muted ? 'Mic off. Tap the mic when you’re ready.' : '');
       if (!S.muted) startListening();
@@ -839,6 +861,7 @@
     } catch (err) {
       if (!current(owner)) return;
       S.busy = false;
+      S.resumeAfterReply = S.resumeAfterReply || !S.muted;
       pauseListening(audioProblem(err));
       $('sageVoiceReplay').hidden = false;
     }
@@ -947,6 +970,7 @@
     S.session++;
     restarts = 0;
     S.muted = false;
+    S.resumeAfterReply = false;
     S.sttMode = settings.recognition === 'browser' ? 'web' : 'gemini';
     const method = $('sageVoiceMethod');
     if (method) method.textContent = S.sttMode === 'gemini' ? `Tamil + Tanglish · ${settings.speed === 'fast' ? 'Fast' : 'Careful'}` : (settings.sttLang === 'ta-IN' ? 'Tamil · Browser' : 'English · Browser');
@@ -1055,6 +1079,7 @@
         }
         if (S.busy || S.transcribing || S.reviewing) return;
         if (S.lastSaid) {
+          stopListening();
           S.busy = true;
           deliverReply(S.lastSaid, S.session);
           return;
@@ -1066,6 +1091,7 @@
       e.mic._wired = true;
       e.mic.addEventListener('click', () => {
         unlockAudio();
+        S.resumeAfterReply = false; // the user's mic choice wins over automatic recovery
         S.muted = !S.muted;
         meterStream?.getTracks().forEach(t => { t.enabled = !S.muted; });
         if (S.muted) {
@@ -1079,6 +1105,7 @@
     $('sageVoiceReplay')?.addEventListener('click', () => {
       if (!S.open || S.busy || !S.lastSaid) return;
       unlockAudio();
+      stopListening();
       S.busy = true;
       deliverReply(S.lastSaid, S.session);
     });
