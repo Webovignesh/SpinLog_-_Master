@@ -203,15 +203,23 @@
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  // Every request goes through this one chain.
+  // Ordinary requests share one chain; voice gets an independent serial lane.
   //
   // The gap above used to be enforced with a bare `lastCallAt` check, which is a
   // race: parallel callers all read the same stale value, all wait the same
   // amount, then fire simultaneously. Pool refresh, the health insight and the
   // chat all start unawaited on app open, so that happened on every load.
   let callQueue = Promise.resolve();
+  let voiceQueue = Promise.resolve();
 
-  function serialize(task) {
+  function serialize(task, voice = false) {
+    // A background request may take 30 seconds. Voice has its own serial lane,
+    // while attemptOnce still reserves the shared start gap and quota checks.
+    if (voice) {
+      const run = voiceQueue.then(task, task);
+      voiceQueue = run.then(() => {}, () => {});
+      return run;
+    }
     const run = callQueue.then(task, task);
     // Swallow here only, so one failure cannot break the chain for everyone else.
     callQueue = run.then(() => {}, () => {});
@@ -1505,7 +1513,7 @@
     // more models that share the same budget. A 503 or a timeout is one model
     // misbehaving, so it moves to the next model on the same key.
     const timeoutMs = opts.timeoutMs || REQUEST_TIMEOUT_MS;
-    const budget = purpose === 'chat' ? MAX_ATTEMPTS_PER_CALL : MAX_AUTO_ATTEMPTS;
+    const budget = opts.voice ? 3 : purpose === 'chat' ? MAX_ATTEMPTS_PER_CALL : MAX_AUTO_ATTEMPTS;
     let attempts = 0;
     let fellBack = false;
     let ranDry = false;
@@ -1546,30 +1554,30 @@
         countRequest(purpose);
 
         let body = bodyFor(model, ceiling);
-        let result = await serialize(() => attemptOnce(model, body, entry.key, timeoutMs));
+        let result = await serialize(() => attemptOnce(model, body, entry.key, timeoutMs), opts.voice);
 
         // A 400 while asking for no-thinking means this model does not accept
         // that switch. Remember it and ask again plainly — going quiet over a
         // config flag would be the worst possible outcome.
-        if (result.verdict === 'stop' && result.status === 400 && body.generationConfig.thinkingConfig) {
-          noteThinkingRefused(model);
+        if (result.verdict === 'stop' && result.status === 400 && body.generationConfig.thinkingConfig && attempts < budget) {
+          noteThinkingRefused(body.generationConfig.thinkingConfig.thinkingLevel ? model + ':level' : model);
           attempts++;
           countRequest(purpose);
           body = bodyFor(model, ceiling);
-          result = await serialize(() => attemptOnce(model, body, entry.key, timeoutMs));
+          result = await serialize(() => attemptOnce(model, body, entry.key, timeoutMs), opts.voice);
         }
 
         // A candidate with no text at all and finishReason MAX_TOKENS means the
         // whole ceiling went on reasoning before the first visible word. One
         // retry with real room, rather than falling back to a canned line.
-        if (result.verdict === 'stop' && result.truncated && !grewCeiling && ceiling < HARD_MAX_TOKENS) {
+        if (result.verdict === 'stop' && result.truncated && !grewCeiling && ceiling < HARD_MAX_TOKENS && attempts < budget) {
           grewCeiling = true;
           ceiling = Math.min(HARD_MAX_TOKENS, Math.max(ceiling * 3, 900));
           console.warn(`[SpinLog] ${model} spent its whole budget thinking — retrying with ${ceiling} tokens.`);
           attempts++;
           countRequest(purpose);
           body = bodyFor(model, ceiling);
-          result = await serialize(() => attemptOnce(model, body, entry.key, timeoutMs));
+          result = await serialize(() => attemptOnce(model, body, entry.key, timeoutMs), opts.voice);
         }
 
         if (result.verdict === 'ok') {
@@ -1731,8 +1739,11 @@
           temperature: opts.temperature ?? 1.0,
           maxOutputTokens: ceiling,
         };
-        if (!allowThinking && !thinkingRefused(model)) {
-          generationConfig.thinkingConfig = { thinkingBudget: 0 };
+        const useLevel = opts.voice && /^gemini-3/.test(model);
+        if (!allowThinking && !thinkingRefused(useLevel ? model + ':level' : model)) {
+          generationConfig.thinkingConfig = useLevel
+            ? { thinkingLevel: 'low' }
+            : { thinkingBudget: 0 };
         }
         const body = {
           contents,
@@ -1807,9 +1818,12 @@
    * @returns {Promise<{verdict:string, text?:string, status?:number, message?:string}>}
    */
   async function attemptOnce(model, body, key, timeoutMs) {
-    const since = Date.now() - lastCallAt;
-    if (lastCallAt && since < MIN_CALL_GAP_MS) await sleep(MIN_CALL_GAP_MS - since);
-    lastCallAt = Date.now();
+    // Reserve before awaiting so simultaneous voice/background starts cannot
+    // claim the same slot. Neither lane waits for the other's HTTP response.
+    const now = Date.now();
+    const slot = Math.max(now, lastCallAt ? lastCallAt + MIN_CALL_GAP_MS : now);
+    lastCallAt = slot;
+    if (slot > now) await sleep(slot - now);
 
     const t = withTimeout(timeoutMs);
     try {
@@ -3156,13 +3170,14 @@
       },
       history: [...(opts.history || []).slice(-CHAT_MAX_TURNS), { role: 'user', parts: askParts }],
       temperature: 1.0,
-      // Voice passes a smaller ceiling: spoken replies are a sentence or two,
-      // and a full 1100-token budget is paid for in latency before she starts
-      // talking. Typed chat keeps the default.
+      // Brevity is requested in the voice prompt; the ceiling leaves room for
+      // complete replies and tool arguments, rather than forcing truncation.
       maxOutputTokens: Number(opts.maxTokens) > 0 ? Number(opts.maxTokens) : CHAT_MAX_TOKENS,
       meta,
       // You asked, so this is never rationed against the background allowance.
       purpose: 'chat',
+      voice: opts.voice === true,
+      timeoutMs: opts.voice ? 12000 : undefined,
     });
 
     const raw = turn.ok ? turn.text : null;
