@@ -70,7 +70,7 @@ function harness(options = {}) {
     }
     close() { return Promise.resolve(); }
     createMediaStreamSource() { return { connect() {} }; }
-    createAnalyser() { return { fftSize: 1024, getByteTimeDomainData(data) { data.fill(128); } }; }
+    createAnalyser() { return { fftSize: 1024, getByteTimeDomainData(data) { data.fill(options.loud ? 136 : 128); } }; }
     async decodeAudioData(buffer) { decoded.push(Buffer.from(buffer).toString()); return { duration: 0.1 }; }
   }
   class OfflineAudioContext {
@@ -90,7 +90,7 @@ function harness(options = {}) {
     Blob, DataView, ArrayBuffer, Uint8Array, Float32Array, AbortController, URL: { createObjectURL: () => 'blob:test', revokeObjectURL() {} },
     atob: b64 => Buffer.from(b64, 'base64').toString('binary'),
     localStorage: { getItem: k => storage.get(k) ?? null, setItem: (k,v) => storage.set(k,v) },
-    setTimeout(fn,ms) { const timer = setTimeout(fn,ms); timers.add(timer); return timer; }, clearTimeout,
+    setTimeout(fn,ms) { const timer = setTimeout(fn,options.fastRestarts && ms >= 500 && ms <= 3000 ? 0 : ms); timers.add(timer); return timer; }, clearTimeout,
     setInterval(fn) { const id = Symbol(); intervals.set(id,fn); return id; }, clearInterval: id => intervals.delete(id),
     requestAnimationFrame: () => 1, cancelAnimationFrame() {}, matchMedia: () => ({ matches: true }),
     Date: class extends Date { static now() { return now; } },
@@ -161,13 +161,17 @@ test('latest four turns remain; full conversation stays in history', async () =>
   } finally { h.cleanup(); }
 });
 
-test('silence is discarded without sending bytes to Gemini', async () => {
+test('long silence recycles bounded recordings while the mic stays live without uploads', async () => {
   const h = harness();
   try {
-    await h.open(); h.tick(16000); await delay(20);
+    await h.open();
+    for(let i=0;i<6;i++) {h.tick(16000);await until(()=>h.recordings.length===i+2);}
     assert.equal(h.requests.length,0);
-    assert.equal(h.nodes.get('sageVoiceMic').getAttribute('aria-pressed'),'true');
-    assert.equal(h.streams[0].getTracks()[0].enabled,false);
+    assert.equal(h.nodes.get('sageVoiceMic').getAttribute('aria-pressed'),'false');
+    assert.equal(h.streams.length,1);
+    assert.equal(h.streams[0].getTracks()[0].enabled,true);
+    assert.equal(h.recordings.at(-1).state,'recording');
+    assert.ok(h.recordings.slice(0,-1).every(r=>r.state==='inactive'));
   } finally { h.cleanup(); }
 });
 
@@ -387,7 +391,7 @@ test('fast recognition and a 900ms pause are defaults; careful preferences remai
   } finally {h.cleanup();careful.cleanup();}
 });
 
-test('a successful replay clears the obsolete playback failure hint', async () => {
+test('a successful replay clears the failure hint and resumes hands-free listening', async () => {
   const options={silentAudio:true}, h=harness(options);
   try {
     await h.open(); await h.root.SageVoice.sendVoiceText('reply');
@@ -395,7 +399,86 @@ test('a successful replay clears the obsolete playback failure hint', async () =
     options.silentAudio=false;
     h.nodes.get('sageVoiceReplay').emit('click');
     await until(()=>h.playback.length===1);
-    await until(()=>h.nodes.get('sageVoiceHint').textContent.includes('Mic off'));
+    await until(()=>h.recordings.length===2);
+    assert.equal(h.nodes.get('sageVoiceMic').getAttribute('aria-pressed'),'false');
+    assert.doesNotMatch(h.nodes.get('sageVoiceHint').textContent,/Play reply/);
     assert.equal(h.nodes.get('sageVoiceReplay').hidden,true);
+  } finally {h.cleanup();}
+});
+
+
+test('empty transcription returns to listening instead of muting',async()=>{
+  const h=harness({transcript:{transcript:'',unclear:false}});
+  try {
+    await h.open();await h.finish();await until(()=>h.recordings.length===2);
+    assert.equal(h.asks.length,0);
+    assert.equal(h.requests.length,1);
+    assert.equal(h.nodes.get('sageVoiceMic').getAttribute('aria-pressed'),'false');
+  } finally {h.cleanup();}
+});
+
+for(const action of ['mute','close']) {
+  test(`${action} during silent-buffer rollover prevents automatic reopening`,async()=>{
+    const h=harness();
+    try {
+      await h.open();h.tick(16000);
+      if(action==='mute') h.nodes.get('sageVoiceMic').emit('click');
+      else h.root.SageVoice.close();
+      await delay(30);
+      assert.equal(h.recordings.length,1);
+      assert.equal(h.recordings[0].state,'inactive');
+      assert.equal(h.requests.length,0);
+    } finally {h.cleanup();}
+  });
+}
+
+test('browser no-speech timeouts keep rearming beyond the failure retry limit',async()=>{
+  const h=harness({fastRestarts:true,storage:{sage_voice_recognition:'browser'}});
+  try {
+    await h.open();
+    for(let i=0;i<7;i++) {
+      h.recognition[i].onerror({error:'no-speech'});
+      h.recognition[i].onend();
+      await until(()=>h.recognition.length===i+2);
+    }
+    assert.equal(h.nodes.get('sageVoiceMic').getAttribute('aria-pressed'),'false');
+    assert.equal(h.asks.length,0);
+    h.recognition.at(-1).onend();h.root.SageVoice.close();await delay(20);
+    assert.equal(h.recognition.length,8);
+  } finally {h.cleanup();}
+});
+
+test('successful playback retry preserves an explicit manual mute',async()=>{
+  const options={silentAudio:true},h=harness(options);
+  try {
+    await h.open();h.nodes.get('sageVoiceMic').emit('click');
+    await h.root.SageVoice.sendVoiceText('reply while muted');
+    options.silentAudio=false;h.nodes.get('sageVoiceReplay').emit('click');
+    await until(()=>h.playback.length===1);await delay(20);
+    assert.equal(h.recordings.length,1);
+    assert.equal(h.nodes.get('sageVoiceMic').getAttribute('aria-pressed'),'true');
+  } finally {h.cleanup();}
+});
+
+test('replay stops a manually resumed recording before audio and restarts after it ends',async()=>{
+  const options={silentAudio:true,holdPlayback:true},h=harness(options);
+  try {
+    await h.open();await h.root.SageVoice.sendVoiceText('reply');
+    h.nodes.get('sageVoiceMic').emit('click');await until(()=>h.recordings.length===2);
+    options.silentAudio=false;h.nodes.get('sageVoiceReplay').emit('click');
+    await until(()=>h.playback.length===1);
+    assert.equal(h.recordings[1].state,'inactive');
+    h.playback[0].end();await until(()=>h.recordings.length===3);
+  } finally {h.cleanup();}
+});
+
+
+test('speech beginning at the silent-buffer deadline is not discarded',async()=>{
+  const h=harness({loud:true});
+  try {
+    await h.open();h.tick(15000);await delay(20);
+    assert.equal(h.recordings.length,1);
+    assert.equal(h.recordings[0].state,'recording');
+    h.tick(200);assert.equal(h.recordings.length,1);
   } finally {h.cleanup();}
 });

@@ -4,7 +4,7 @@
 // Version segment matches <meta name="version"> in index.html. That meta is what the
 // screen shows; this is what is actually cached. If they disagree, the number on the
 // home chip is a lie about which build is running.
-const CACHE_NAME = 'spinlog-cache-v1.9.23-voice15';
+const CACHE_NAME = 'spinlog-cache-v1.9.24-voice16';
 const OFFLINE_URL = 'index.html';
 
 // The scheduler is shared with the page so foreground and background agree on
@@ -17,9 +17,9 @@ importScripts('./src/js/sage-scheduler.js');
 // three.core.js must be cached too — three.module.min.js imports it by name.
 const PRECACHE = [
   OFFLINE_URL,
-  './src/css/styles.css?v=1.9.23',
-  './src/css/home.css?v=1.9.23',
-  './src/css/sage-voice.css?v=1.9.23',
+  './src/css/styles.css?v=1.9.24',
+  './src/css/home.css?v=1.9.24',
+  './src/css/sage-voice.css?v=1.9.24',
   './src/js/script.js',
   './src/js/cloud-store.js',
   './src/js/sage-confirm.js',
@@ -32,11 +32,11 @@ const PRECACHE = [
   './src/js/sage-scheduler.js',
   './src/js/sage-memory.js',
   './src/js/sage-tools.js',
-  './src/js/sage-ai.js?v=1.9.23',
+  './src/js/sage-ai.js?v=1.9.24',
   './src/js/sage-keyvault.js',
   './src/js/sage-autofill.js',
   './src/js/sage-ui.js',
-  './src/js/sage-voice.js?v=1.9.23',
+  './src/js/sage-voice.js?v=1.9.24',
   './src/js/notifications.js',
   './src/js/home3d.js',
   './src/js/docs3d.js',

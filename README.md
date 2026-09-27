@@ -881,7 +881,7 @@ gone rather than left as links that go nowhere. What was in them that still matt
   back to localStorage then to the `data-due` values in `index.html`; Sage's memory
   falls back to localStorage; the key ring stays on the device.
 
-## Sage voice — v1.9.23
+## Sage voice — v1.9.24
 
 Open **Talk to Sage** inside the chat card. The fullscreen voice room uses a fluid amber orb (blue while speaking) and
 keeps the latest four speaker turns on screen, moving older turns out as new ones
@@ -906,8 +906,9 @@ In **Sage settings → Voice → Speaking & listening**:
   instructions and transcript-review safeguards; compare accuracy with your own audio.
 - The default pause is 0.9 seconds; a saved **Relaxed · 2.2 seconds** preference
   is preserved. Audio turns are capped at
-  45 seconds; 15 seconds without detected speech pauses the microphone without
-  uploading silence. Tap the orb to submit quiet speech manually.
+  45 seconds; silent recording buffers are discarded locally every 15 seconds
+  while the microphone keeps listening. Empty transcripts and normal browser
+  silence timeouts also rearm listening without uploading silence. Tap the orb to submit quiet speech manually.
 - Enable **Let me check every transcript before sending** to edit each transcript.
   Gemini-marked unclear speech and low-confidence browser results require review
   even when that preference is off. These signals are imperfect; they cannot
@@ -915,7 +916,8 @@ In **Sage settings → Voice → Speaking & listening**:
 
 Preferences save immediately and apply to the next voice session. Hands-free
 capture resumes only after the audio source finishes (or you interrupt it).
-Blocked or silent audio pauses capture and offers **Play reply**. Permission, recording, transcription and quota
+Blocked or silent audio pauses capture and offers **Play reply**. A successful
+retry resumes listening unless you manually muted the microphone. Permission, recording, transcription and quota
 failures pause with a retry action. Muting disables the shared microphone tracks;
 closing the room or backgrounding the page releases them and cancels outstanding
 voice audio requests. Results from a closed session cannot appear in a new one.
