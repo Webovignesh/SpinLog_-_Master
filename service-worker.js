@@ -4,22 +4,22 @@
 // Version segment matches <meta name="version"> in index.html. That meta is what the
 // screen shows; this is what is actually cached. If they disagree, the number on the
 // home chip is a lie about which build is running.
-const CACHE_NAME = 'spinlog-cache-v1.9.24-voice16';
+const CACHE_NAME = 'spinlog-cache-v1.9.25-voice17';
 const OFFLINE_URL = 'index.html';
 
 // The scheduler is shared with the page so foreground and background agree on
 // one queue, one daily cap and one set of cooldowns. importScripts is
 // synchronous, so SageScheduler is ready before any event handler runs.
-importScripts('./src/js/sage-scheduler.js');
+importScripts('./src/js/sage-scheduler.js?v=1.9.25');
 
 // three.js is vendored rather than pulled from a CDN specifically so the ambient
 // backdrop survives offline loads. Since r167 the module build is split, so
 // three.core.js must be cached too — three.module.min.js imports it by name.
 const PRECACHE = [
   OFFLINE_URL,
-  './src/css/styles.css?v=1.9.24',
-  './src/css/home.css?v=1.9.24',
-  './src/css/sage-voice.css?v=1.9.24',
+  './src/css/styles.css?v=1.9.25',
+  './src/css/home.css?v=1.9.25',
+  './src/css/sage-voice.css?v=1.9.25',
   './src/js/script.js',
   './src/js/cloud-store.js',
   './src/js/sage-confirm.js',
@@ -29,15 +29,15 @@ const PRECACHE = [
   // serve the minority of entries with more than one file, is the wrong trade. The
   // network-first rule caches it on first use instead.
   './src/js/bill-merge.js',
-  './src/js/sage-scheduler.js',
-  './src/js/sage-memory.js',
+  './src/js/sage-scheduler.js?v=1.9.25',
+  './src/js/sage-memory.js?v=1.9.25',
   './src/js/sage-tools.js',
-  './src/js/sage-ai.js?v=1.9.24',
+  './src/js/sage-ai.js?v=1.9.25',
   './src/js/sage-keyvault.js',
   './src/js/sage-autofill.js',
-  './src/js/sage-ui.js',
-  './src/js/sage-voice.js?v=1.9.24',
-  './src/js/notifications.js',
+  './src/js/sage-ui.js?v=1.9.25',
+  './src/js/sage-voice.js?v=1.9.25',
+  './src/js/notifications.js?v=1.9.25',
   './src/js/home3d.js',
   './src/js/docs3d.js',
   './vendor/three.module.min.js',
@@ -351,10 +351,10 @@ async function fireBgNotif(category, line, opts) {
     // Quiet-hours emergencies land silently rather than buzzing at 3am.
     vibrate: whisper ? [0] : [120, 60, 120],
     silent: !!whisper,
-    tag: `sage-${category}-${now}`,
+    tag: opts?.entry ? self.SageScheduler.notificationTag(opts.entry) : `sage-${category}-${now}`,
     renotify: false,
     timestamp: now,
-    data: { category, sentAt: now, source: 'background', url: './index.html' },
+    data: { category, planId: opts?.entry ? self.SageScheduler.planId(opts.entry) : null, sentAt: now, source: 'background', url: './index.html' },
     actions: [
       { action: 'open', title: 'Open SpinLog' },
       { action: 'dismiss', title: 'Later' },
@@ -370,13 +370,12 @@ async function fireBgNotif(category, line, opts) {
 async function pumpScheduler() {
   const S = self.SageScheduler;
   if (!S) return false;
-  const decision = await S.drain();
-  if (!decision) return false;
-  const shown = await fireBgNotif(decision.entry.category, decision.line, {
-    whisper: decision.mood === 'quiet',
+  return S.deliver(async decision => {
+    if (!await S.validDelivery(decision.entry)) return false;
+    return fireBgNotif(decision.entry.category, decision.line, {
+      whisper: decision.mood === 'quiet', entry: decision.entry,
+    });
   });
-  if (shown) await S.recordSent(decision.entry);
-  return shown;
 }
 
 // ── Main background check logic ────────────────────────────────────────

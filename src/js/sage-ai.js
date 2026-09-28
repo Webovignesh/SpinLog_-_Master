@@ -2000,7 +2000,7 @@
     // will actually be shown. This is the single funnel for every line she
     // produces — chat, notifications, pool lines, her read on herself — so the
     // guard belongs here rather than in each caller.
-    let out = latinOnly(String(text)).trim();
+    let out = (opts.allowTamil ? String(text) : latinOnly(String(text))).trim();
     if (!out) return null;
     out = out.replace(/^```[\w]*\s*|\s*```$/g, '').trim();
     out = out.replace(/^["'“”‘’]+|["'“”‘’]+$/g, '').trim();
@@ -3147,7 +3147,8 @@
       // The language line goes LAST, after the chat rules, because personaFor puts
       // the state block at the end and the end is what she weighs most.
       state: [held, contextBlock(context), CHAT_RULES, languageDirective(asked),
-        opts.voice ? 'This is a spoken voice conversation. Answer directly in one or two short sentences unless detail is essential. No markdown, emojis, greeting preamble or read-out of tool activity. Preserve important numbers and facts.' : null]
+        'For Tamil/Tanglish replies, use complete natural colloquial phrases from Chennai or Theni to match his register. Say sollu da when inviting him to tell you, not a bare da followed by tell me. Do not caricature an accent or mix unrelated regional languages.',
+        opts.voice ? 'This is a spoken voice conversation. For Tamil speech, override any earlier Latin-only rule: write Tamil words in Tamil script for correct pronunciation; keep English terms in English. Use one warm, lightly teasing adult feminine persona in both languages. Answer directly in one or two short sentences unless detail is essential. No markdown, emojis, greeting preamble or read-out of tool activity. Preserve important numbers and facts.' : null]
         .filter(Boolean).join('\n\n'),
     });
 
@@ -3221,7 +3222,7 @@
 
     // Paragraph breaks survive here, unlike in a notification: this is a
     // conversation, and the bubble already renders pre-wrap.
-    let text = tidyLine(absorbed.text, { keepBreaks: true }) || '';
+    let text = tidyLine(absorbed.text, { keepBreaks: true, allowTamil: !!opts.voice }) || '';
     // If she genuinely ran out of room, end her on a finished thought rather
     // than showing the fragment.
     if (meta.truncated) text = trimToSentence(text);
