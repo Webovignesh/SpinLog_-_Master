@@ -881,14 +881,16 @@ gone rather than left as links that go nowhere. What was in them that still matt
   back to localStorage then to the `data-due` values in `index.html`; Sage's memory
   falls back to localStorage; the key ring stays on the device.
 
-## Sage voice — v1.9.24
+## Sage voice — v1.9.25
 
 Open **Talk to Sage** inside the chat card. The fullscreen voice room uses a fluid amber orb (blue while speaking) and
 keeps the latest four speaker turns on screen, moving older turns out as new ones
 arrive. Completed voice turns remain in the normal chat history. Tap the orb to
 send a recording early or interrupt a spoken reply; use the microphone button to
 mute, and End, Escape or app Back to leave. The transcript is centered; there is
-no duplicate close button in the header.
+no duplicate close button in the header. The backdrop is translucent and blurred.
+Type **go to voice mode**, **open voice chat** or **let's talk** to open it directly
+from chat without an AI round trip. The activity pill appears only for site lookups.
 
 In **Sage settings → Voice → Speaking & listening**:
 
@@ -915,26 +917,60 @@ In **Sage settings → Voice → Speaking & listening**:
   guarantee a correct transcript.
 
 Preferences save immediately and apply to the next voice session. Hands-free
-capture resumes only after the audio source finishes (or you interrupt it).
-Blocked or silent audio pauses capture and offers **Play reply**. A successful
-retry resumes listening unless you manually muted the microphone. Permission, recording, transcription and quota
-failures pause with a retry action. Muting disables the shared microphone tracks;
-closing the room or backgrounding the page releases them and cancels outstanding
-voice audio requests. Results from a closed session cannot appear in a new one.
-Closing voice mode does not roll back a tool action already submitted to SageAI.
+capture resumes after the audio source finishes or you interrupt it. Transient
+recognition, synthesis and network failures reconnect automatically with backoff;
+permission failures and blocked playback require a tap. Failed speech stays
+available through **Play reply**, and a manual mute is always respected. Browser
+recognition also reconnects after repeated short disconnects, instead of permanently
+muting after four retries. The room stays open across tab switches: hidden tabs
+release the mic, and returning resumes capture unless you muted it. Closing the
+room cancels outstanding voice audio requests and invalidates late results; it
+does not roll back tool actions already submitted to SageAI.
 
-Replies use a gesture-unlocked Web Audio context. The first short sentence plays
-while the next is prepared (the opening chunk is limited to about 96 characters
-at a word boundary); the default playback speed is 1.08×. Voice answers
-are brief, and failed speech is never silently skipped. Voice replies have a
-separate serial request queue so background generation cannot hold them up.
-The shared 1.5-second request-start spacing and quota checks still apply. Voice
-requests time out after 12 seconds per attempt, with at most three attempts per
-model turn, including config retries. Tool results still precede the final answer.
-Gemini 3 voice requests use low thinking via the supported level parameter;
-2.5 requests use a zero thinking budget. These are latency controls, not a
-promise of instant responses. Versioned CSS and scripts
-prevent older cached voice assets from being mixed with the new markup.
+Replies use one synthesis request for the complete mixed-language reply, with one
+session-fixed voice (Kore by default) and a consistent warm, softly breathy adult
+feminine style. Tamil text stays in Tamil script for pronunciation. Regional
+transcription and reply instructions cover Chennai and Theni phrases, including
+whole phrases such as “sollu da”; examples must not be inserted unless spoken.
+This is prompting, not a newly trained Tamil recognition model.
+
+Gemini 3.8 Flash-Lite TTS streams PCM audio into a gesture-unlocked Web Audio
+context, so playback can start before generation finishes. Unsupported model or
+configuration responses fall back to 3.1 Flash TTS, then 2.5 Flash TTS; the session
+remembers the supported model. The legacy 2.5 fallback buffers its response.
+Separate synthesis calls for short sentences have been removed, reducing request
+count and cross-sentence timbre changes. Default playback speed remains 1.08×.
+Missing, silent or truncated audio offers replay. No other voice provider or
+browser speaker is substituted. Streaming requests have a 20-second inactivity
+watchdog; recognition has a 15-second deadline.
+
+Voice answers are brief and use a separate serial AI queue so background generation
+cannot hold them up. The shared 1.5-second request-start spacing and quota checks
+still apply. AI voice requests time out after 12 seconds per attempt, with at most
+three attempts per model turn, including configuration retries. Tool results still
+precede the final answer. Versioned assets prevent old worker caches from mixing
+with this release. These controls reduce avoidable waits; provider latency and
+voice consistency still need real-device testing.
+
+### Plan and notification cleanup
+
+Expired and deleted plans/promises are permanently removed rather than archived.
+Existing archived plans are cleaned on load/sync, including old “tomorrow” plans
+with the previous extra expiry slack. Their fact rows, duplicate learned text in
+episodes and potentially stale recap are removed; queued cloud deletes survive
+sync failures. Restore excludes these plans. Other kinds of memories retain their
+existing recoverable-delete behavior. Cloud removal happens when the updated app
+successfully syncs; this release does not directly access a user's live database.
+
+Page tabs and the service worker share a delivery lock (Web Locks, with an IndexedDB
+lease fallback), retry state and stable notification tags. Refreshing a reminder
+preserves its retry delay and attempt count. Each plan can notify once per day.
+Deleting the last plan reconciles an empty list too, cancels its queued reminder,
+invalidates selected reminders and closes existing plan notifications. Plan
+eligibility is checked again just before delivery; expired plans cannot notify
+while the app is closed. Existing daily caps, quiet hours and category settings
+still apply. Live AI generation was removed from reminder delivery to avoid a
+network wait between checking a plan and showing its alert.
 
 The Gemini path transcribes a completed utterance, then uses the existing SageAI
 chat/tools and Gemini TTS pipeline. It is not a streaming speech-to-speech service.
@@ -944,7 +980,9 @@ provider, network and actual speech, and need testing on the target device.
 ### Voice checks
 
 ```sh
-node --test tools/audit-sage-voice.mjs tools/audit-sage-voice-latency.mjs
+node --test tools/audit-sage-voice.mjs tools/audit-sage-voice-latency.mjs tools/audit-sage-chat-command.mjs
+# Install fake-indexeddb, or set SAGE_TEST_NODE_MODULES to its node_modules directory:
+node --test tools/audit-sage-reminders.mjs
 node tools/audit-refs.mjs
 node tools/audit-boot.mjs
 # With Playwright and Chromium installed:
@@ -954,7 +992,10 @@ node tools/audit-sage-voice-ui.mjs
 The deterministic regression suite covers final recorder chunks, WAV payloads,
 review/correction, four-turn history, silence, permissions, mute, cancellation,
 late results, browser fallback, quota failures, speech interruption, playback
-completion, blocked/silent audio, and first-sentence playback. The UI
+completion, blocked/silent/truncated audio, model fallback, streamed playback,
+eight consecutive exchanges, Tamil-script replies and chat activation. Reminder
+tests use fake-indexeddb and a simulated cloud to exercise cross-context delivery,
+retry delays, expiry, hard deletion and denied-delete recovery. The UI
 audit renders the actual page markup and styles at 1280×900, 390×844 and 320×568
 with mocked voice services and no external requests. It checks control visibility,
 keyboard focus, settings typography, recovery controls and an upgrade with a
@@ -963,4 +1004,4 @@ simulated stale service-worker cache, and writes screenshots to
 `PLAYWRIGHT_CHROMIUM_EXECUTABLE` to use an existing Chromium binary. Neither audit
 verifies real provider responses or subjective recognition accuracy.
 
-Model references: [Flash-Lite audio support](https://ai.google.dev/gemini-api/docs/models/gemini-2.5-flash-lite), [thinking controls](https://ai.google.dev/gemini-api/docs/thinking).
+Model references: [streaming speech generation](https://ai.google.dev/gemini-api/docs/generate-content/speech-generation), [Flash-Lite audio support](https://ai.google.dev/gemini-api/docs/models/gemini-2.5-flash-lite), [thinking controls](https://ai.google.dev/gemini-api/docs/thinking).

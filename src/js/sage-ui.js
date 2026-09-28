@@ -589,15 +589,7 @@
     renderMemory();
   }
 
-  /**
-   * Forget one thing. A soft delete, and the status line now says so.
-   *
-   * The row stays in the table with archived_at set, because that is what makes
-   * the forget reach his other devices instead of being pushed straight back up
-   * by the next one to sync. The consequence is that this is reversible and the
-   * memory is still in the database, which is worth saying out loud — the panel
-   * used to report "Forgotten: …" and leave you to discover both facts later.
-   */
+  // Plans are permanently removed; other memories remain recoverable.
   async function forgetOneMemory(id) {
     const e = cache();
     const M = window.SageMemory;
@@ -606,16 +598,20 @@
     M.forget(id);
     renderMemory();
     if (fact) {
-      setStatus(e.memStatus,
-        `Forgotten: “${fact.text}” — still in the cloud, so Pick can bring it back `
-        + 'or delete it for good.', 'warn');
+      setStatus(e.memStatus, fact.kind === 'plan' || fact.kind === 'promise'
+        ? 'Plan removed. Deleting its cloud copy…'
+        : `Forgotten: “${fact.text}” — Restore can bring it back or delete it for good.`, 'warn');
     }
 
     // Push now rather than on commit()'s 1.5s debounce, then re-read. Without
     // this the Forgotten count in the facts row above is a second and a half
     // behind the list, and the two disagreeing is exactly the bug this panel
     // exists to make impossible.
-    await M.push().catch(() => {});
+    const result = await M.push().catch(() => null);
+    if (fact && (fact.kind === 'plan' || fact.kind === 'promise')) {
+      setStatus(e.memStatus, result?.ok ? 'Plan permanently deleted.'
+        : 'Plan removed here. Cloud deletion is queued and will retry when sync is available.', result?.ok ? 'ok' : 'warn');
+    }
     await refreshMemCloud();
   }
 
@@ -3241,6 +3237,14 @@
     // Files on their own are a valid message: clip a bill, press send, and she
     // works out what it is.
     if ((!asked && !pending.length) || chatBusy) return;
+
+    if (!pending.length && /^(?:(?:hey )?sage[, ]*)?(?:please )?(?:(?:go|switch|take me) (?:to|into) (?:the )?voice(?: mode| chat)?|(?:start|open|enable|activate) (?:the )?voice(?: mode| chat)?|let'?s (?:talk|speak)|voice mode)(?: please)?[.!?]*$/i.test(asked)) {
+      if (window.SageVoice?.open()) {
+        if (e.input) e.input.value='';
+        setStatus(e.status,'');
+      } else setStatus(e.status,'Voice is still loading. Try again.','bad');
+      return;
+    }
 
     if (!AI) { setStatus(e.status, 'Sage is not loaded.', 'bad'); return; }
 

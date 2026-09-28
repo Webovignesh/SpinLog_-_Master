@@ -58,3 +58,12 @@ test('tool results still precede the spoken answer in the fast request lane',asy
     assert.equal(h.requests[1].body.contents.at(-1).parts[0].functionResponse.response.date,'tomorrow');
   } finally {h.cleanup();}
 });
+
+test('spoken answers preserve Tamil script and instruct full regional phrases',async()=>{
+  const h=harness(async()=>answer('சொல்லு டா, என்ன விஷயம்?'));
+  try {const reply=await h.AI.askSage('நான் பேசுறது கேக்குதா',{voice:true});
+    assert.equal(reply.ok,true);assert.match(reply.text,/சொல்லு டா/);
+    const system=JSON.stringify(h.requests[0].body.systemInstruction);
+    assert.match(system,/Chennai/);assert.match(system,/Theni/);assert.match(system,/sollu da/);
+  } finally {h.cleanup();}
+});

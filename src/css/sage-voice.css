@@ -1,11 +1,11 @@
-/* Sage voice room v1.9.24. Loaded after the app styles with its own version URL. */
+/* Sage voice room v1.9.25. Loaded after the app styles with its own version URL. */
 .sage-voice-entry { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 18px; font-family:var(--sl-read); }
 .sage-voice-entry > span { color:#989ba4; font:400 12px/1.5 var(--sl-read); }
 .sage-chat-mic { display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; width:auto; min-width:128px; height:40px; padding:0 14px; gap:8px; border:1px solid #ffd2ae40; border-radius:12px; background:#2c251f; color:#ffd6b5; font:600 12px/1 var(--sl-read); white-space:nowrap; box-shadow:none; animation:none; cursor:pointer; }
 .sage-chat-mic::after { display:none; }
 .sage-chat-mic:hover { background:#3a2d22; box-shadow:none; transform:translateY(-1px); }
 .sage-chat-mic svg { flex:none; }
-.sage-voice-overlay { z-index:1200; padding:0; background:#101115; background-image:radial-gradient(ellipse at 50% 25%,#25201d 0,transparent 55%); backdrop-filter:none; -webkit-backdrop-filter:none; }
+.sage-voice-overlay { z-index:1200; padding:0; background:rgba(16,17,21,.78); background-image:radial-gradient(ellipse at 50% 25%,#39271850 0,transparent 55%); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px); }
 .sage-voice-overlay::before { display:none; }
 .sage-voice-card { --sage-accent:#ffb776; display:flex; flex-direction:column; width:100%; max-width:1000px; height:100dvh; max-height:100dvh; padding:28px 40px max(20px,env(safe-area-inset-bottom)); border:0; border-radius:0; background:none; box-shadow:none; overflow:hidden; font-family:var(--sl-read); gap:0; }
 .sage-voice-top { display:flex; align-items:center; gap:12px; padding:0; flex-shrink:0; }
@@ -33,8 +33,8 @@
 .sage-voice-dots span { width:3px; height:3px; border-radius:50%; background:currentColor; animation:sageDots 1s ease-in-out infinite; }
 .sage-voice-dots span:nth-child(2) { animation-delay:.15s; }
 .sage-voice-dots span:nth-child(3) { animation-delay:.3s; }
-.sage-voice-captions { display:flex; flex-direction:column; flex:1; width:min(100%,620px); min-height:50px; margin:0 auto; overflow:hidden; gap:8px; }
-.sage-voice-lines { display:flex; flex-direction:column; align-items:stretch; justify-content:flex-end; min-height:0; flex:1; gap:0; overflow:hidden; padding:12px 0 2px; mask-image:linear-gradient(transparent,#000 16px); }
+.sage-voice-captions { display:flex; flex-direction:column; flex:1; width:min(100%,560px); min-height:50px; text-align:center; margin:0 auto; overflow:hidden; gap:8px; }
+.sage-voice-lines { display:flex; flex-direction:column; align-items:center; justify-content:flex-end; min-height:0; flex:1; gap:0; overflow:hidden; padding:12px 0 2px; mask-image:linear-gradient(transparent,#000 16px); }
 .sage-voice-lines:empty::after { content:'Just say what’s on your mind.'; align-self:center; margin:auto; color:#727680; font:400 14px/1.6 var(--sl-read); }
 .sage-voice-line { display:flex; flex-direction:column; align-items:center; flex:none; gap:3px; width:100%; max-width:none; padding:10px 0; margin:0; border:0; background:none; text-align:center; color:#e9e7e5; font:400 15px/1.65 var(--sl-read); opacity:1; transform:none; animation:sageTurnIn .25s ease-out; }
 .sage-voice-line strong { align-self:center; margin:2px 0 0; color:#ffbc86; font:500 11px/1.8 var(--sl-read); letter-spacing:0; text-transform:none; }

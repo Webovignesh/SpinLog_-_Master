@@ -176,7 +176,7 @@
         dirty: false,
       },
       // Hard deletes waiting to reach the server. A soft delete rides along on
-      // the record itself; this is only for "forget everything".
+      // the record itself; these keys also purge expired or deleted plans.
       tombstones: [],
       sync: {
         lastPullAt: null,
@@ -300,12 +300,48 @@
     }
   }
 
+  function isPlan(fact) { return fact && (fact.kind === 'plan' || fact.kind === 'promise'); }
+  function planExpired(fact, now = nowMs()) {
+    if (!isPlan(fact)) return false;
+    // Upgrade old today/tomorrow horizons that included two extra days.
+    const words = plainWords(fact.text || '');
+    let deadline = fact.expiresAt;
+    if (/\b(today|tonight|tomorrow)\b|\b\d{4}-\d{2}-\d{2}\b/.test(words)) {
+      const exact = horizonFor(words, fact.kind, fact.at || now);
+      deadline = deadline ? Math.min(deadline, exact) : exact;
+      fact.expiresAt = deadline;
+    }
+    return !!deadline && deadline <= now;
+  }
+  function removeFactsPermanently(state, ids) {
+    const doomed = state.facts.filter(f => ids.has(f.id));
+    const texts = new Set(doomed.map(f => f.text));
+    state.facts = state.facts.filter(f => !ids.has(f.id));
+    state.tombstones = [...new Set([...(state.tombstones || []), ...ids])];
+    for (const ep of state.episodes) {
+      const kept = (ep.learned || []).filter(t => !texts.has(t));
+      if (kept.length !== (ep.learned || []).length) { ep.learned=kept; ep.rev=(ep.rev||1)+1; ep.dirty=true; }
+    }
+    // Recaps can paraphrase a plan, so exact substring removal is insufficient.
+    if (doomed.some(isPlan) && state.recap?.text) {
+      state.recap=null;
+      state.tombstones=[...new Set([...state.tombstones,'recap'])];
+    }
+    return ids.size;
+  }
+  function cleanPlans(state, now = nowMs()) {
+    const ids = new Set(state.facts.filter(f => isPlan(f) && (f.archivedAt || planExpired(f, now))).map(f => f.id));
+    return ids.size ? removeFactsPermanently(state, ids) : 0;
+  }
+
   /** Persist, tell anyone listening, and get the change moving to the server. */
   function commit(state, options) {
     const opts = options || {};
+    const removed = cleanPlans(state);
     write(state);
     notify(opts.reason || 'change');
-    if (opts.push !== false) schedulePush();
+    if (opts.push !== false || removed) schedulePush();
+    if (root.SageScheduler?.checkPlans) root.SageScheduler.checkPlans(upcomingPlans()).catch(() => {});
     return state;
   }
 
@@ -433,11 +469,14 @@
     const explicit = t.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
     if (explicit) {
       const when = new Date(`${explicit[1]}-${explicit[2]}-${explicit[3]}T00:00:00`).getTime();
-      if (!Number.isNaN(when)) return when + 2 * day;
+      if (!Number.isNaN(when)) { const end=new Date(when);end.setDate(end.getDate()+1);return end.getTime(); }
     }
 
     const dayIn = phrase => {
-      if (/\b(today|tonight|tomorrow)\b/.test(phrase)) return at + 2 * day;
+      if (/\b(today|tonight|tomorrow)\b/.test(phrase)) {
+        const end=new Date(at);end.setHours(0,0,0,0);
+        end.setDate(end.getDate()+(/\btomorrow\b/.test(phrase)?2:1));return end.getTime();
+      }
       if (/\bweekend\b/.test(phrase)) return at + 9 * day;
       if (/\bnext week\b/.test(phrase)) return at + 16 * day;
       if (/\bnext month\b/.test(phrase)) return at + 45 * day;
@@ -760,7 +799,7 @@
     lastSweepAt = at;
 
     const state = read();
-    let changed = 0;
+    let changed = cleanPlans(state, at);
     state.facts.forEach(f => {
       if (f.archivedAt || f.pinned) return;
       if (f.expiresAt && f.expiresAt < at) {
@@ -961,6 +1000,11 @@
     const state = read();
     const fact = state.facts.find(f => f.id === id && !f.archivedAt);
     if (!fact) return false;
+    if (isPlan(fact)) {
+      removeFactsPermanently(state, new Set([id]));
+      commit(state, {reason:'purge-plan'});
+      return true;
+    }
     fact.archivedAt = nowMs();
     fact.rev = (fact.rev || 1) + 1;
     fact.dirty = true;
@@ -2615,6 +2659,7 @@
   function upcomingPlans(now) {
     const at = now || nowMs();
     const day = 86400000;
+    sweep({now:at});
 
     return read().facts
       .filter(f => f
@@ -2623,17 +2668,15 @@
         && (f.kind === 'plan' || f.kind === 'promise')
         // A plan whose horizon has passed is history, not a plan. Promises have
         // no horizon and stay until he says otherwise.
-        && (!f.expiresAt || f.expiresAt > at))
+        && !planExpired(f, at))
       .map(f => ({
         id: f.id,
         text: f.text,
         kind: f.kind,
         at: f.at || null,
         when: f.expiresAt || null,
-        // horizonFor() adds two days of slack past the day itself, so this is a
-        // window rather than a deadline. Good enough to sort and to decide
-        // whether something is imminent.
-        daysLeft: f.expiresAt ? Math.max(0, Math.round((f.expiresAt - at) / day) - 2) : null,
+        // Expiry is the start of the day after the plan; today has zero days left.
+        daysLeft: f.expiresAt ? Math.max(0, Math.ceil((f.expiresAt - new Date(new Date(at).setHours(0,0,0,0)).getTime()) / day) - 1) : null,
       }))
       .sort((a, b) => {
         if (a.when && b.when) return a.when - b.when;
@@ -2726,6 +2769,10 @@
       if (doomed.has(row.mem_key)) return;
       const fact = factFromRow(row);
       if (!fact) return;
+      if (isPlan(fact) && (fact.archivedAt || planExpired(fact))) {
+        state.tombstones = [...new Set([...state.tombstones, fact.id])];
+        return;
+      }
       const entry = {
         key: row.mem_key,
         text: fact.text,
@@ -2744,6 +2791,7 @@
       restorable.push(entry);
     });
 
+    if (state.tombstones.length !== doomed.size) commit(state, {reason:'purge-old-plans'});
     const newestFirst = (a, b) => (b.at || 0) - (a.at || 0);
     restorable.sort(newestFirst);
     forgotten.sort(newestFirst);
@@ -2753,8 +2801,8 @@
   /**
    * What the cloud is holding, and how much of it this device lacks.
    *
-   * Reads three columns rather than the whole bank, so the panel can show honest
-   * numbers on open without pulling. "Nothing came back" and "there was nothing
+   * Reads the bank without adopting it, excluding plans queued for permanent deletion.
+   * This lets the panel show honest numbers on open without pulling. "Nothing came back" and "there was nothing
    * to come back" are different answers and the panel could not tell them apart.
    *
    * @returns {Promise<{rows:number, facts:number, missingHere:number, hasRecap:boolean, episodes:number}|null>}
@@ -2770,7 +2818,7 @@
     // memory would report "42 rows, 3 memories" and make the panel look broken
     // when it was simply looking at the wrong thing.
     const { data, error } = await supabase.from(name)
-      .select('mem_key, record_type, archived_at')
+      .select('*')
       .in('record_type', RECORD_TYPES);
     if (error) {
       console.warn('[SpinLog] 🧠 Could not size the cloud memory:', error.message);
@@ -2780,7 +2828,17 @@
     // A row queued for deletion is not counted. Otherwise the Restore button keeps
     // its "there is something waiting" dot for the rows it has just been told to
     // destroy, which reads as the delete having failed.
-    const doomed = new Set(read().tombstones || []);
+    const state = read();
+    const doomed = new Set(state.tombstones || []);
+    for (const row of data || []) {
+      if (row.record_type !== 'fact') continue;
+      const fact = factFromRow(row);
+      if (isPlan(fact) && (fact.archivedAt || planExpired(fact))) doomed.add(row.mem_key);
+    }
+    if (doomed.size !== state.tombstones.length) {
+      state.tombstones = [...doomed];
+      commit(state, {reason:'purge-old-plans'});
+    }
     const rows = (data || []).filter(r => r && r.mem_key && !doomed.has(r.mem_key));
     const factRows = rows.filter(r => r.record_type === 'fact');
     const liveFactRows = factRows.filter(r => !r.archived_at);
@@ -2854,7 +2912,7 @@
 
     rows.forEach(row => {
       const fact = factFromRow(row);
-      if (!fact) return;
+      if (!fact || (isPlan(fact) && (fact.archivedAt || planExpired(fact)))) return;
       // Already live under some id? Then there is nothing to bring back.
       const print = fingerprint(fact.text);
       if (state.facts.some(f => !f.archivedAt && !f.supersededBy && fingerprint(f.text) === print)) return;
@@ -3275,6 +3333,7 @@
    */
   function boot() {
     const start = () => {
+      sweep({force:true});
       sync({ force: true }).catch(() => {});
     };
 
@@ -3292,6 +3351,7 @@
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState !== 'visible') return;
+        sweep({force:true});
         const last = read().sync.lastPullAt || 0;
         if (nowMs() - last > PULL_STALE_MS) sync().catch(() => {});
       });

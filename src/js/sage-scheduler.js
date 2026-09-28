@@ -670,6 +670,69 @@
     } catch { return false; }
   }
 
+  // Shared across page tabs and service workers. The IDB lease is a fallback
+  // for browsers without Web Locks; a crashed owner expires after one minute.
+  async function withLock(name, task) {
+    if (root.navigator?.locks) return root.navigator.locks.request('sage-' + name, task);
+    const db = await openDb();
+    const key = 'sage_lock_' + name;
+    const token = Date.now() + ':' + Math.random();
+    const lease = release => new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite'), store = tx.objectStore(STORE);
+      let owned = false;
+      const req = store.get(key);
+      req.onsuccess = () => {
+        const old = req.result;
+        if (release) { if (old?.token === token) store.delete(key); }
+        else if (!old || old.until <= Date.now()) {
+          store.put({token, until:Date.now()+60000}, key); owned = true;
+        }
+      };
+      tx.oncomplete = () => resolve(owned);
+      tx.onerror = () => reject(tx.error);
+    });
+    try {
+      for (let i=0;i<200;i++) {
+        if (await lease(false)) {
+          try { return await task(); } finally { await lease(true); }
+        }
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      return null; // let the next pump retry, never deliver without ownership
+    } finally { db.close(); }
+  }
+
+  function planId(entry) {
+    return entry?.vars?.planId || (entry?.category === 'planReminder' ? entry.key?.split(':')[1] : null);
+  }
+  async function validDelivery(entry, now = Date.now()) {
+    if (entry.expiresAt && entry.expiresAt <= now) return false;
+    if (entry.category !== 'planReminder') return true;
+    const plans = await kvGet('sage_active_plans', {});
+    const plan = plans[planId(entry)];
+    return !!plan && (!plan.when || plan.when > now);
+  }
+  function notificationTag(entry) { return 'sage-' + (entry.key || entry.category); }
+  async function closePlanNotifications(active) {
+    try {
+      const reg = root.registration || await root.navigator?.serviceWorker?.getRegistration();
+      const notes = await reg?.getNotifications();
+      for (const note of notes || []) {
+        if (note.data?.category !== 'planReminder') continue;
+        if (!note.data.planId || !active[note.data.planId]) note.close();
+      }
+    } catch { /* notification permission may be unavailable */ }
+  }
+  async function deliver(send) {
+    return withLock('delivery', async () => {
+      const decision = await drain();
+      if (!decision || !await validDelivery(decision.entry)) return false;
+      const sent = await send(decision);
+      if (sent) await recordSent(decision.entry);
+      return !!sent;
+    });
+  }
+
   // ══ PURE TIME LOGIC ══════════════════════════════════════════════════
 
   /** Next timestamp at or after `fromTs` whose mood is allowed. */
@@ -1008,7 +1071,8 @@
    * Pass an explicit key when one category covers several subjects — two
    * documents expiring are two separate reminders, not one.
    */
-  async function enqueue(category, options) {
+  function enqueue(category, options) { return withLock('state', () => enqueueLocked(category, options)); }
+  async function enqueueLocked(category, options) {
     const opts = options || {};
     const meta = CATEGORY_META[category];
     if (!meta) return null;
@@ -1035,12 +1099,16 @@
     };
 
     const queue = await getQueue();
+    const cooldowns = await kvGet(KEY_COOLDOWNS, {});
+    if (category === 'planReminder' && cooldowns[key]) return null;
     const existing = queue.findIndex(e => (e.key || e.category) === key);
     if (existing !== -1) {
       const prev = queue[existing];
-      // Keep whichever is more urgent, and the sooner send time.
+      // Keep urgency and the retry delay; refresh must not reset an in-flight send.
       entry.urgency = Math.max(entry.urgency, prev.urgency || 1);
-      entry.earliestSend = Math.min(entry.earliestSend, prev.earliestSend || entry.earliestSend);
+      entry.earliestSend = Math.max(entry.earliestSend, prev.earliestSend || 0);
+      entry.id = prev.id;
+      entry.attempts = prev.attempts || 0;
       queue[existing] = entry;
     } else {
       queue.push(entry);
@@ -1241,10 +1309,19 @@
    */
   async function checkPlans(plans, now) {
     const at = now || Date.now();
-    if (!Array.isArray(plans) || !plans.length) return null;
+    if (!Array.isArray(plans)) return null;
+    const active = Object.fromEntries(plans.filter(p => p?.id && (!p.when || p.when > at)).map(p => [p.id, {when:p.when || null}]));
+    await withLock('state', async () => {
+      await kvSet('sage_active_plans', active);
+      const queue = await getQueue();
+      await kvSet(KEY_QUEUE, queue.filter(e => e.category !== 'planReminder' ||
+        (active[planId(e)] && (!e.expiresAt || e.expiresAt > at) && e.key.endsWith(':' + isoDate(at)))));
+    });
+    await closePlanNotifications(active);
+    if (!plans.length) return null;
 
     const worth = plans.find(plan => {
-      if (!plan || !plan.text) return false;
+      if (!plan || !plan.text || !active[plan.id]) return false;
       // Dated and close enough to matter.
       if (plan.daysLeft !== null && plan.daysLeft !== undefined) {
         return plan.daysLeft <= PLAN_NOTICE_DAYS;
@@ -1259,13 +1336,13 @@
       now: at,
       // A plan for today outranks one for the day after tomorrow.
       urgency: worth.daysLeft === 0 ? 2 : 1,
-      vars: { plan: worth.text },
+      vars: { plan: worth.text, planId: worth.id },
       // Per plan, per day. A plan cannot nag twice in a day however often this
       // runs, and tomorrow it is a different key so it can speak once more.
       key: `planReminder:${worth.id}:${isoDate(at)}`,
       // Never arrives after the thing it was reminding him about. A dated plan
       // dies with its horizon; an open-ended one gets a day to be delivered.
-      expiresAt: worth.when || (at + 86400000),
+      expiresAt: Math.min(worth.when || Infinity, startOfNextLocalDay(at)),
     });
   }
 
@@ -1293,7 +1370,8 @@
    * takes it out. Accepts a queue entry or a bare category string — a bare
    * string has no queue entry to clear.
    */
-  async function recordSent(entryOrCategory, at) {
+  function recordSent(entryOrCategory, at) { return withLock('state', () => recordSentLocked(entryOrCategory, at)); }
+  async function recordSentLocked(entryOrCategory, at) {
     const now = at || Date.now();
     const isEntry = entryOrCategory && typeof entryOrCategory === 'object';
     const category = isEntry ? entryOrCategory.category : entryOrCategory;
@@ -1323,10 +1401,13 @@
    * Work out what should go out now. Persists the pruned/deferred queue but
    * does NOT send — the caller shows the notification, then calls recordSent.
    */
-  async function drain(now) {
+  function drain(now) { return withLock('state', () => drainLocked(now)); }
+  async function drainLocked(now) {
     const at = now || Date.now();
     const [queue, state, limits] = await Promise.all([getQueue(), getState(), getLimits()]);
-    const result = selectNext(queue, at, state, limits);
+    const eligible = [];
+    for (const entry of queue) if (await validDelivery(entry, at)) eligible.push(entry);
+    const result = selectNext(eligible, at, state, limits);
 
     if (!result.send) {
       await kvSet(KEY_QUEUE, result.queue);
@@ -1399,6 +1480,7 @@
     MOOD_POOLS,
     // storage-backed
     getLimits, setLimits, getState, getQueue, enqueue, recordSent, drain, pickLine, pickFrom, inspect,
+    deliver, validDelivery, notificationTag, planId, withLock,
     // AI line cache (written by sage-ai.js, read here so the worker can use it)
     AI_POOL_TTL_MS, aiPoolKey, readAiPool, aiPoolAge,
     // park session

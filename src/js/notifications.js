@@ -448,9 +448,8 @@ async function sendSageNotif(category, overrides = {}, context = {}) {
   // Quiet-hours emergencies arrive silently rather than buzzing at 3am.
   const whisper = mood === 'quiet';
 
-  // tag used to be the bare category name, which meant a second notification
-  // in the same category quietly replaced the first one. Stamping the tag with
-  // the send time lets them stack. renotify is pointless with a unique tag.
+  // Stable per-reminder tags replace retries instead of stacking duplicates.
+  // Immediate user-action confirmations still receive their own tag.
   const options = {
     body,
     // ── icon and badge, and why neither is what it was ──
@@ -468,10 +467,10 @@ async function sendSageNotif(category, overrides = {}, context = {}) {
     badge: './assets/icons/badge-96.png',
     vibrate: whisper ? [0] : [120, 60, 120],
     silent: whisper,
-    tag: `sage-${category}-${now}`,
+    tag: context.entry ? S.notificationTag(context.entry) : `sage-${category}-${now}`,
     renotify: false,
     timestamp: now,
-    data: { category, mood, sentAt: now, source: 'foreground', url: './index.html' },
+    data: { category, planId: context.entry ? S.planId(context.entry) : null, mood, sentAt: now, source: 'foreground', url: './index.html' },
     actions: [
       { action: 'open', title: 'Open SpinLog' },
       { action: 'dismiss', title: 'Later' },
@@ -488,6 +487,7 @@ async function sendSageNotif(category, overrides = {}, context = {}) {
   // not catch.
   try {
     const reg = await withTimeout(navigator.serviceWorker?.ready, SW_READY_TIMEOUT_MS);
+    if (context.entry && !await S.validDelivery(context.entry)) return false;
     if (reg?.showNotification) {
       await reg.showNotification(title, options);
       return true;
@@ -562,33 +562,17 @@ async function sagePump() {
     // which has no access to her memory.
     await checkSagePlans();
 
-    const decision = await S.drain();
-    if (!decision) return false;
-
-    let overrides = decision.entry.overrides || {};
-
-    // A plan reminder is the one category whose line cannot be pre-written: the
-    // point of it is that it names the thing he said he would do. So she writes it
-    // here, about this plan, at the moment it is actually going out — queueing
-    // time would mean paying for lines that quiet hours then threw away.
-    //
-    // Any failure falls through to the scheduler's {plan} pool. A reminder in a
-    // plainer voice beats no reminder.
-    if (decision.entry.category === 'planReminder' && !overrides.body) {
-      const plan = decision.entry.vars && decision.entry.vars.plan;
-      const written = self.SageAI && self.SageAI.writePlanLine
-        ? await self.SageAI.writePlanLine(plan, decision.mood).catch(() => null)
-        : null;
-      if (written) overrides = { ...overrides, ...written };
-    }
-
-    const sent = await sendSageNotif(decision.entry.category, overrides, {
-      mood: decision.mood,
-      line: decision.line,
-      vars: decision.entry.vars,
+    return S.deliver(async decision => {
+      // Revalidate after asynchronous queue/line work. A deleted plan never
+      // uses a cached AI reminder, and stable tags replace duplicate cards.
+      if (!await S.validDelivery(decision.entry)) return false;
+      if (decision.entry.category === 'planReminder' &&
+          !self.SageMemory?.upcomingPlans().some(p => p.id === S.planId(decision.entry))) return false;
+      return sendSageNotif(decision.entry.category, decision.entry.overrides || {}, {
+        mood:decision.mood, line:decision.line, vars:decision.entry.vars,
+        entry:decision.entry,
+      });
     });
-    if (sent) await S.recordSent(decision.entry);
-    return sent;
   } catch {
     return false;
   }
