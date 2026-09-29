@@ -197,7 +197,7 @@
   // and must never escalate the rate-limit ladder.
   const TIMEOUT_REST_MS = 45000;
 
-  let lastCallAt = 0;
+  const lastCallByModel = new Map();
 
   function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -512,14 +512,15 @@
    * flash model in the catalog that predates this list is appended, so a newly
    * released one gets used without waiting for a code change.
    */
-  function modelChain(preferred) {
-    const first = preferred || getModel();
+  function modelChain(preferred, voice = false) {
+    const first = preferred || (voice ? 'gemini-3.5-flash-lite' : getModel());
     const known = getKnownModels();
 
     let chain = [first, ...MODEL_CHAIN.filter(m => m !== first)];
 
     if (known) {
-      const usable = chain.filter(m => known.indexOf(m) !== -1);
+      // Older catalogs were saved before Flash-Lite launched; allow one probe.
+      const usable = chain.filter(m => known.indexOf(m) !== -1 || (voice && m === 'gemini-3.5-flash-lite'));
       // Any new-enough flash model we do not know about yet, newest names first.
       const extras = known
         .filter(m => isChainWorthy(m) && chain.indexOf(m) === -1)
@@ -540,22 +541,22 @@
   }
 
   /** Models we can actually use this moment. */
-  function availableModels(preferred, now) {
+  function availableModels(preferred, now, voice = false) {
     const at = now || Date.now();
-    return modelChain(preferred).filter(m => !modelResting(m, at));
+    return modelChain(preferred, voice).filter(m => !modelResting(m, at));
   }
 
   /** True when there is nothing left to try: no usable key, or no usable model. */
-  function isBackingOff(now) {
+  function isBackingOff(now, voice = false) {
     if (!getKeys().length) return false;   // no keys at all is a different problem
-    return availableKeys(now).length === 0 || availableModels(null, now).length === 0;
+    return availableKeys(now).length === 0 || availableModels(null, now, voice).length === 0;
   }
 
   /** How long until the soonest key or model frees up, whichever is blocking. */
-  function backoffRemainingMs(now) {
+  function backoffRemainingMs(now, voice = false) {
     const at = now || Date.now();
     const state = readBackoff();
-    const modelWaits = modelChain().map(m => {
+    const modelWaits = modelChain(null, voice).map(m => {
       const entry = state.models[m];
       return entry ? Math.max(0, entry.until - at) : 0;
     });
@@ -569,12 +570,12 @@
    * Only for genuine quota refusals and server overload — anything else that
    * borrows this ladder inflates the wait for a reason that is not quota.
    */
-  function noteModelLimited(model, now, reason) {
+  function noteModelLimited(model, now, reason, retryMs = 0) {
     const at = now || Date.now();
     const state = readBackoff();
     const prev = state.models[model] || { until: 0, step: 0 };
     const step = Math.min(prev.step, BACKOFF_STEPS_MS.length - 1);
-    const wait = BACKOFF_STEPS_MS[step];
+    const wait = Math.max(BACKOFF_STEPS_MS[step], retryMs);
     state.models[model] = {
       until: at + wait,
       step: Math.min(step + 1, BACKOFF_STEPS_MS.length - 1),
@@ -697,16 +698,15 @@
   /**
    * Rest a whole key.
    *
-   * A 429 is the project's quota, not one model's, so resting the key and moving
-   * to the next one is the only move that actually buys headroom. Escalates on
-   * the same ladder as the models.
+   * Only project-wide or unclassified quota failures use this rest. Explicit
+   * per-model quota failures use noteModelLimited instead.
    */
-  function noteKeyLimited(id, now, label) {
+  function noteKeyLimited(id, now, label, retryMs = 0) {
     const at = now || Date.now();
     const state = readBackoff();
     const prev = state.keys[id] || { until: 0, step: 0 };
     const step = Math.min(prev.step, BACKOFF_STEPS_MS.length - 1);
-    const wait = BACKOFF_STEPS_MS[step];
+    const wait = Math.max(BACKOFF_STEPS_MS[step], retryMs);
     state.keys[id] = {
       until: at + wait,
       step: Math.min(step + 1, BACKOFF_STEPS_MS.length - 1),
@@ -1500,18 +1500,16 @@
     }
 
     const keys = availableKeys();
-    if (!keys.length) return { ok: false, reason: 'no-key' };
+    if (!keys.length) return { ok: false, reason: hasKey() ? 'backoff' : 'no-key' };
 
-    const chain = availableModels(opts.model);
+    const chain = availableModels(opts.model, undefined, opts.voice);
     if (!chain.length) return { ok: false, reason: 'backoff' };
 
     let ceiling = opts.maxOutputTokens ?? LINE_MAX_TOKENS;
     let grewCeiling = false;
 
-    // Keys are the outer loop, models the inner one. A 429 is the project's
-    // quota, so it rests the key and moves to the next key rather than trying
-    // more models that share the same budget. A 503 or a timeout is one model
-    // misbehaving, so it moves to the next model on the same key.
+    // Model-scoped failures move to another model; project-wide quota rests
+    // the key. Each walk has a strict attempt budget, including config retries.
     const timeoutMs = opts.timeoutMs || REQUEST_TIMEOUT_MS;
     const budget = opts.voice ? 3 : purpose === 'chat' ? MAX_ATTEMPTS_PER_CALL : MAX_AUTO_ATTEMPTS;
     let attempts = 0;
@@ -1581,13 +1579,11 @@
         }
 
         if (result.verdict === 'ok') {
-          // Success proves this key has budget, so lift its rest and every quota
-          // rest. Timeout and unavailable shelvings stay put — they are not about
-          // quota, and clearing them would send the next call straight back into
-          // the slow or missing model.
-          clearKeyBackoff(entry.id);
-          clearModelBackoff(model);
-          clearQuotaBackoff();
+          // Success only proves this model works. Other model quotas stay rested.
+          // A concurrent request may have just received a real quota error.
+          // A successful in-flight response must not erase that active rest.
+          if (!keyResting(entry.id)) clearKeyBackoff(entry.id);
+          if (!modelResting(model)) clearModelBackoff(model);
           if (fellBack) console.log(`[SpinLog] ✅ Sage fell back to ${model} on key ${label}.`);
           if (result.truncated) {
             console.warn(`[SpinLog] ${model} hit the ${ceiling}-token ceiling mid-reply — it will be trimmed to her last finished sentence.`);
@@ -1597,10 +1593,15 @@
 
         fellBack = true;
 
-        // Out of quota: this key is done for now, and every model shares its
-        // budget. Rest the key and hand over to the next one.
         if (result.verdict === 'limited') {
-          noteKeyLimited(entry.id, undefined, label);
+          // Google reports quotas per project AND model. A model-specific 429
+          // must not disable the other models, transcription or speech output.
+          if (result.scope === 'model') {
+            noteModelLimited(model, undefined, 'hit its model quota', result.retryMs);
+            deadEnds.add(model);
+            continue;
+          }
+          noteKeyLimited(entry.id, undefined, label, result.retryMs);
           break;
         }
 
@@ -1742,7 +1743,7 @@
         const useLevel = opts.voice && /^gemini-3/.test(model);
         if (!allowThinking && !thinkingRefused(useLevel ? model + ':level' : model)) {
           generationConfig.thinkingConfig = useLevel
-            ? { thinkingLevel: 'low' }
+            ? { thinkingLevel: model === 'gemini-3.5-flash-lite' ? 'minimal' : 'low' }
             : { thinkingBudget: 0 };
         }
         const body = {
@@ -1818,11 +1819,12 @@
    * @returns {Promise<{verdict:string, text?:string, status?:number, message?:string}>}
    */
   async function attemptOnce(model, body, key, timeoutMs) {
-    // Reserve before awaiting so simultaneous voice/background starts cannot
-    // claim the same slot. Neither lane waits for the other's HTTP response.
+    // Reserve per model before awaiting. Voice Flash-Lite does not inherit a
+    // background Flash delay; calls to the same model retain start spacing.
     const now = Date.now();
-    const slot = Math.max(now, lastCallAt ? lastCallAt + MIN_CALL_GAP_MS : now);
-    lastCallAt = slot;
+    const last = lastCallByModel.get(model) || 0;
+    const slot = Math.max(now, last ? last + MIN_CALL_GAP_MS : now);
+    lastCallByModel.set(model, slot);
     if (slot > now) await sleep(slot - now);
 
     const t = withTimeout(timeoutMs);
@@ -1837,7 +1839,21 @@
         }
       );
 
-      if (res.status === 429) return { verdict: 'limited' };
+      if (res.status === 429) {
+        const error = await res.json().catch(() => ({}));
+        const details = error?.error?.details || [];
+        const violations = details.flatMap(d => Array.isArray(d.violations) ? d.violations : []);
+        // Unknown/mixed limits remain conservative: do not infer scope from a
+        // model name in generic error prose.
+        const modelScoped = violations.length > 0 && violations.every(v =>
+          v.quotaDimensions?.model || /PerModel/i.test(v.quotaId || ''));
+        const retryHeader = res.headers?.get?.('retry-after');
+        const headerMs = retryHeader ? (/^\d+(?:\.\d+)?$/.test(retryHeader)
+          ? Number(retryHeader) * 1000 : Math.max(0, Date.parse(retryHeader) - Date.now())) : 0;
+        const retryMs = Math.max(Number.isFinite(headerMs) ? headerMs : 0,
+          ...details.map(d => /^\d+(?:\.\d+)?s$/.test(d.retryDelay || '') ? parseFloat(d.retryDelay) * 1000 : 0));
+        return { verdict: 'limited', scope: modelScoped ? 'model' : 'project', retryMs };
+      }
       if (res.status >= 500) return { verdict: 'overloaded', status: res.status };
       // A bad or revoked key: no model on it will work, so hand to the next key.
       if (res.status === 401) return { verdict: 'rejected', status: res.status };
@@ -1848,7 +1864,7 @@
       const json = await res.json();
       const candidate = json?.candidates?.[0] || null;
       const parts = candidate?.content?.parts || [];
-      const text = parts.map(p => p.text || '').join('').trim();
+      const text = parts.filter(p => !p.thought).map(p => p.text || '').join('').trim();
       // finishReason was previously ignored, so a reply the model had abandoned
       // half-written was reported as a clean success and shown as-is. That is
       // the whole of the "her message is not completed" bug.
@@ -3102,7 +3118,7 @@
     const asked = String(question || '').trim();
     if (!asked) return { ok: false, reason: 'empty' };
 
-    const state = ready();
+    const state = ready(opts);
     if (!state.ok) return { ok: false, reason: state.reason, retryInMs: state.retryInMs };
 
     const S = root.SageScheduler;
@@ -3184,7 +3200,7 @@
     const raw = turn.ok ? turn.text : null;
     if (!raw) {
       // Re-check so the UI can be specific about why she went quiet.
-      const after = ready();
+      const after = ready(opts);
       return {
         ok: false,
         reason: after.ok ? (turn.reason || 'failed') : after.reason,
@@ -3283,10 +3299,10 @@
   }
 
   /** Is she able to speak for herself at this moment? */
-  function ready() {
+  function ready(options = {}) {
     if (!hasKey()) return { ok: false, reason: 'no-key' };
     if (typeof navigator !== 'undefined' && navigator.onLine === false) return { ok: false, reason: 'offline' };
-    if (isBackingOff()) return { ok: false, reason: 'backoff', retryInMs: backoffRemainingMs() };
+    if (isBackingOff(undefined, options.voice)) return { ok: false, reason: 'backoff', retryInMs: backoffRemainingMs(undefined, options.voice) };
     return { ok: true };
   }
 

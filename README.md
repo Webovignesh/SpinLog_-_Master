@@ -881,7 +881,7 @@ gone rather than left as links that go nowhere. What was in them that still matt
   back to localStorage then to the `data-due` values in `index.html`; Sage's memory
   falls back to localStorage; the key ring stays on the device.
 
-## Sage voice — v1.9.26
+## Sage voice — v1.9.27
 
 Open **Talk to Sage** inside the chat card. The fullscreen voice room uses a fluid amber orb (blue while speaking) and
 keeps the latest four speaker turns on screen, moving older turns out as new ones
@@ -900,13 +900,14 @@ In **Sage settings → Voice → Speaking & listening**:
   The transcription instruction preserves regional Tamil and English mixing,
   slang, names and numbers. It does not force a Chennai dialect or translate
   Tamil into English. Audio requests count toward the provider's quota.
+- **Live draft captions** use the browser recognizer in the selected language while Gemini records. They appear before upload, are labelled draft, and never trigger chat or tools. Gemini replaces them with its final bilingual transcript. An unsupported or disconnected caption service does not stop capture or retry in a loop. Drafts are optional browser functionality, not guaranteed on every device.
 - **Browser recognition** is available as an explicit fallback. The default
   language is Tamil (`ta-IN`); English (India) can be selected. Silence never
   changes the selected language. Browser support and recognition quality vary.
 - **Fast transcription** uses Gemini 3.5 Flash-Lite by default. Choose **Careful**
   to use Gemini 3.5 Flash for difficult speech. Both keep the same Tamil/Tanglish
   instructions and transcript-review safeguards; compare accuracy with your own audio.
-- The default pause is 0.9 seconds; a saved **Relaxed · 2.2 seconds** preference
+- The default pause is 0.65 seconds; a saved **Relaxed · 2.2 seconds** preference
   is preserved. Audio turns are capped at
   45 seconds; silent recording buffers are discarded locally every 15 seconds
   while the microphone keeps listening. Empty transcripts and normal browser
@@ -958,13 +959,20 @@ Missing, silent or truncated audio offers replay. No other voice provider or
 browser speaker is substituted. Streaming requests have a 20-second inactivity
 watchdog; recognition has a 15-second deadline.
 
-Voice answers are brief and use a separate serial AI queue so background generation
-cannot hold them up. The shared 1.5-second request-start spacing and quota checks
-still apply. AI voice requests time out after 12 seconds per attempt, with at most
+Voice answers lead with Gemini 3.5 Flash-Lite at minimal thinking, falling back to
+the existing Flash chain. Speech synthesis is unchanged. A separate serial AI
+queue and per-model 1.5-second start spacing keep background Flash requests from
+delaying voice Flash-Lite. Calls to the same model still share spacing. Explicit
+model-scoped 429s rest only that model and honor provider retry delays; unknown or
+project-wide limits still rest the key. Success on another model cannot erase a
+quota rest. Reply failures show an actionable status, keep the user turn, and
+resume listening without synthesizing canned errors as Sage replies. AI voice requests time out after 12 seconds per attempt, with at most
 three attempts per model turn, including configuration retries. Tool results still
 precede the final answer. Versioned assets prevent old worker caches from mixing
 with this release. These controls reduce avoidable waits; provider latency and
 voice consistency still need real-device testing.
+
+Gemini 3.5 Transcribe Live was evaluated against [Google's live transcription guide](https://ai.google.dev/gemini-api/docs/live-api/live-transcribe). It supports partial captions, but Tamil is absent from its documented language list as checked on 2026-09-29. It is therefore not the default for this bilingual room. Final transcription remains Gemini multimodal audio; no Tamil accuracy or end-to-end latency guarantee is inferred from mocked tests.
 
 ### Plan and notification cleanup
 
