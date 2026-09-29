@@ -881,7 +881,7 @@ gone rather than left as links that go nowhere. What was in them that still matt
   back to localStorage then to the `data-due` values in `index.html`; Sage's memory
   falls back to localStorage; the key ring stays on the device.
 
-## Sage voice — v1.9.25
+## Sage voice — v1.9.26
 
 Open **Talk to Sage** inside the chat card. The fullscreen voice room uses a fluid amber orb (blue while speaking) and
 keeps the latest four speaker turns on screen, moving older turns out as new ones
@@ -903,8 +903,8 @@ In **Sage settings → Voice → Speaking & listening**:
 - **Browser recognition** is available as an explicit fallback. The default
   language is Tamil (`ta-IN`); English (India) can be selected. Silence never
   changes the selected language. Browser support and recognition quality vary.
-- **Fast transcription** uses Gemini 2.5 Flash-Lite by default. Choose **Careful**
-  to use Gemini 2.5 Flash for difficult speech. Both keep the same Tamil/Tanglish
+- **Fast transcription** uses Gemini 3.5 Flash-Lite by default. Choose **Careful**
+  to use Gemini 3.5 Flash for difficult speech. Both keep the same Tamil/Tanglish
   instructions and transcript-review safeguards; compare accuracy with your own audio.
 - The default pause is 0.9 seconds; a saved **Relaxed · 2.2 seconds** preference
   is preserved. Audio turns are capped at
@@ -917,9 +917,23 @@ In **Sage settings → Voice → Speaking & listening**:
   guarantee a correct transcript.
 
 Preferences save immediately and apply to the next voice session. Hands-free
-capture resumes after the audio source finishes or you interrupt it. Transient
-recognition, synthesis and network failures reconnect automatically with backoff;
-permission failures and blocked playback require a tap. Failed speech stays
+capture resumes after the audio source finishes or you interrupt it. Browser
+recognition disconnects and transient synthesis failures reconnect with backoff;
+permission failures and blocked playback require a tap.
+
+Gemini transcription retries the **same recording**, with at most three HTTP attempts
+inside one 15-second deadline. Unsupported models fall back from 3.5 Flash-Lite to
+3.1 Flash-Lite and then legacy 2.5 Flash-Lite (Careful: 3.5 Flash to 2.5 Flash), and
+the successful route is remembered for the call. Gemini 3 uses `thinkingLevel`,
+with a retry without that option only if the provider rejects it. Authentication,
+model access, quota, network, unreadable responses and decode failures have distinct
+messages. Persistent failure holds the recording in memory and displays **Retry
+recording** / **Use Tamil browser** instead of discarding speech and cycling between
+Listening and Reconnecting. Quota retry waits at least a minute and honors a longer
+Retry-After value. Closing the room or choosing browser recognition drops the
+saved audio. Browser fallback is explicit and applies only to this call.
+
+Failed speech stays
 available through **Play reply**, and a manual mute is always respected. Browser
 recognition also reconnects after repeated short disconnects, instead of permanently
 muting after four retries. The room stays open across tab switches: hidden tabs
@@ -987,6 +1001,7 @@ node tools/audit-refs.mjs
 node tools/audit-boot.mjs
 # With Playwright and Chromium installed:
 node tools/audit-sage-voice-ui.mjs
+node tools/audit-sage-capture.mjs
 ```
 
 The deterministic regression suite covers final recorder chunks, WAV payloads,
@@ -1001,7 +1016,9 @@ with mocked voice services and no external requests. It checks control visibilit
 keyboard focus, settings typography, recovery controls and an upgrade with a
 simulated stale service-worker cache, and writes screenshots to
 `/tmp/sage-voice-preview` (override with `SAGE_SCREENSHOT_DIR`). Set
-`PLAYWRIGHT_CHROMIUM_EXECUTABLE` to use an existing Chromium binary. Neither audit
-verifies real provider responses or subjective recognition accuracy.
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE` to use an existing Chromium binary. The capture audit additionally runs real Chromium MediaRecorder and Web Audio decoding,
+checks PCM payloads, simulates a service outage, retries identical audio and completes
+five spoken turns. Provider responses remain mocked; these checks do not verify live
+API access or subjective recognition accuracy.
 
-Model references: [streaming speech generation](https://ai.google.dev/gemini-api/docs/generate-content/speech-generation), [Flash-Lite audio support](https://ai.google.dev/gemini-api/docs/models/gemini-2.5-flash-lite), [thinking controls](https://ai.google.dev/gemini-api/docs/thinking).
+Model references: [streaming speech generation](https://ai.google.dev/gemini-api/docs/generate-content/speech-generation), [Flash-Lite audio support](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash-lite), [legacy model access changes](https://ai.google.dev/gemini-api/docs/changelog), [thinking controls](https://ai.google.dev/gemini-api/docs/thinking).

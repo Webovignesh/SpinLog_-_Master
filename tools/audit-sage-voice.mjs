@@ -392,10 +392,10 @@ test('fast recognition and a 900ms pause are defaults; careful preferences remai
   try {
     assert.equal(h.root.SageVoice.settings.pauseMs,900);
     await h.open(); await h.finish();
-    assert.match(h.requests[0].url,/gemini-2.5-flash-lite:generateContent/);
+    assert.match(h.requests[0].url,/gemini-3.5-flash-lite:generateContent/);
     assert.equal(careful.root.SageVoice.settings.pauseMs,2200);
     await careful.open(); await careful.finish();
-    assert.match(careful.requests[0].url,/gemini-2.5-flash:generateContent/);
+    assert.match(careful.requests[0].url,/gemini-3.5-flash:generateContent/);
   } finally {h.cleanup();careful.cleanup();}
 });
 
@@ -526,4 +526,62 @@ test('truncated audio stream offers replay and automatically recovers the mic',a
     await h.root.SageVoice.sendVoiceText('reply');await until(()=>h.recordings.length===2);
     assert.equal(h.nodes.get('sageVoiceReplay').hidden,false);assert.equal(h.nodes.get('sageVoiceMic').getAttribute('aria-pressed'),'false');
   } finally {h.cleanup();}
+});
+
+const transcriptResponse = (text='சொல்லு டா') => ({ok:true,json:async()=>({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify({transcript:text,unclear:false})}]}}]})});
+const sttError = (status,message='unavailable') => ({ok:false,status,json:async()=>({error:{message}})});
+test('unavailable recognition model falls back on the same audio and remembers the route',async()=>{
+  let calls=0;const h=harness({transcribe:async()=>++calls===1?sttError(404):transcriptResponse()});
+  try {await h.open();await h.finish();await until(()=>h.recordings.length===2);
+    const first=h.requests.filter(r=>!r.body.generationConfig.responseModalities);
+    assert.equal(first.length,2);assert.match(first[1].url,/gemini-3.1-flash-lite/);
+    assert.equal(first[0].body.contents[0].parts[0].inlineData.data,first[1].body.contents[0].parts[0].inlineData.data);
+    assert.equal(first[0].body.generationConfig.thinkingConfig.thinkingLevel,'low');
+    await h.finish();await until(()=>h.recordings.length===3);
+    assert.match(h.requests.filter(r=>!r.body.generationConfig.responseModalities).at(-1).url,/gemini-3.1-flash-lite/);
+  }finally{h.cleanup();}
+});
+test('unsupported thinking option retries once without it, preserving schema safeguards',async()=>{
+  let calls=0;const h=harness({transcribe:async()=>++calls===1?sttError(400,'thinkingLevel is not supported'):transcriptResponse()});
+  try {await h.open();await h.finish();await until(()=>h.recordings.length===2);
+    assert.equal(h.requests[1].body.generationConfig.thinkingConfig,undefined);
+    assert.ok(h.requests[1].body.generationConfig.responseSchema.required.includes('unclear'));
+  }finally{h.cleanup();}
+});
+test('failed recognition never cycles capture; retry reuses saved recording without decoding again',async()=>{
+  let failing=true;const h=harness({fastRestarts:true,transcribe:async()=>failing?sttError(503):transcriptResponse()});
+  try {await h.open();await h.finish();await until(()=>!h.nodes.get('sageVoiceSTTError').hidden);
+    assert.equal(h.requests.length,2);assert.equal(h.recordings.length,1);
+    h.tick(10000);await delay(30);assert.equal(h.recordings.length,1);assert.equal(h.asks.length,0);
+    assert.equal(h.nodes.get('sageVoiceState').textContent,'Couldn’t transcribe');
+    const audio=h.requests[0].body.contents[0].parts[0].inlineData.data;
+    failing=false;h.nodes.get('sageVoiceSTTRetry').emit('click');await until(()=>h.recordings.length===2);
+    assert.equal(h.decoded.length,1);assert.equal(h.requests[2].body.contents[0].parts[0].inlineData.data,audio);
+    assert.equal(h.asks.length,1);assert.equal(h.nodes.get('sageVoiceSTTError').hidden,true);
+  }finally{h.cleanup();}
+});
+test('invalid key shows actionable failure and does not retry unchanged requests',async()=>{
+  const h=harness({transcribe:async()=>sttError(400,'API key not valid')});
+  try {await h.open();await h.finish();await until(()=>!h.nodes.get('sageVoiceSTTError').hidden);
+    assert.equal(h.requests.length,1);assert.match(h.nodes.get('sageVoiceHint').textContent,/key was rejected/);
+    h.nodes.get('sageVoiceSTTBrowser').emit('click');await until(()=>h.recognition.length===1);
+    assert.equal(h.recognition[0].lang,'ta-IN');assert.equal(h.nodes.get('sageVoiceSTTError').hidden,true);
+    assert.equal(h.requests.length,1);
+  }finally{h.cleanup();}
+});
+test('quota recovery honors cooldown and does not record or upload repeatedly',async()=>{
+  const h=harness({transcribe:async()=>sttError(429)});
+  try {await h.open();await h.finish();await until(()=>!h.nodes.get('sageVoiceSTTError').hidden);
+    h.nodes.get('sageVoiceSTTRetry').emit('click');await delay(10);assert.equal(h.requests.length,1);
+    assert.match(h.nodes.get('sageVoiceHint').textContent,/60 seconds/);
+    h.tick(60001);h.nodes.get('sageVoiceSTTRetry').emit('click');await until(()=>h.requests.length===2);
+    assert.equal(h.recordings.length,1);
+  }finally{h.cleanup();}
+});
+test('closing failed recognition clears saved audio and retry cannot upload into new session',async()=>{
+  const h=harness({transcribe:async()=>sttError(403,'API_KEY_HTTP_REFERRER_BLOCKED')});
+  try {await h.open();await h.finish();await until(()=>!h.nodes.get('sageVoiceSTTError').hidden);
+    h.root.SageVoice.close();await h.open();h.nodes.get('sageVoiceSTTRetry').emit('click');await delay(15);
+    assert.equal(h.requests.length,1);assert.equal(h.nodes.get('sageVoiceSTTError').hidden,true);
+  }finally{h.cleanup();}
 });

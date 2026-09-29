@@ -1,4 +1,4 @@
-/* Sage voice room v1.9.25. Loaded after the app styles with its own version URL. */
+/* Sage voice room v1.9.26. Loaded after the app styles with its own version URL. */
 .sage-voice-entry { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 18px; font-family:var(--sl-read); }
 .sage-voice-entry > span { color:#989ba4; font:400 12px/1.5 var(--sl-read); }
 .sage-chat-mic { display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; width:auto; min-width:128px; height:40px; padding:0 14px; gap:8px; border:1px solid #ffd2ae40; border-radius:12px; background:#2c251f; color:#ffd6b5; font:600 12px/1 var(--sl-read); white-space:nowrap; box-shadow:none; animation:none; cursor:pointer; }
@@ -111,3 +111,8 @@
 .sage-listening-settings > small { color: #aaaab4; line-height: 1.6; font-size: 0.72rem; }
 .sage-voice-review-choice { display: flex; align-items: flex-start; gap: 10px; line-height: 1.6; cursor: pointer; }
 .sage-voice-review-choice input { accent-color: #fb923c; width: 18px; height: 18px; flex-shrink: 0; }
+
+.sage-voice-stt-error { display:flex; flex-wrap:wrap; justify-content:center; gap:8px; flex-shrink:0; margin:8px auto 0; }
+.sage-voice-stt-error[hidden] { display:none; }
+.sage-voice-stt-error button { min-height:40px; padding:8px 12px; border:1px solid #ffffff30; border-radius:12px; background:#292724; color:#f4e8dc; font:500 12px/1.4 var(--sl-read); cursor:pointer; }
+.sage-voice-stt-error button:focus-visible { outline:2px solid #ffbc86; outline-offset:3px; }
