@@ -33,10 +33,12 @@ test('voice starts while background HTTP is pending; ordinary requests remain se
     assert.equal((await voice).ok,true);
     assert.equal(h.requests.length,2,'ordinary request is still behind background');
     assert.ok(h.delays.includes(12000),'voice uses shorter request timeout');
-    assert.ok(h.delays.some(ms=>ms>1000 && ms<=1500),'shared start spacing remains');
-    assert.equal(h.requests[1].body.generationConfig.thinkingConfig.thinkingLevel,'low');
+    assert.ok(!h.delays.some(ms=>ms>0 && ms<=1500),'different model does not wait behind background');
+    assert.match(h.requests[1].url,/gemini-3.5-flash-lite/);
+    assert.equal(h.requests[1].body.generationConfig.thinkingConfig.thinkingLevel,'minimal');
     finishBackground();await background;await ordinary;
     assert.equal(h.requests.length,3);
+    assert.ok(h.delays.some(ms=>ms>0 && ms<=1500),'same model retains start spacing');
   } finally {h.cleanup();}
 });
 
@@ -66,4 +68,50 @@ test('spoken answers preserve Tamil script and instruct full regional phrases',a
     const system=JSON.stringify(h.requests[0].body.systemInstruction);
     assert.match(system,/Chennai/);assert.match(system,/Theni/);assert.match(system,/sollu da/);
   } finally {h.cleanup();}
+});
+
+const quota=(violations,retryDelay='65s')=>({ok:false,status:429,headers:{get:()=>null},json:async()=>({error:{details:[{violations},{retryDelay}]}})});
+test('model quota falls through to another model without resting the key or clearing the quota',async()=>{
+  const h=harness(async(url,init,n)=>n===1?quota([{quotaId:'GenerateRequestsPerMinutePerProjectPerModel',quotaDimensions:{model:'gemini-3.5-flash-lite'}}]):answer('சொல்லு டா'));
+  try{const at=Date.now(),reply=await h.AI.askSage('hello',{voice:true,tools:false});
+    assert.equal(reply.ok,true);assert.equal(h.requests.length,2);
+    assert.match(h.requests[1].url,/gemini-3.5-flash:/);
+    assert.equal(h.AI.availableKeys().length,1);
+    const rest=h.AI.readBackoff().models['gemini-3.5-flash-lite'];
+    assert.equal(rest.kind,'quota');assert.ok(rest.until>=at+65000);
+    await h.AI.askSage('next',{voice:true,tools:false});
+    assert.match(h.requests[2].url,/gemini-3.5-flash:/,'do not retry the capped model');
+  }finally{h.cleanup();}
+});
+test('project-wide and mixed quotas preserve whole-key cooldown and retry metadata',async()=>{
+  for(const violations of [[],[{quotaId:'DailyProjectSpend'}],[{quotaDimensions:{model:'gemini-3.5-flash-lite'}},{quotaId:'DailyProjectSpend'}]]){
+    const h=harness(async()=>quota(violations,'120s'));
+    try{const reply=await h.AI.askSage('hello',{voice:true,tools:false});
+      assert.equal(reply.ok,false);assert.equal(reply.reason,'backoff');
+      assert.ok(reply.retryInMs>119000);assert.equal(h.requests.length,1);
+      assert.equal(h.AI.availableKeys().length,0);
+    }finally{h.cleanup();}
+  }
+});
+test('resting full chat models and an older catalog cannot block the voice Lite route',async()=>{
+  const h=harness(async()=>answer('ready bro'));
+  try{h.AI.setKnownModels(h.AI.MODEL_CHAIN);h.AI.MODEL_CHAIN.forEach(m=>h.AI.noteModelUnavailable(m));
+    assert.equal(h.AI.ready().ok,false);
+    const reply=await h.AI.askSage('hello',{voice:true,tools:false});
+    assert.equal(reply.ok,true);assert.match(h.requests[0].url,/gemini-3.5-flash-lite/);
+  }finally{h.cleanup();}
+});
+
+
+test('an older in-flight success cannot erase a newer project quota cooldown',async()=>{
+  let finishBackground;
+  const h=harness(async(url,init,n)=>n===1?new Promise(resolve=>{finishBackground=()=>resolve(answer('background'));}):quota([{quotaId:'DailyProjectSpend'}],'120s'));
+  try{
+    const background=h.AI.generate('background',{purpose:'auto',system:'test'});
+    await until(()=>finishBackground);
+    const voice=await h.AI.askSage('hello',{voice:true,tools:false});
+    assert.equal(voice.reason,'backoff');
+    finishBackground();await background;
+    assert.equal(h.AI.availableKeys().length,0,'late success preserves active quota rest');
+  }finally{h.cleanup();}
 });

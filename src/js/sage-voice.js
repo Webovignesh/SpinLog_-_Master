@@ -34,7 +34,7 @@
     get recognition() { return load('sage_voice_recognition', 'gemini'); },
     get review() { return load('sage_voice_review', 'false') === 'true'; },
     get speed() { return load('sage_voice_speed', 'fast') === 'careful' ? 'careful' : 'fast'; },
-    get pauseMs() { return load('sage_voice_pause', 'quick') === 'patient' ? 2200 : 900; },
+    get pauseMs() { return load('sage_voice_pause', 'quick') === 'patient' ? 2200 : 650; },
     set sttLang(v) { save(LS_STT_LANG, v); },
   };
 
@@ -457,6 +457,38 @@
     if (S.sttMode === 'gemini') return startGeminiListen();
     return startBrowserListen();
   }
+  let previewRec = null;
+  function stopPreview() {
+    const r = previewRec;
+    previewRec = null;
+    if (!r) return;
+    r.onresult = r.onend = r.onerror = null;
+    try { r.abort(); } catch { /* optional captions only */ }
+  }
+  function startPreview(take) {
+    stopPreview();
+    const Ctor = RecognitionCtor();
+    if (!Ctor) return;
+    let r;
+    try { r = new Ctor(); } catch { return; }
+    previewRec = r;
+    r.lang = settings.sttLang;
+    r.continuous = true;
+    r.interimResults = true;
+    r.maxAlternatives = 1;
+    const valid = () => previewRec === r && capture === take && !take.stopping
+      && current(take.owner) && S.recording && !S.muted;
+    r.onresult = event => {
+      if (!valid()) return;
+      // Rebuild this recognizer's hypothesis: interim words can be revised.
+      const text = Array.from(event.results, result => result[0]?.transcript || '').join(' ').trim();
+      if (text) paintCaption(text, true, true);
+    };
+    // Browser captions are best effort. Never restart/stop the recorder or
+    // submit their guesses; Gemini still hears the full bilingual audio turn.
+    r.onerror = r.onend = () => { if (previewRec === r) stopPreview(); };
+    try { r.start(); } catch { stopPreview(); }
+  }
   async function startGeminiListen() {
     if (!canListen() || openingMic || S.recording) return false;
     const owner = S.session;
@@ -484,6 +516,7 @@
       setMode('listening');
       setHint(S.lastSaid ? 'Reply audio is unavailable. Keep talking, or tap Play reply.' : 'Speak naturally. Pause to send, or tap the orb when you’re done.');
       paintCaption('', false);
+      startPreview(take);
       take.timer = setInterval(() => {
         if (capture !== take || take.stopping) return;
         const now = Date.now();
@@ -517,6 +550,7 @@
     } finally { if (epoch === captureEpoch) openingMic = false; }
   }
   function cancelGeminiListen() {
+    stopPreview();
     const take = capture;
     capture = null;
     S.recording = false;
@@ -531,6 +565,7 @@
     if (!take || take.stopping) return;
     if (!commit) { cancelGeminiListen(); return; }
     take.stopping = true;
+    stopPreview();
     clearInterval(take.timer);
     S.recording = false;
     S.transcribing = true;
@@ -663,7 +698,7 @@
         const generationConfig = {temperature:0, maxOutputTokens:1200,
           responseMimeType:'application/json', responseSchema:{type:'OBJECT',
             properties:{transcript:{type:'STRING'}, unclear:{type:'BOOLEAN'}}, required:['transcript','unclear']}};
-        if (!simple) generationConfig.thinkingConfig = model.startsWith('gemini-2.5') ? {thinkingBudget:0} : {thinkingLevel:'low'};
+        if (!simple) generationConfig.thinkingConfig = model.startsWith('gemini-2.5') ? {thinkingBudget:0} : {thinkingLevel:model === 'gemini-3.5-flash-lite' ? 'minimal' : 'low'};
         let res;
         try {
           res = await fetch(`${GEM_API}/models/${model}:generateContent`, {
@@ -883,7 +918,7 @@
   }
 
   /** The live "you: …" line while he talks. Replaced, never stacked. */
-  function paintCaption(full, live) {
+  function paintCaption(full, live, draft = false) {
     const e = els();
     if (!e.caption) return;
     const f = String(full || '').trim();
@@ -891,7 +926,7 @@
       e.caption.textContent = '';
       return;
     }
-    e.caption.innerHTML = `<span class="sage-voice-you">you · </span>${esc(f.length > 200 ? f.slice(-200) : f)}`
+    e.caption.innerHTML = `<span class="sage-voice-you">${draft ? 'draft' : 'you'} · </span>${esc(f.length > 200 ? f.slice(-200) : f)}`
       + (live ? '<span class="sage-voice-caret" aria-hidden="true"></span>' : '');
   }
 
@@ -954,11 +989,11 @@
     } catch { /* storage full etc. */ }
   }
 
-  function voiceProblem(reason) {
+  function voiceProblem(reason, retryInMs) {
     if (reason === 'no-key') return 'Add a Gemini key in settings so I can answer and speak.';
     if (reason === 'offline') return 'You are offline, so I cannot answer right now.';
-    if (reason === 'backoff') return 'All my models are resting. Give me a minute.';
-    return 'I went quiet. Say it again?';
+    if (reason === 'backoff') return `Reply service is temporarily limited.${retryInMs > 0 ? ` Try again in ${Math.ceil(retryInMs / 1000)} seconds.` : ' Try again shortly.'} Your words are saved in chat.`;
+    return 'The reply service could not answer. Your words are saved in chat; please try again.';
   }
 
   function audioProblem(err) {
@@ -1065,11 +1100,12 @@
     if (!S.open || owner !== S.session) return;
 
     if (!result || !result.ok) {
-      const line = voiceProblem(result && result.reason);
-      setHint(line);
-      addLine('her', line);
+      const line = voiceProblem(result?.reason, result?.retryInMs);
       setActivity(null);
-      await deliverReply(line, owner);
+      S.busy = false;
+      setMode('idle');
+      if (!S.muted) await startListening();
+      if (current(owner)) setHint(line);
       return;
     }
 

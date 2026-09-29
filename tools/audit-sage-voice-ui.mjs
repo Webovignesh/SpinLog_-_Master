@@ -30,7 +30,7 @@ const server = http.createServer(async (req,res) => {
   try {
     let content = await readFile(filename);
     if (rel === 'index.html') content = content.toString().replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'')
-      .replace('</body>','<script src="src/js/sage-voice.js?v=1.9.26"></script></body>');
+      .replace('</body>','<script src="src/js/sage-voice.js?v=1.9.27"></script></body>');
     res.setHeader('Content-Type', ({'.html':'text/html','.js':'text/javascript','.css':'text/css','.woff2':'font/woff2','.webp':'image/webp'})[path.extname(filename)] || 'application/octet-stream');
     res.end(content);
   } catch {res.writeHead(404).end();}
@@ -73,7 +73,7 @@ try {
     await page.locator('#sageChatMic').click();
     assert.equal(await page.locator('.sage-voice-core').evaluate(el=>getComputedStyle(el).display),'block','new orb CSS bypasses stale unversioned cache');
     for (const asset of ['src/css/styles.css','src/css/home.css','src/css/sage-voice.css','src/js/sage-voice.js']) {
-      assert.ok(await page.evaluate(asset=>[...document.querySelectorAll('link[href],script[src]')].some(el=>(el.href||el.src).endsWith(asset+'?v=1.9.26')),asset),'voice assets use versioned URLs');
+      assert.ok(await page.evaluate(asset=>[...document.querySelectorAll('link[href],script[src]')].some(el=>(el.href||el.src).endsWith(asset+'?v=1.9.27')),asset),'voice assets use versioned URLs');
     }
     await page.evaluate(async()=>{
       await SageVoice.sendVoiceText('Bro, நேத்து petrol போட்டேன்.');
@@ -84,6 +84,10 @@ try {
     assert.equal(await page.locator('#sageVoiceLines > p').count(),4);
     assert.equal(await page.locator('#sageVoiceClose').count(),0);
     assert.equal(await page.locator('.sage-voice-line').first().evaluate(el=>getComputedStyle(el).textAlign),'center');
+    const conversation = await page.locator('#sageVoiceLines').boundingBox();
+    assert.ok(Math.abs(conversation.y + conversation.height/2 - height/2) < height*.15, `${name}: conversation occupies the middle of the screen`);
+    const instruction = await page.locator('#sageVoiceInstruction').boundingBox();
+    if (instruction) assert.ok(instruction.y+instruction.height <= conversation.y+2, `${name}: instructions do not overlap conversation`);
     const bounds = await page.locator('.sage-voice-card').boundingBox();
     assert.ok(bounds.x >= -1 && bounds.y >= -1 && bounds.x+bounds.width <= width+1 && bounds.y+bounds.height <= height+1, `${name}: card fits screen`);
     for (const selector of ['#sageVoiceEnd','#sageVoiceMic']) {

@@ -26,6 +26,7 @@ try {
   page.on('pageerror',e=>errors.push(e.message));
   await page.route('**/*',r=>r.request().url().startsWith(base)?r.continue():r.abort());
   await page.addInitScript(()=>{
+    window.SpeechRecognition=class {start(){} abort(){} stop(){}};
     window.recordedRequests=[];window.replies=[];window.failRecognition=true;
     window.SageAI={availableKeys:()=>[{key:'test-only'}],askSage:async text=>{replies.push(text);return {ok:true,text:'Okay, heard you.'};}};
     let history=[];window.dkCloudStore={chatHistory:()=>history,setChat:rows=>history=rows};
