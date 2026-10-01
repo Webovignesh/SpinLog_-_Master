@@ -753,3 +753,74 @@ test('relaxed pause and explicit mute are respected by browser endpointing',asyn
     assert.equal(h.requests.length,0);assert.equal(h.recordings.length,1);
   }finally{h.cleanup();}
 });
+
+test('auto captions start in English and follow only confirmed audio; fixed preference wins', async()=>{
+  const h=harness();
+  try {
+    await h.open();assert.equal(h.recognition[0].lang,'en-IN');
+    h.recognition[0].result('தமிழ் ஊகம்',false);
+    await h.finish();await until(()=>h.recordings.length===2);
+    assert.equal(h.recognition[1].lang,'ta-IN');
+    await h.root.SageVoice.sendVoiceText('What is my costliest update?');
+    await until(()=>h.recordings.length===3);assert.equal(h.recognition[2].lang,'en-IN');
+  } finally {h.cleanup();}
+  const fixed=harness({storage:{sage_voice_caption_lang:'en-IN',sage_voice_lang:'ta-IN'}});
+  try {await fixed.open();await fixed.finish();await until(()=>fixed.recordings.length===2);
+    assert.equal(fixed.recognition[1].lang,'en-IN');assert.equal(fixed.root.SageVoice.settings.sttLang,'ta-IN');
+  } finally {fixed.cleanup();}
+});
+test('voice is visibly detected before delayed captions; a transient empty caption stream retries once', async()=>{
+  const h=harness({loud:true});
+  try {await h.open();h.tick(100);h.tick(100);
+    assert.match(h.nodes.get('sageVoiceHint').textContent,/I can hear you/);
+    h.recognition[0].onerror({error:'network'});await until(()=>h.recognition.length===2);
+    assert.equal(h.recordings.length,1);assert.equal(h.requests.length,0);
+    h.recognition[1].onerror({error:'network'});await delay(350);
+    assert.equal(h.recognition.length,2);
+  } finally {h.cleanup();}
+});
+test('caption retry never restarts after close or a permission denial', async()=>{
+  for(const error of ['network','not-allowed']) {
+    const h=harness();try {await h.open();h.recognition[0].onerror({error});
+      if(error==='network')h.root.SageVoice.close();await delay(350);assert.equal(h.recognition.length,1);
+    }finally{h.cleanup();}
+  }
+});
+test('repeated full questions collapse in live captions, the submitted turn and history', async()=>{
+  const repeated='Which one is the costliest Which one is the costliest Which one is the costliest update';
+  const h=harness({transcript:{transcript:repeated,unclear:false}});
+  try {await h.open();h.recognition[0].result(repeated,false);
+    assert.equal((h.nodes.get('sageVoiceCaption').innerHTML.match(/Which one/g)||[]).length,1);
+    await h.finish();await until(()=>h.recordings.length===2);
+    assert.deepEqual(h.asks,['Which one is the costliest update']);assert.equal(h.history[0].text,h.asks[0]);
+    const emphatic='No no no, I paid 500 not 5000';await h.root.SageVoice.sendVoiceText(emphatic);
+    assert.equal(h.asks[1],emphatic);
+    await h.root.SageVoice.sendVoiceText(emphatic);assert.equal(h.asks[2],emphatic,'same answer in a new turn is kept');
+  }finally{h.cleanup();}
+});
+test('a final exact close command exits locally after the pause, with no provider request',async()=>{
+  for(const text of ['close voice mode','Sage, end the call please','can you close voice mode','voice mode close pannu','வாய்ஸ் மோடை மூடு']) {
+    const h=harness();try {await h.open();h.recognition[0].result(text,true);h.tick(449);
+      assert.equal(h.root.SageVoice.isOpen(),true);h.tick(1);
+      assert.equal(h.root.SageVoice.isOpen(),false,text);assert.equal(h.requests.length,0);assert.equal(h.asks.length,0);
+      assert.equal(h.streams[0].getTracks()[0].readyState,'ended');
+    }finally{h.cleanup();}
+  }
+});
+test('negations, quoted instructions, questions and incomplete commands do not trigger local close',async()=>{
+  for(const text of ["don't close voice mode",'how do I close voice mode','say close voice mode','close voice mode after this answer']) {
+    const h=harness();try {await h.open();await h.root.SageVoice.sendVoiceText(text);
+      assert.equal(h.root.SageVoice.isOpen(),true,text);assert.equal(h.asks[0],text);
+    }finally{h.cleanup();}
+  }
+  const h=harness();try {await h.open();h.recognition[0].result('close voice mode',false);h.tick(500);
+    assert.equal(h.root.SageVoice.isOpen(),true);
+  }finally{h.cleanup();}
+});
+test('review preference still reviews a close command before acting',async()=>{
+  const h=harness({storage:{sage_voice_review:'true'},transcript:{transcript:'close voice mode',unclear:false}});
+  try {await h.open();h.recognition[0].result('close voice mode',true);h.tick(500);
+    await until(()=>!h.nodes.get('sageVoiceReview').hidden);assert.equal(h.root.SageVoice.isOpen(),true);
+    h.nodes.get('sageVoiceReview').emit('submit');assert.equal(h.root.SageVoice.isOpen(),false);
+  }finally{h.cleanup();}
+});

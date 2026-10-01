@@ -11,6 +11,7 @@
   // ── Persisted voice preferences ────────────
   const LS_GEM_VOICE = 'sage_voice_gem';      // Gemini prebuilt voice
   const LS_RATE = 'sage_voice_rate';
+  const LS_CAPTION_LANG = 'sage_voice_caption_lang'; // separate from browser-only fallback
   const LS_STT_LANG = 'sage_voice_lang';      // explicit browser language
 
   function load(key, fallback) {
@@ -31,6 +32,7 @@
       return Number.isFinite(n) ? Math.min(1.3, Math.max(0.7, n)) : 1;
     },
     get sttLang() { return load(LS_STT_LANG, 'ta-IN') === 'en-IN' ? 'en-IN' : 'ta-IN'; },
+    get captionLang() { return load(LS_CAPTION_LANG, 'auto'); },
     get recognition() { return load('sage_voice_recognition', 'gemini'); },
     get review() { return load('sage_voice_review', 'false') === 'true'; },
     get speed() { return load('sage_voice_speed', 'fast') === 'careful' ? 'careful' : 'fast'; },
@@ -55,6 +57,7 @@
     transcribing: false,
     reviewing: false,
     busy: false,       // brain turn in flight
+    captionLang: 'en-IN', // auto captions start English; confirmed Tamil adapts the next turn
     finalText: '',
     speechSeen: false, // mic energy said a human is talking
     sttMode: 'gemini', // audio first; explicit browser fallback
@@ -516,6 +519,41 @@
     r.onresult = r.onend = r.onerror = r.onspeechstart = r.onspeechend = null;
     try { r.abort(); } catch { /* optional captions only */ }
   }
+  function previewLanguage() {
+    return ['en-IN', 'ta-IN'].includes(settings.captionLang) ? settings.captionLang : S.captionLang;
+  }
+  function rememberCaptionLanguage(text) {
+    // The final audio transcript is authoritative, never the browser's guess.
+    S.captionLang = /[\u0B80-\u0BFF]/.test(text) ? 'ta-IN' : 'en-IN';
+  }
+  function isCloseCommand(text) {
+    const command = String(text).toLowerCase().replace(/[.!?,;]+/g, ' ').replace(/\s+/g, ' ').trim()
+      .replace(/^(?:(?:hey )?sage|bro)\s+/, '').replace(/^please\s+/, '')
+      .replace(/^(?:can|could|would) you\s+/, '').replace(/\s+(?:please|bro|sage)$/, '');
+    return /^(?:(?:close|exit|stop|leave|end) (?:the )?voice (?:mode|chat)|(?:end|close) (?:the |this )?call|hang up|voice (?:mode|chat) (?:close|stop) (?:pannu|pannunga)|வாய்ஸ் (?:மோட்|மோடை|மோடு|மோடைப்) (?:மூடு|மூடுங்க|க்ளோஸ் பண்ணு|க்ளோஸ் பண்ணுங்க)|காலை (?:கட் பண்ணு|முடி))$/u.test(command);
+  }
+  function cleanRepeatedPhrases(raw) {
+    let text = String(raw || '').trim();
+    // Only exact adjacent phrases, within this turn. Keep short emphatic repeats,
+    // numbers, corrections, and repeated answers in separate turns untouched.
+    for (let pass = 0; pass < 8; pass++) {
+      const words = [...text.matchAll(/[\p{L}\p{M}\p{N}]+(?:['’][\p{L}\p{M}]+)*/gu)];
+      if (words.length > 256) break;
+      let removed = false;
+      outer: for (let i = 0; i < words.length; i++) {
+        for (let n = Math.floor((words.length - i) / 2); n >= 4; n--) {
+          const phrase = words.slice(i, i + n);
+          if (phrase.some(w => /\p{N}/u.test(w[0]))) continue;
+          if (!phrase.every((w, j) => w[0].toLowerCase() === words[i + n + j][0].toLowerCase())) continue;
+          text = text.slice(0, words[i].index) + text.slice(words[i + n].index);
+          removed = true;
+          break outer;
+        }
+      }
+      if (!removed) break;
+    }
+    return text;
+  }
   function startPreview(take) {
     stopPreview();
     const Ctor = RecognitionCtor();
@@ -523,7 +561,7 @@
     let r;
     try { r = new Ctor(); } catch { return; }
     previewRec = r;
-    r.lang = settings.sttLang;
+    r.lang = previewLanguage();
     r.continuous = true;
     r.interimResults = true;
     r.maxAlternatives = 1;
@@ -535,12 +573,13 @@
       const results = Array.from(event.results);
       const text = results.map(result => result[0]?.transcript || '').join(' ').trim();
       if (!text) return;
-      paintCaption(text, true, true);
+      paintCaption(cleanRepeatedPhrases(text), true, true);
       // Captions prove speech occurred even when the local level meter misses
       // a quiet voice. They signal turn boundaries, never the submitted words.
       take.heard = true;
       if (text !== take.previewText) take.quietAt = 0;
       take.previewText = text;
+      take.previewFinal = results.every(result => result.isFinal);
       take.previewBoundaryAt = results.at(-1)?.isFinal ? Date.now() : 0;
     };
     r.onspeechstart = () => { if (valid()) { take.previewBoundaryAt = 0; take.quietAt = 0; } };
@@ -550,10 +589,21 @@
     r.onend = () => {
       // Some browsers end with an interim hypothesis instead of a final result.
       if (valid() && take.previewText && !take.previewBoundaryAt) take.previewBoundaryAt = Date.now();
-      if (previewRec === r) stopPreview();
+      if (previewRec === r) { stopPreview(); retryPreview(); }
     };
+    function retryPreview() {
+      if (take.previewText || take.previewRetries) return;
+      take.previewRetries = 1;
+      take.previewRetry = setTimeout(() => {
+        if (capture === take && !take.stopping && current(take.owner) && S.recording && !S.muted && !S.backgrounded) startPreview(take);
+      }, 300);
+    }
     // A network/permission error is not evidence that the user finished.
-    r.onerror = () => { if (previewRec === r) stopPreview(); };
+    r.onerror = event => {
+      if (previewRec !== r) return;
+      stopPreview();
+      if (['network', 'no-speech'].includes(event.error)) retryPreview();
+    };
 
     try { r.start(); } catch { stopPreview(); }
   }
@@ -605,7 +655,10 @@
         if (loud) {
           take.quietAt = 0;
           if (!take.loudAt) take.loudAt = now;
-          if (now - take.loudAt >= 100) take.heard = true;
+          if (now - take.loudAt >= 100 && !take.heard) {
+            take.heard = true;
+            if (!take.previewText) setHint('I can hear you. Keep going; your words will appear shortly.');
+          }
         } else {
           take.loudAt = 0;
           if (take.heard) {
@@ -638,6 +691,7 @@
     if (!take) return;
     take.cancelled = true;
     clearInterval(take.timer);
+    clearTimeout(take.previewRetry);
     take.chunks = [];
     try { if (take.recorder.state !== 'inactive') take.recorder.stop(); } catch { /* already stopped */ }
   }
@@ -645,9 +699,15 @@
     const take = capture;
     if (!take || take.stopping) return;
     if (!commit) { cancelGeminiListen(); return; }
+    // A final, exact exit command needs neither an audio upload nor a model.
+    if (!settings.review && take.previewFinal && isCloseCommand(take.previewText)) {
+      sendVoiceText(take.previewText);
+      return;
+    }
     take.stopping = true;
     stopPreview();
     clearInterval(take.timer);
+    clearTimeout(take.previewRetry);
     S.recording = false;
     S.transcribing = true;
     setMode('transcribing');
@@ -660,6 +720,7 @@
   async function completeCapture(take) {
     if (take.cancelled || capture !== take || !current(take.owner)) return;
     clearInterval(take.timer);
+    clearTimeout(take.previewRetry);
     capture = null;
     S.recording = false;
     S.transcribing = true;
@@ -836,13 +897,14 @@
     }
   }
   function acceptTranscript(result) {
-    const text = String(result.transcript || '').trim();
+    const text = cleanRepeatedPhrases(result.transcript);
     if (!text) {
       // An empty transcript is not a microphone failure. Wait for the next
       // utterance; VAD still prevents silent recordings from being uploaded.
       if (canListen()) startListening();
       return;
     }
+    if (!result.unclear) rememberCaptionLanguage(text);
     if (settings.review || result.unclear) {
       S.reviewing = true;
       $('sageVoiceReview').hidden = false;
@@ -1138,8 +1200,14 @@
   }
 
   async function sendVoiceText(raw) {
-    const said = String(raw || '').trim();
+    const said = cleanRepeatedPhrases(raw);
     if (!said || S.busy || !S.open) return;
+    rememberCaptionLanguage(said);
+    if (isCloseCommand(said)) {
+      pushTurn({ role: 'user', text: said, at: Date.now(), via: 'voice' });
+      close();
+      return;
+    }
     const owner = S.session;
     S.busy = true;
     S.finalText = '';
@@ -1169,6 +1237,7 @@
       result = await AI.askSage(said, {
         history,
         voice: true,
+        isCancelled: () => !current(owner),
         maxTokens: 480, // leave room for complete replies; brevity belongs in the prompt
         onTool: name => {
           if (S.open && owner === S.session) setActivity(name);
@@ -1212,6 +1281,7 @@
     const e = els();
     if (!e.overlay) return false;
     if (S.open) return true;
+    S.captionLang = 'en-IN';
     S.lastFocus = document.activeElement || null;
     S.open = true;
     S.backgrounded = false;
@@ -1393,6 +1463,7 @@
     const preferences = [
       ['sageVoiceRecognition', 'sage_voice_recognition', settings.recognition],
       ['sageVoiceLanguage', LS_STT_LANG, settings.sttLang],
+      ['sageVoiceCaptionLanguage', LS_CAPTION_LANG, settings.captionLang],
       ['sageVoicePause', 'sage_voice_pause', load('sage_voice_pause', 'quick')],
       ['sageVoiceSpeed', 'sage_voice_speed', settings.speed],
       ['sageVoiceReviewSetting', 'sage_voice_review', settings.review],

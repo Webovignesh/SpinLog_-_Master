@@ -1119,8 +1119,9 @@
     '',
     'OPENING PAGES',
     'open_section does not open anything. It puts a button under your reply and he',
-    'decides. So never say you have opened, shown or taken him to a page — you have',
-    'offered one. Offer a page only when he asked to go somewhere, or when the next',
+    'decides. For this offer, never say the page opened. For an explicit request',
+    'to open a page use navigate_section; for settings use open_sage_settings.',
+    'Use control_voice to open or close voice mode when requested. Offer a page when the next',
     'step is genuinely his: attaching a bill, picking a file. Answering a question',
     'is not a reason to offer a page.',
     '',
@@ -1731,6 +1732,7 @@
     const meta = (opts.meta && typeof opts.meta === 'object') ? opts.meta : {};
 
     for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
+      if (opts.isCancelled?.()) return { ok: false, reason: 'cancelled', calls };
       // On the final round the tools are withheld, which forces her to answer in
       // words instead of reaching for another control forever.
       const offerTools = tools && round < MAX_TOOL_ROUNDS;
@@ -1756,6 +1758,7 @@
         return body;
       }, opts);
 
+      if (opts.isCancelled?.()) return { ok: false, reason: 'cancelled', calls };
       if (!walk.ok) {
         meta.reason = walk.reason;
         return { ok: false, reason: walk.reason, calls };
@@ -1776,6 +1779,7 @@
 
       const responses = [];
       for (const call of wanted) {
+        if (opts.isCancelled?.()) return { ok: false, reason: 'cancelled', calls };
         let outcome;
         try {
           outcome = await opts.onTool(call.name, call.args || {});
@@ -2916,7 +2920,9 @@
     'are broken down for you, including what went on mods and updates as against',
     'standard servicing. If a control hands you a list, its `totals` cover every',
     'record; the listed rows are usually only the newest few and summing them',
-    'gives a wrong answer. If you do not know, say so plainly and briefly. Then stop.',
+    'gives a wrong answer. Totals answer total-spend questions only. For costliest work',
+    'call list_services and use mostExpensive, naming the work and its price, not a sum.',
+    'If you do not know, say so plainly and briefly. Then stop.',
     'Stay in character. You are still the bike.',
     '',
     'If his message tells you something worth keeping — plans, feelings, people in',
@@ -3028,6 +3034,19 @@
    * as he used" was already in the persona and she still wrote five Tamil words
    * back at a two-word greeting.
    */
+  function voiceLanguageDirective(text) {
+    const tamil = readLanguage(text).thanglish;
+    return [
+      'SPOKEN CONVERSATION — these instructions take precedence over chat language/style rules.',
+      tamil
+        ? 'He spoke Tamil or Tanglish. Reply in natural spoken Tamil matching his mix of English. Write Tamil words in Tamil script for speech, and English terms in English. Use familiar Chennai/Theni phrasing only when it fits his register, without forced slang or formal literary Tamil. Mixed clauses are fine when they sound natural; do not translate an English sentence word for word.'
+        : 'He spoke English. Reply naturally in English; do not switch to Tamil just because previous turns were Tamil.',
+      'Keep the same warm adult feminine personality. Be attentive and specific, with light playfulness only when it fits. Do not keep adding da, bro, pet names or a question to every reply. Complete phrases such as sollu da belong only when inviting him to speak. Avoid scripted greetings and repetitive reassurance.',
+      'Answer what he actually asked first. A costliest item question needs the item and its price, not total spending. Use tools for stored facts; never invent details. Read his follow-up in the context of the previous question. If one detail is genuinely ambiguous, ask one short useful question.',
+      'Use the available controls to carry out explicit requests, including closing voice mode or opening a page/settings. For unavailable actions, explain the limit briefly; only claim success after a successful tool result. Keep existing confirmations for destructive actions.',
+    ].join('\n');
+  }
+
   function languageDirective(text) {
     const read = readLanguage(text);
     if (!read.thanglish) {
@@ -3162,8 +3181,8 @@
       recallFor: asked,
       // The language line goes LAST, after the chat rules, because personaFor puts
       // the state block at the end and the end is what she weighs most.
-      state: [held, contextBlock(context), CHAT_RULES, languageDirective(asked),
-        'For Tamil/Tanglish replies, use complete natural colloquial phrases from Chennai or Theni to match his register. Say sollu da when inviting him to tell you, not a bare da followed by tell me. Do not caricature an accent or mix unrelated regional languages.',
+      state: [held, contextBlock(context), CHAT_RULES, opts.voice ? voiceLanguageDirective(asked) : languageDirective(asked),
+        opts.voice ? null : 'For Tamil/Tanglish replies, use complete natural colloquial phrases from Chennai or Theni to match his register. Say sollu da when inviting him to tell you, not a bare da followed by tell me. Do not caricature an accent or mix unrelated regional languages.',
         opts.voice ? 'This is a spoken voice conversation. For Tamil speech, override any earlier Latin-only rule: write Tamil words in Tamil script for correct pronunciation; keep English terms in English. Use one warm, lightly teasing adult feminine persona in both languages. Answer directly in one or two short sentences unless detail is essential. No markdown, emojis, greeting preamble or read-out of tool activity. Preserve important numbers and facts.' : null]
         .filter(Boolean).join('\n\n'),
     });
@@ -3194,6 +3213,7 @@
       // You asked, so this is never rationed against the background allowance.
       purpose: 'chat',
       voice: opts.voice === true,
+      isCancelled: opts.isCancelled,
       timeoutMs: opts.voice ? 12000 : undefined,
     });
 

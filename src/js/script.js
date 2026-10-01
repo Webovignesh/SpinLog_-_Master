@@ -5626,13 +5626,23 @@ async function getBillFileUrl(fileName) {
      * ₹26,604 against a real total of ₹27,103. `truncated` says so outright, so
      * a partial list can never be mistaken for the whole set.
      */
-    async listServices({ limit = 20, type = null, from = null, to = null } = {}) {
+    async listServices({ limit = 20, type = null, from = null, to = null, sort = 'newest' } = {}) {
       let rows = serviceEntries.slice();
       if (type) rows = rows.filter(r => String(r.type || '').toLowerCase() === String(type).toLowerCase());
       if (okISO(from)) rows = rows.filter(r => r.date && r.date >= from);
       if (okISO(to)) rows = rows.filter(r => r.date && r.date <= to);
       rows.sort((a, b) => String(b.date).localeCompare(String(a.date)));
 
+      const costOf = r => r.cost !== null && r.cost !== '' && Number.isFinite(Number(r.cost)) ? Number(r.cost) : null;
+      if (sort === 'cost_desc') rows.sort((a, b) => (costOf(b) ?? -Infinity) - (costOf(a) ?? -Infinity));
+      const summarize = r => ({ id: r.id, date: r.date, type: r.type, odo: r.odo,
+        cost: r.cost, nextDue: r.next_due, notes: r.notes, hasBill: !!r.bill });
+      const mostExpensive = list => {
+        const priced = list.filter(r => costOf(r) !== null);
+        if (!priced.length) return null;
+        const cost = priced.reduce((max, r) => Math.max(max, costOf(r)), -Infinity);
+        return { cost, currency: 'INR', records: priced.filter(r => costOf(r) === cost).map(summarize) };
+      };
       const shown = rows.slice(0, Math.min(50, Math.max(1, limit)));
       const isMod = r => String(r.type || '').toLowerCase() === 'mods/updates';
       const sum = list => Math.round(list.reduce((t, r) => {
@@ -5655,11 +5665,8 @@ async function getBillFileUrl(fileName) {
           servicesCounted: rows.length - mods.length,
           currency: 'INR',
         },
-        records: shown.map(r => ({
-          id: r.id, date: r.date, type: r.type,
-          odo: r.odo, cost: r.cost, nextDue: r.next_due,
-          notes: r.notes, hasBill: !!r.bill,
-        })),
+        mostExpensive: { everything: mostExpensive(rows), modsAndUpdates: mostExpensive(mods) },
+        records: shown.map(summarize),
       };
     },
 

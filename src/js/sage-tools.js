@@ -46,11 +46,12 @@
         + 'visit, what something cost, or when you last had something done. Also use it to find '
         + 'the id of a record before changing or deleting it. '
         + 'The result carries a `totals` block covering EVERY matching record, including ones not '
-        + 'listed — read those for any money question and never add up `records` yourself, because '
-        + '`truncated` is often true and the list you get is only part of the history.',
+        + 'listed — use totals for TOTAL spending, never add up a partial `records` list, because '
+        + '`truncated` is often true. For costliest/most expensive work, use `mostExpensive` (all matching records, including ties), NOT totals. Name the actual work, its cost and date. For a mod/update question use mostExpensive.modsAndUpdates. If notes do not identify the work, say so; never invent a part name.',
       parameters: {
         type: 'object',
         properties: {
+          sort: { ...STRING, enum: ['newest', 'cost_desc'], description: 'Use cost_desc for a ranked comparison; newest by default.' },
           limit: { ...INTEGER, description: 'How many records to list, newest first. Default 20, max 50. The totals cover everything regardless of this.' },
           type: { ...STRING, description: 'Optional filter: Showroom, 3rd Party or Mods/Updates.' },
           from: { ...DATE, description: 'Optional: only records on or after this date.' },
@@ -508,11 +509,26 @@
 
     /* ── Doing things in the app ──────────────────────────────────── */
     {
+      name: 'control_voice',
+      description: 'Actually open or close voice mode when he asks. Close ends the microphone and reply immediately. Never use for a question about how voice works or a negated request.',
+      parameters: { type: 'object', properties: { action: { ...STRING, enum: ['open', 'close'] } }, required: ['action'] },
+    },
+    {
+      name: 'navigate_section',
+      description: 'Actually take him to home, service history, documents or Sage chat, ONLY when he explicitly asks to go/open/show that page. This ends an active voice call so the page is visible. Do not use for a factual question or a recommendation; use open_section to offer a button instead.',
+      parameters: { type: 'object', properties: { section: { ...STRING, enum: ['home', 'service', 'docs', 'sage'] } }, required: ['section'] },
+    },
+    {
+      name: 'open_sage_settings',
+      description: 'Actually open the requested Sage settings panel. Only when asked to open settings; changing data uses the relevant tool instead. Ends an active voice call to reveal the settings.',
+      parameters: { type: 'object', properties: { tab: { ...STRING, enum: ['memory', 'voice', 'timing', 'alerts'] } }, required: ['tab'] },
+    },
+    {
       name: 'open_section',
       description: 'OFFER him a page — home, service, docs or sage. This does NOT open anything. '
         + 'It puts a button under your reply and he decides whether to press it. Only use it when '
         + 'he needs to do something himself that you cannot, like attaching a bill, or when he '
-        + 'actually asked to be taken somewhere. Never use it to answer a question, and never say '
+        + 'wants a shortcut. For an explicit navigation request use navigate_section. Never use it to answer a question, and never say '
         + 'you have opened or shown him anything.',
       parameters: {
         type: 'object',
@@ -609,6 +625,27 @@
     delete_park_entry: (app, a) => app.deleteParkEntry(a),
 
     // ── Getting around ──
+    control_voice: (_app, a) => {
+      if (!['open', 'close'].includes(a.action)) return { ok: false, error: 'Unknown voice action.' };
+      if (!root.SageVoice) return { ok: false, error: 'Voice mode is not loaded.' };
+      if (a.action === 'open' && !root.SageVoice.open()) return { ok: false, error: 'Voice mode could not open.' };
+      if (a.action === 'close') root.SageVoice.close();
+      return { ok: true, voice: a.action === 'open' ? 'open' : 'closed' };
+    },
+    navigate_section: async (app, a) => {
+      if (!['home', 'service', 'docs', 'sage'].includes(a.section)) return { ok: false, error: 'Unknown section.' };
+      const result = await app.goToSection({ section: a.section });
+      if (result.ok) root.SageVoice?.close();
+      return result;
+    },
+    open_sage_settings: (_app, a) => {
+      if (!['memory', 'voice', 'timing', 'alerts'].includes(a.tab)) return { ok: false, error: 'Unknown settings panel.' };
+      if (!root.SageUI) return { ok: false, error: 'Sage settings are not loaded.' };
+      root.SageVoice?.close();
+      root.SageUI.open(a.tab);
+      if (!root.SageUI.isOpen()) return { ok: false, error: 'Settings could not open.' };
+      return { ok: true, opened: 'sage_settings', tab: a.tab };
+    },
     open_section: (app, a) => app.openSection(a),
     save_park_location: app => app.saveParkLocation(),
     refresh_everything: app => app.refreshEverything(),
@@ -993,7 +1030,7 @@
     'remember', 'list_memories', 'recall_memory', 'read_recap', 'list_episodes',
     'memory_stats', 'update_memory', 'pin_memory', 'sync_memory', 'forget',
     'forget_everything', 'search_conversation', 'get_own_status',
-    'get_vehicle_profile', 'get_health_report',
+    'get_vehicle_profile', 'get_health_report', 'control_voice', 'open_sage_settings',
   ]);
 
   function declarations() {
@@ -1031,6 +1068,9 @@
     delete_media: 'deleting an upload',
     delete_document: 'deleting a document',
     delete_park_entry: 'removing a parking spot',
+    control_voice: 'changing voice mode',
+    navigate_section: 'opening your page',
+    open_sage_settings: 'opening your settings',
     open_section: 'offering you a page',
     save_park_location: 'saving where you parked',
     refresh_everything: 'reloading everything',

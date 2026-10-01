@@ -4,23 +4,23 @@
 // Version segment matches <meta name="version"> in index.html. That meta is what the
 // screen shows; this is what is actually cached. If they disagree, the number on the
 // home chip is a lie about which build is running.
-const CACHE_NAME = 'spinlog-cache-v1.9.29-voice21';
+const CACHE_NAME = 'spinlog-cache-v1.9.30-voice22';
 const OFFLINE_URL = 'index.html';
 
 // The scheduler is shared with the page so foreground and background agree on
 // one queue, one daily cap and one set of cooldowns. importScripts is
 // synchronous, so SageScheduler is ready before any event handler runs.
-importScripts('./src/js/sage-scheduler.js?v=1.9.29');
+importScripts('./src/js/sage-scheduler.js?v=1.9.30');
 
 // three.js is vendored rather than pulled from a CDN specifically so the ambient
 // backdrop survives offline loads. Since r167 the module build is split, so
 // three.core.js must be cached too — three.module.min.js imports it by name.
 const PRECACHE = [
   OFFLINE_URL,
-  './src/css/styles.css?v=1.9.29',
-  './src/css/home.css?v=1.9.29',
-  './src/css/sage-voice.css?v=1.9.29',
-  './src/js/script.js',
+  './src/css/styles.css?v=1.9.30',
+  './src/css/home.css?v=1.9.30',
+  './src/css/sage-voice.css?v=1.9.30',
+  './src/js/script.js?v=1.9.30',
   './src/js/cloud-store.js',
   './src/js/sage-confirm.js',
   './src/js/date-picker.js',
@@ -29,15 +29,15 @@ const PRECACHE = [
   // serve the minority of entries with more than one file, is the wrong trade. The
   // network-first rule caches it on first use instead.
   './src/js/bill-merge.js',
-  './src/js/sage-scheduler.js?v=1.9.29',
-  './src/js/sage-memory.js?v=1.9.29',
-  './src/js/sage-tools.js',
-  './src/js/sage-ai.js?v=1.9.29',
+  './src/js/sage-scheduler.js?v=1.9.30',
+  './src/js/sage-memory.js?v=1.9.30',
+  './src/js/sage-tools.js?v=1.9.30',
+  './src/js/sage-ai.js?v=1.9.30',
   './src/js/sage-keyvault.js',
   './src/js/sage-autofill.js',
-  './src/js/sage-ui.js?v=1.9.29',
-  './src/js/sage-voice.js?v=1.9.29',
-  './src/js/notifications.js?v=1.9.29',
+  './src/js/sage-ui.js?v=1.9.30',
+  './src/js/sage-voice.js?v=1.9.30',
+  './src/js/notifications.js?v=1.9.30',
   './src/js/home3d.js',
   './src/js/docs3d.js',
   './vendor/three.module.min.js',

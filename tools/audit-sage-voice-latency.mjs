@@ -115,3 +115,26 @@ test('an older in-flight success cannot erase a newer project quota cooldown',as
     assert.equal(h.AI.availableKeys().length,0,'late success preserves active quota rest');
   }finally{h.cleanup();}
 });
+
+test('voice language rules override chat mixing restrictions without imposing pet names',async()=>{
+  for(const text of ['எது ரொம்ப விலை அதிகம்','Which update costs the most?']) {
+    const h=harness(async()=>answer('Test response'));
+    try {await h.AI.askSage(text,{voice:true,tools:false});
+      const system=JSON.stringify(h.requests[0].body.systemInstruction);
+      assert.match(system,/Answer what he actually asked first/);assert.match(system,/Do not keep adding da/);
+      assert.doesNotMatch(system,/FINISH EVERY CLAUSE/);
+      assert.match(system,text.startsWith('Which')?/He spoke English/:/natural spoken Tamil/);
+    }finally{h.cleanup();}
+  }
+});
+test('closing a voice session during tool execution stops later tools and follow-up generation',async()=>{
+  let cancelled=false;
+  const h=harness(async()=>({ok:true,status:200,json:async()=>({candidates:[{content:{parts:[
+    {functionCall:{name:'control_voice',args:{action:'close'}}},
+    {functionCall:{name:'update_service',args:{id:4}}},
+  ]},finishReason:'STOP'}]})}));
+  try {const calls=[];const reply=await h.AI.converse({voice:true,history:[{role:'user',text:'End this call'}],
+    isCancelled:()=>cancelled,onTool:async name=>{calls.push(name);cancelled=true;return {ok:true};}});
+    assert.equal(reply.reason,'cancelled');assert.deepEqual(calls,['control_voice']);assert.equal(h.requests.length,1);
+  }finally{h.cleanup();}
+});
