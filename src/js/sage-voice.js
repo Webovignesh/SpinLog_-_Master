@@ -34,7 +34,7 @@
     get recognition() { return load('sage_voice_recognition', 'gemini'); },
     get review() { return load('sage_voice_review', 'false') === 'true'; },
     get speed() { return load('sage_voice_speed', 'fast') === 'careful' ? 'careful' : 'fast'; },
-    get pauseMs() { return load('sage_voice_pause', 'quick') === 'patient' ? 2200 : 650; },
+    get pauseMs() { return load('sage_voice_pause', 'quick') === 'patient' ? 2200 : 450; },
     set sttLang(v) { save(LS_STT_LANG, v); },
   };
 
@@ -48,6 +48,7 @@
     recovering: false,
     ttsModel: 'gemini-3.8-flash-lite-tts',
     voiceName: 'Kore',
+    ttsLocked: false, // never change synthesis models after this call has spoken
     resumeAfterReply: false, // automatic audio hold; never overrides a manual mute
     recognising: false,
     speaking: false,   // TTS audio actually playing
@@ -105,14 +106,14 @@
   // One gesture-unlocked Web Audio context owns playback for the entire session.
   // A new HTMLAudioElement per sentence does not inherit another element's unlock.
   let actx = null;
-  let playbackSource = null;
-  let playbackSettle = null;
+  const playbackSources = new Map();
+  let playbackNextAt = 0;
   let cancelSpeech = null;
   let voiceSession = 0;
   const ttsRequests = new Set();
   const TTS_MODELS = ['gemini-3.8-flash-lite-tts', 'gemini-3.1-flash-tts-preview', 'gemini-2.5-flash-preview-tts'];
   const audioKeyRest = new Map();
-  const GEM_VOICE_STYLE = 'One adult feminine Tamil-native voice; warm, low, softly breathy and playfully seductive, with a natural conversational pace. Keep the same timbre and Indian accent across Tamil and English.';
+  const GEM_VOICE_STYLE = 'One adult feminine voice; warm, low and playfully seductive, with a natural conversational pace. Use the selected speaker’s natural English voice and accent as the identity for the entire reply. Carry that same pitch, resonance, softness and vocal placement into Tamil and Tanglish; only the language changes. Speak Tamil clearly and conversationally without switching to a formal Tamil narrator or exaggerating a regional accent. Keep gentle airy warmth with clean, supported phonation: no vocal fry, rasp, creaking or exaggerated whispering.';
 
   function unlockAudio() {
     const AC = root.AudioContext || root.webkitAudioContext;
@@ -138,23 +139,23 @@
     if (!/^audio\/(?:L16|pcm)(?:;|$)/i.test(mime)) throw new Error('audio-format');
     const rate = Number(mime.match(/rate=(\d+)/i)?.[1] || 24000);
     if (rate < 8000 || rate > 48000) throw new Error('audio-format');
-    const raw = atob(inline.data);
-    if (raw.length < 96 || raw.length % 2) throw new Error('empty-audio');
+    const raw = inline.pcm || atob(inline.data);
+    if (raw.length < (streaming ? 2 : 96) || raw.length % 2) throw new Error('empty-audio');
     const bytes = Uint8Array.from(raw, c => c.charCodeAt(0));
     const pcm = new DataView(bytes.buffer);
-    let first = -1, last = -1;
+    let first = -1, last = -1, activeSamples = 0;
     for (let i = 0; i < raw.length / 2; i++) {
-      if (Math.abs(pcm.getInt16(i * 2, true)) > 96) { if (first < 0) first = i; last = i; }
+      if (Math.abs(pcm.getInt16(i * 2, true)) > 96) { activeSamples++; if (first < 0) first = i; last = i; }
     }
     // A successful HTTP response with silence must never count as a spoken reply.
-    const audible = first >= 0 && last - first >= rate * 0.02;
+    const audible = first >= 0 && (streaming || last - first >= rate * 0.02);
     if (!streaming && !audible) throw new Error('silent-audio');
     if (streaming) { first = 0; last = raw.length / 2; }
     first = Math.max(0, first - Math.floor(rate * 0.06));
     last = Math.min(raw.length / 2, last + Math.floor(rate * 0.12));
     const samples = new Float32Array(last - first);
     for (let i = 0; i < samples.length; i++) samples[i] = pcm.getInt16((first + i) * 2, true) / 32768;
-    return { samples, rate, audible };
+    return { samples, rate, audible, activeSamples };
   }
 
   // One synthesis request per reply. Audio chunks arrive from ONE speaker
@@ -170,14 +171,39 @@
       ttsRequests.add(controller);
       let timer;
       const watchdog = () => { clearTimeout(timer); timer=setTimeout(()=>controller.abort(),20000); };
-      let playback = Promise.resolve(true), audible = false, started = false, playbackError = null;
-      const queue = inline => {
-        const audio = decodeSpeech(inline, true);
-        audible = audible || audio.audible;
-        if (!audible) return; // skip leading silence, keep timing inside the reply
+      const playback = [], pendingAudio = [];
+      let audible = false, started = false, playbackError = null;
+      let pendingDuration = 0, sampleRate = 0, activeSamples = 0, carry = '';
+      const flush = () => {
+        if (!pendingAudio.length || !audible || !S.open || my !== voiceSession) return;
+        // Coalesce tiny transport chunks, preserving every PCM sample. Start
+        // with 120ms buffered, then schedule arrivals ahead on the audio clock.
+        const samples = new Float32Array(pendingAudio.reduce((n,a) => n+a.samples.length, 0));
+        let offset = 0;
+        for (const audio of pendingAudio) { samples.set(audio.samples, offset); offset += audio.samples.length; }
+        pendingAudio.length = 0; pendingDuration = 0;
         started = true;
-        playback = playback.then(played => played && !playbackError ? playSpeech(audio,my) : false)
-          .catch(err => { playbackError=err; controller.abort(); return false; });
+        playback.push(playSpeech({samples, rate:sampleRate}, my).catch(err => {
+          playbackError = err; controller.abort(); stopPlayback(); return false;
+        }));
+      };
+      const queue = inline => {
+        const rate = Number((inline.mimeType || '').match(/rate=(\d+)/i)?.[1] || 24000);
+        if (sampleRate && rate !== sampleRate) throw new Error('audio-format');
+        sampleRate = rate;
+        // SSE boundaries need not align with a 16-bit sample boundary.
+        let pcm = carry + atob(inline.data);
+        carry = pcm.length % 2 ? pcm.slice(-1) : '';
+        if (carry) pcm = pcm.slice(0,-1);
+        if (!pcm.length) return;
+        const audio = decodeSpeech({...inline, pcm}, true);
+        // One isolated PCM spike is not a spoken reply. Keep short voiced
+        // chunks until their cumulative energy passes the silence safeguard.
+        if (!activeSamples && !audio.activeSamples) return;
+        activeSamples += audio.activeSamples;
+        audible = activeSamples >= sampleRate * 0.02;
+        pendingAudio.push(audio); pendingDuration += audio.samples.length/audio.rate;
+        if (pendingDuration >= 0.12) flush();
       };
       let reader;
       try {
@@ -192,7 +218,7 @@
         const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:${streaming?'streamGenerateContent?alt=sse':'generateContent'}`, {
           method:'POST',signal:controller.signal,headers:{'Content-Type':'application/json','x-goog-api-key':keys[attempt]},body:JSON.stringify(body),
         });
-        if ([400,403,404].includes(res.status) && TTS_MODELS.indexOf(model)<TTS_MODELS.length-1) {
+        if ([400,403,404].includes(res.status) && !S.ttsLocked && TTS_MODELS.indexOf(model)<TTS_MODELS.length-1) {
           model=TTS_MODELS[TTS_MODELS.indexOf(model)+1]; S.ttsModel=model; attempt--; continue;
         }
         if (res.status===429) { audioKeyRest.set(keys[attempt],Date.now()+60000); if (attempt+1<keys.length) continue; throw new Error('quota'); }
@@ -220,7 +246,14 @@
             if(done) {pending+=decoder.decode();break;}
             watchdog();pending+=decoder.decode(value,{stream:true});
             pending=pending.replace(/\r\n/g,'\n');
-            let cut;while((cut=pending.indexOf('\n\n'))>=0) {event(pending.slice(0,cut));pending=pending.slice(cut+2);}
+            let cut;
+            while((cut=pending.indexOf('\n\n'))>=0) {
+              event(pending.slice(0,cut)); pending=pending.slice(cut+2);
+              if (finished) { pending=''; break; }
+            }
+            // STOP is authoritative. Do not keep the mic waiting for an idle
+            // HTTP stream to close after the final audio has already arrived.
+            if (finished) break;
           }
           if(pending.trim()) event(pending);
           if(!finished) throw new Error('incomplete-audio');
@@ -229,24 +262,28 @@
           for(const part of Array.isArray(json)?json:[json]) consume(part);
         }
         clearTimeout(timer);
+        if (carry) throw new Error('incomplete-audio');
+        flush();
         if (!started || !audible) throw new Error('silent-audio');
-        const completed=await playback;
+        const completed=(await Promise.all(playback)).every(Boolean);
         if(playbackError) throw playbackError;
         return completed;
       } catch(err) {
         playbackError = playbackError || err;
         controller.abort(); stopPlayback();
-        await playback;
+        await Promise.all(playback);
         throw playbackError || (err.name==='AbortError' ? new Error('timeout') : err);
       } finally {clearTimeout(timer);ttsRequests.delete(controller);try {await reader?.cancel();}catch{/* closed */}}
     }
     throw new Error('no-audio');
   }
   function stopPlayback() {
-    const source = playbackSource;
-    playbackSource = null;
-    if (source) { source.onended = null; try { source.stop(); source.disconnect(); } catch { /* already ended */ } }
-    if (playbackSettle) { const done = playbackSettle; playbackSettle = null; done(false); }
+    for (const [source, finish] of [...playbackSources]) {
+      source.onended = null;
+      try { source.stop(); } catch { /* already ended */ }
+      finish(false);
+    }
+    playbackNextAt = 0;
   }
   async function playSpeech(audio, my) {
     if (!actx || actx.state !== 'running') throw new Error('play-blocked');
@@ -255,9 +292,13 @@
     buffer.copyToChannel(audio.samples, 0);
     const source = actx.createBufferSource();
     source.buffer = buffer;
-    source.playbackRate.value = settings.rate;
+    const rate = settings.rate;
+    source.playbackRate.value = rate;
     source.connect(actx.destination);
-    playbackSource = source;
+    const now = actx.currentTime;
+    const startAt = Math.max(now + (playbackNextAt > now ? 0 : 0.08), playbackNextAt);
+    const endAt = startAt + buffer.duration/rate;
+    playbackNextAt = endAt;
     return new Promise((resolve, reject) => {
       let settled = false;
       let timer;
@@ -267,21 +308,21 @@
         clearTimeout(timer);
         source.onended = null;
         try { source.disconnect(); } catch { /* released */ }
-        if (playbackSource === source) playbackSource = null;
-        if (playbackSettle === finish) playbackSettle = null;
+        playbackSources.delete(source);
         error ? reject(error) : resolve(played);
       };
-      playbackSettle = finish;
+      playbackSources.set(source, finish);
       source.onended = () => finish(true);
       try {
-        source.start();
+        // Schedule now, never from the previous source's JS onended callback.
+        // Contiguous chunks touch sample-for-sample without per-chunk fades.
+        source.start(startAt);
+        S.ttsLocked = true;
         setMode('speaking');
-        // onended is the only successful completion. A suspended or stuck audio
-        // device is an error; a watchdog must never silently resume the mic.
         timer = setTimeout(() => {
           finish(false, new Error('play-failed'));
           try { source.stop(); } catch { /* stopped */ }
-        }, (buffer.duration / settings.rate + 5) * 1000);
+        }, (endAt - now + 5) * 1000);
       } catch { finish(false, new Error('play-failed')); }
     });
   }
@@ -297,6 +338,7 @@
   async function speak(text) {
     S.speaking = true;
     setMode('thinking', 'Preparing voice…');
+    playbackNextAt = 0;
     const my = ++voiceSession;
     let cancel;
     const interrupted = new Promise(resolve => { cancel = () => resolve(false); cancelSpeech = cancel; });
@@ -334,6 +376,8 @@
   let sttRoute = null; // remember a working model/configuration for this session
   let meterCtx = null;
   let meterAnalyser = null;
+  let meterSource = null;
+  let meterData = null;
   let meterStream = null;
   let meterRaf = 0;
   let meterLevel = 0;
@@ -405,28 +449,23 @@
       stream.getTracks().forEach(t => { t.onended = () => {
         if (current(owner)) { pauseListening('Microphone disconnected. Reconnect and tap to retry.'); stopMeter(); }
       }; });
-      const AC = root.AudioContext || root.webkitAudioContext;
-      if (AC) {
+      if (actx) {
         try {
-          meterCtx = new AC();
-          meterCtx.resume().catch(() => {});
-          if (!current(owner)) return stream;
+          // Reuse the context unlocked by the opening tap. Creating a second
+          // context after awaiting mic permission loses the user activation.
+          meterCtx = actx;
+          if (meterCtx.state === 'suspended') meterCtx.resume().catch(() => {});
           meterAnalyser = meterCtx.createAnalyser();
           meterAnalyser.fftSize = 1024;
-          meterCtx.createMediaStreamSource(stream).connect(meterAnalyser);
-          const data = new Uint8Array(meterAnalyser.fftSize);
+          meterSource = meterCtx.createMediaStreamSource(stream);
+          meterSource.connect(meterAnalyser);
+          meterData = new Uint8Array(meterAnalyser.fftSize);
           const tick = () => {
             if (!current(owner) || !meterAnalyser) return;
-            meterAnalyser.getByteTimeDomainData(data);
-            let sum = 0;
-            for (const sample of data) sum += ((sample - 128) / 128) ** 2;
-            const rms = Math.sqrt(sum / data.length);
-            meterLevel = rms;
-            if (rms < noiseFloor * 1.8) noiseFloor = Math.max(0.002, noiseFloor * 0.98 + rms * 0.02);
-            paintLevel(Math.min(1, rms * 8));
+            paintLevel(Math.min(1, meterLevel * 8));
             meterRaf = requestAnimationFrame(tick);
           };
-          tick();
+          sampleMeter(); tick();
         } catch { /* Recording still works; manual send remains available. */ }
       }
       S.lastMicErr = '';
@@ -436,14 +475,26 @@
     try { return await task; }
     finally { if (micPending === task) micPending = null; }
   }
+  function sampleMeter() {
+    if (!meterAnalyser || !meterData) return meterLevel;
+    meterAnalyser.getByteTimeDomainData(meterData);
+    let sum = 0;
+    for (const sample of meterData) sum += ((sample - 128) / 128) ** 2;
+    meterLevel = Math.sqrt(sum / meterData.length);
+    // Learn only quiet background frames, not the user's soft first syllable.
+    if (meterLevel < 0.006 && meterLevel < noiseFloor * 1.5) {
+      noiseFloor = Math.min(0.004, Math.max(0.0015, noiseFloor * 0.9 + meterLevel * 0.1));
+    }
+    return meterLevel;
+  }
   function stopMeter() {
     cancelAnimationFrame(meterRaf);
     meterRaf = 0;
     const stream = meterStream;
     meterStream = null;
     stream?.getTracks().forEach(t => { t.onended = null; t.stop(); });
-    if (meterCtx) meterCtx.close().catch(() => {});
-    meterCtx = meterAnalyser = null;
+    try { meterSource?.disconnect(); meterAnalyser?.disconnect(); } catch { /* released */ }
+    meterCtx = meterAnalyser = meterSource = meterData = null;
     micPending = null;
     meterLevel = 0;
     noiseFloor = 0.004;
@@ -511,20 +562,26 @@
       recorder.onerror = () => {
         if (current(owner) && capture === take) pauseListening('Recording failed. Tap the mic to retry.');
       };
-      recorder.start(250);
+      recorder.onstart = () => {
+        if (!current(owner) || capture !== take || take.cancelled) return;
+        setMode('listening');
+        setHint(S.lastSaid ? 'Reply audio is unavailable. Keep talking, or tap Play reply.' : 'Speak naturally. Pause to send, or tap the orb when you’re done.');
+      };
       S.recording = true;
-      setMode('listening');
-      setHint(S.lastSaid ? 'Reply audio is unavailable. Keep talking, or tap Play reply.' : 'Speak naturally. Pause to send, or tap the orb when you’re done.');
+      recorder.start(100);
       paintCaption('', false);
       startPreview(take);
       take.timer = setInterval(() => {
         if (capture !== take || take.stopping) return;
         const now = Date.now();
-        const loud = meterLevel > Math.max(0.009, noiseFloor * 2.8);
+        // Detection runs independently of visual animation frames. Lower the
+        // continuation threshold so quiet Tamil syllables remain in the turn.
+        const level = sampleMeter();
+        const loud = level > Math.max(take.heard ? 0.0045 : 0.007, noiseFloor * (take.heard ? 1.5 : 2));
         if (loud) {
           take.quietAt = 0;
           if (!take.loudAt) take.loudAt = now;
-          if (now - take.loudAt >= 160) take.heard = true;
+          if (now - take.loudAt >= 100) take.heard = true;
         } else {
           take.loudAt = 0;
           if (take.heard) {
@@ -1136,6 +1193,7 @@
     S.backgrounded = false;
     S.voiceName = settings.gemVoice;
     S.ttsModel = TTS_MODELS[0];
+    S.ttsLocked = false;
     sttRoute = null; failedRecording = null;
     $('sageVoiceSTTError').hidden = true;
     S.session++;

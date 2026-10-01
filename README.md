@@ -881,7 +881,7 @@ gone rather than left as links that go nowhere. What was in them that still matt
   back to localStorage then to the `data-due` values in `index.html`; Sage's memory
   falls back to localStorage; the key ring stays on the device.
 
-## Sage voice — v1.9.27
+## Sage voice — v1.9.28
 
 Open **Talk to Sage** inside the chat card. The fullscreen voice room uses a fluid amber orb (blue while speaking) and
 keeps the latest four speaker turns on screen, moving older turns out as new ones
@@ -907,7 +907,7 @@ In **Sage settings → Voice → Speaking & listening**:
 - **Fast transcription** uses Gemini 3.5 Flash-Lite by default. Choose **Careful**
   to use Gemini 3.5 Flash for difficult speech. Both keep the same Tamil/Tanglish
   instructions and transcript-review safeguards; compare accuracy with your own audio.
-- The default pause is 0.65 seconds; a saved **Relaxed · 2.2 seconds** preference
+- The default pause is 0.45 seconds; a saved **Relaxed · 2.2 seconds** preference
   is preserved. Audio turns are capped at
   45 seconds; silent recording buffers are discarded locally every 15 seconds
   while the microphone keeps listening. Empty transcripts and normal browser
@@ -916,6 +916,13 @@ In **Sage settings → Voice → Speaking & listening**:
   Gemini-marked unclear speech and low-confidence browser results require review
   even when that preference is off. These signals are imperfect; they cannot
   guarantee a correct transcript.
+
+The microphone meter shares the AudioContext unlocked by the opening gesture,
+so it does not create a potentially suspended context after permission resolves.
+Speech detection samples audio every 100 ms independently of visual animation
+frames, with a lower continuation threshold for quiet syllables. The room says
+“listening” only once MediaRecorder starts. First-use microphone permission and
+the browser caption service’s cold connection still depend on the device.
 
 Preferences save immediately and apply to the next voice session. Hands-free
 capture resumes after the audio source finishes or you interrupt it. Browser
@@ -943,16 +950,27 @@ room cancels outstanding voice audio requests and invalidates late results; it
 does not roll back tool actions already submitted to SageAI.
 
 Replies use one synthesis request for the complete mixed-language reply, with one
-session-fixed voice (Kore by default) and a consistent warm, softly breathy adult
-feminine style. Tamil text stays in Tamil script for pronunciation. Regional
+session-fixed voice (Kore by default) and a warm adult feminine style anchored
+to that speaker’s natural English identity across both languages. The delivery
+instruction avoids a separate Tamil narrator accent, vocal fry, creaking and
+exaggerated whispering. This guides generation; it cannot guarantee identical
+accent/timbre across independently generated replies. Tamil text stays in Tamil script for pronunciation. Regional
 transcription and reply instructions cover Chennai and Theni phrases, including
 whole phrases such as “sollu da”; examples must not be inserted unless spoken.
 This is prompting, not a newly trained Tamil recognition model.
 
 Gemini 3.8 Flash-Lite TTS streams PCM audio into a gesture-unlocked Web Audio
-context, so playback can start before generation finishes. Unsupported model or
+context, so playback can start before generation finishes. PCM packets are
+coalesced into at least 120 ms of audio (a shorter final packet is flushed at EOF),
+then scheduled contiguously on the Web Audio clock with a small startup cushion.
+Playback never waits for JavaScript `onended` to start the next chunk. Odd-byte
+packet boundaries preserve the unfinished 16-bit sample; a truncated sample
+fails explicitly. Interrupting cancels every scheduled source. This removes
+avoidable chunk gaps, but cannot repair distortion already in generated audio. Unsupported model or
 configuration responses fall back to 3.1 Flash TTS, then 2.5 Flash TTS; the session
-remembers the supported model. The legacy 2.5 fallback buffers its response.
+remembers the supported model. After the first playback, the model is locked for
+the call: a later failure offers replay instead of silently changing the voice.
+The legacy 2.5 fallback buffers its response.
 Separate synthesis calls for short sentences have been removed, reducing request
 count and cross-sentence timbre changes. Default playback speed remains 1.08×.
 Missing, silent or truncated audio offers replay. No other voice provider or
