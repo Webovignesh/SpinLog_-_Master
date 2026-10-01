@@ -16,7 +16,7 @@ async function until(check) {
 }
 function harness(options = {}) {
   const timers = new Set(), intervals = new Map(), nodes = new Map(), streams = [], recordings = [], recognition = [];
-  const asks = [], requests = [], decoded = [], playback = [];
+  const asks = [], requests = [], decoded = [], playback = [], contexts = [];
   let history = [], now = 100000;
   class Element {
     constructor(id = '') { this.id = id; this.children = []; this.events = {}; this.attrs = {}; this.hidden = false; this.value = ''; this.type = ''; this.isConnected = true; this.style = { setProperty() {} }; this.classList = { add() {}, remove() {}, toggle() {} }; }
@@ -45,7 +45,7 @@ function harness(options = {}) {
   class Recorder {
     static isTypeSupported() { return true; }
     constructor() { this.state = 'inactive'; this.mimeType = 'audio/webm;codecs=opus'; recordings.push(this); }
-    start() { this.state = 'recording'; this.ondataavailable?.({ data: new Blob(['first-']) }); }
+    start() { this.state = 'recording'; this.onstart?.(); this.ondataavailable?.({ data: new Blob(['first-']) }); }
     stop() { this.state = 'inactive'; setTimeout(() => { this.ondataavailable?.({ data: new Blob(['LAST']) }); this.onstop?.(); }, 0); }
   }
   class Recognition {
@@ -59,18 +59,20 @@ function harness(options = {}) {
     }
   }
   class AudioContext {
+    currentTime = 0;
+    constructor() { contexts.push(this); }
     state = options.audioBlocked ? 'suspended' : 'running';
     resume() { return Promise.resolve(); }
-    createBuffer(channels,length,rate) { return {duration:length/rate,copyToChannel() {}}; }
+    createBuffer(channels,length,rate) { return {duration:length/rate,copyToChannel(data) { this.samples = new Float32Array(data); }}; }
     createBufferSource() {
       const source = {playbackRate:{value:1},connect(){},disconnect(){},
-        start(){playback.push(source); if (!options.holdPlayback) setTimeout(()=>source.onended?.(),5);},
-        stop(){}, end(){source.onended?.();}};
+        start(when=0){source.startAt=when;playback.push(source); if (!options.holdPlayback) setTimeout(()=>source.onended?.(),5);},
+        stop(){source.stopped=true;}, end(){source.onended?.();}};
       return source;
     }
     close() { return Promise.resolve(); }
-    createMediaStreamSource() { return { connect() {} }; }
-    createAnalyser() { return { fftSize: 1024, getByteTimeDomainData(data) { data.fill(options.loud ? 136 : 128); } }; }
+    createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
+    createAnalyser() { return { fftSize: 1024, disconnect(){},getByteTimeDomainData(data) { data.fill(options.loud ? 136 : 128); } }; }
     async decodeAudioData(buffer) { decoded.push(Buffer.from(buffer).toString()); return { duration: 0.1 }; }
   }
   class OfflineAudioContext {
@@ -106,7 +108,7 @@ function harness(options = {}) {
   };
   root.self = root;
   vm.runInNewContext(source, root, { filename: 'sage-voice.js' });
-  return { root, nodes, streams, recordings, recognition, asks, requests, decoded, storage, playback,
+  return { root, nodes, streams, recordings, recognition, asks, requests, decoded, storage, playback, contexts,
     get history() { return history; },
     tick(ms) { now += ms; [...intervals.values()].forEach(fn => fn()); },
     async open() { root.SageVoice.open(); await until(() => recordings.length || recognition.length); },
@@ -354,7 +356,7 @@ for (const [name,option] of [['silent PCM','silentAudio'],['empty PCM','emptyAud
 test('one mixed-language TTS request starts playback before the stream finishes',async()=>{
   const h=harness({holdPlayback:true,askSage:async()=>({ok:true,text:'சொல்லு டா. Tell me what happened.'})});
   let controller,requests=0;
-  const event=(finish=false)=>new TextEncoder().encode('data: '+JSON.stringify({candidates:[{content:{parts:[{inlineData:{data:speechPCM.toString('base64'),mimeType:'audio/L16;rate=24000'}}]},...(finish?{finishReason:'STOP'}:{})}]})+'\n\n');
+  const event=(finish=false)=>new TextEncoder().encode('data: '+JSON.stringify({candidates:[{content:{parts:[{inlineData:{data:Buffer.concat([speechPCM,speechPCM]).toString('base64'),mimeType:'audio/L16;rate=24000'}}]},...(finish?{finishReason:'STOP'}:{})}]})+'\n\n');
   try {
     await h.open();
     h.root.fetch=async(url,init)=>{
@@ -386,11 +388,11 @@ test('missing Gemini key pauses explicitly without switching recognizers', async
 });
 
 
-test('fast recognition and a 650ms pause are defaults; careful preferences remain available', async () => {
+test('fast recognition and a 450ms pause are defaults; careful preferences remain available', async () => {
   const h=harness();
   const careful=harness({storage:{sage_voice_speed:'careful',sage_voice_pause:'patient'}});
   try {
-    assert.equal(h.root.SageVoice.settings.pauseMs,650);
+    assert.equal(h.root.SageVoice.settings.pauseMs,450);
     await h.open(); await h.finish();
     assert.match(h.requests[0].url,/gemini-3.5-flash-lite:generateContent/);
     assert.equal(careful.root.SageVoice.settings.pauseMs,2200);
@@ -616,5 +618,85 @@ test('provider reply errors stay out of speech/history and hands-free capture re
     assert.equal(h.nodes.get('sageVoiceLines').children.length,1);
     assert.match(h.nodes.get('sageVoiceHint').textContent,/42 seconds/);
     assert.equal(h.nodes.get('sageVoiceMic').getAttribute('aria-pressed'),'false');
+  }finally{h.cleanup();}
+});
+
+
+test('cold opening reuses one gesture-created context and waits for recorder readiness',async()=>{
+  let allow;
+  const h=harness({getUserMedia:()=>new Promise(resolve=>{allow=resolve;})});
+  try{
+    h.root.SageVoice.open();
+    assert.equal(h.contexts.length,1,'audio context is created before the permission promise resolves');
+    assert.equal(h.nodes.get('sageVoiceState').textContent,'Connecting microphone…');
+    allow(h.newStream());await until(()=>h.recordings.length===1);
+    assert.equal(h.contexts.length,1,'meter shares the unlocked context');
+    assert.equal(h.nodes.get('sageVoiceState').textContent,'I’m listening');
+  }finally{h.cleanup();}
+});
+test('speech end detection works without animation frames and hands off within one polling tick',async()=>{
+  const options={loud:true},h=harness(options);
+  try{
+    await h.open();h.tick(100);h.tick(100);
+    options.loud=false;h.tick(100);h.tick(449);
+    assert.equal(h.recordings[0].state,'recording','brief within-phrase pause is retained');
+    h.tick(51);
+    assert.equal(h.recordings[0].state,'inactive');
+    assert.equal(h.nodes.get('sageVoiceState').textContent,'Hearing you…');
+    await until(()=>h.asks.length===1);
+  }finally{h.cleanup();}
+});
+const pcmEvent=(bytes,finish=false)=>new TextEncoder().encode('data: '+JSON.stringify({candidates:[{content:{parts:[{inlineData:{data:bytes.toString('base64'),mimeType:'audio/L16;rate=24000'}}]},...(finish?{finishReason:'STOP'}:{})}]})+'\n\n');
+test('audio chunks are scheduled contiguously before earlier onended; interrupt stops every queued source',async()=>{
+  const h=harness({holdPlayback:true});let controller;
+  try{
+    await h.open();h.root.fetch=async()=>({ok:true,headers:new Headers({'content-type':'text/event-stream'}),body:new ReadableStream({start(c){controller=c;}})});
+    const reply=h.root.SageVoice.sendVoiceText('reply');await until(()=>controller);
+    const chunk=Buffer.concat([speechPCM,speechPCM]);
+    controller.enqueue(pcmEvent(chunk));await until(()=>h.playback.length===1);
+    controller.enqueue(pcmEvent(chunk));await until(()=>h.playback.length===2);
+    assert.equal(h.playback[1].startAt,h.playback[0].startAt+h.playback[0].buffer.duration/1.08);
+    assert.equal(h.recordings.length,1,'mic remains off while scheduled sources play');
+    h.nodes.get('sageVoiceOrb').emit('click');controller.close();await reply;
+    assert.ok(h.playback.every(s=>s.stopped));await until(()=>h.recordings.length===2);
+  }finally{h.cleanup();}
+});
+test('tiny and odd-byte PCM packets are reassembled without missing or shifted samples',async()=>{
+  const h=harness();const bytes=Buffer.concat([speechPCM,speechPCM]);
+  try{
+    await h.open();h.root.fetch=async()=>({ok:true,headers:new Headers({'content-type':'text/event-stream'}),body:new ReadableStream({start(c){
+      for(let i=0;i<bytes.length;i+=31)c.enqueue(pcmEvent(bytes.subarray(i,i+31),i+31>=bytes.length));c.close();
+    }})});
+    await h.root.SageVoice.sendVoiceText('reply');
+    const samples=h.playback.flatMap(p=>Array.from(p.buffer.samples));
+    assert.equal(samples.length,bytes.length/2);
+    for(let i=0;i<samples.length;i++)assert.equal(samples[i],bytes.readInt16LE(i*2)/32768);
+  }finally{h.cleanup();}
+});
+test('Tamil and English use the same English-led delivery and cannot switch models after speaking',async()=>{
+  const h=harness();
+  try{
+    await h.open();await h.root.SageVoice.sendVoiceText('hello');
+    const body=h.requests[0].body,style=body.contents[0].parts[0].speech_metadata.style;
+    assert.match(style,/natural English voice/);assert.match(style,/Carry that same pitch/);
+    assert.match(style,/no vocal fry/);assert.doesNotMatch(style,/Tamil-native/);
+    assert.equal(body.generationConfig.speechConfig.voiceConfig.voice,'Kore');
+    let requests=0;h.root.fetch=async()=>{requests++;return {ok:false,status:404};};
+    await h.root.SageVoice.sendVoiceText('சொல்லு டா');
+    assert.equal(requests,1,'no silent model/voice switch mid-call');
+    assert.equal(h.nodes.get('sageVoiceReplay').hidden,false);
+  }finally{h.cleanup();}
+});
+
+
+test('final audio STOP releases the mic after playback without waiting for HTTP EOF',async()=>{
+  const h=harness();let cancelled=false;
+  try{
+    await h.open();h.root.fetch=async()=>({ok:true,headers:new Headers({'content-type':'text/event-stream'}),body:new ReadableStream({
+      start(c){c.enqueue(pcmEvent(speechPCM,true));},cancel(){cancelled=true;}
+    })});
+    await h.root.SageVoice.sendVoiceText('reply');
+    await until(()=>h.recordings.length===2);
+    assert.equal(cancelled,true);assert.equal(h.nodes.get('sageVoiceReplay').hidden,true);
   }finally{h.cleanup();}
 });
