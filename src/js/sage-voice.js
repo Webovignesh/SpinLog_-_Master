@@ -513,7 +513,7 @@
     const r = previewRec;
     previewRec = null;
     if (!r) return;
-    r.onresult = r.onend = r.onerror = null;
+    r.onresult = r.onend = r.onerror = r.onspeechstart = r.onspeechend = null;
     try { r.abort(); } catch { /* optional captions only */ }
   }
   function startPreview(take) {
@@ -532,12 +532,29 @@
     r.onresult = event => {
       if (!valid()) return;
       // Rebuild this recognizer's hypothesis: interim words can be revised.
-      const text = Array.from(event.results, result => result[0]?.transcript || '').join(' ').trim();
-      if (text) paintCaption(text, true, true);
+      const results = Array.from(event.results);
+      const text = results.map(result => result[0]?.transcript || '').join(' ').trim();
+      if (!text) return;
+      paintCaption(text, true, true);
+      // Captions prove speech occurred even when the local level meter misses
+      // a quiet voice. They signal turn boundaries, never the submitted words.
+      take.heard = true;
+      if (text !== take.previewText) take.quietAt = 0;
+      take.previewText = text;
+      take.previewBoundaryAt = results.at(-1)?.isFinal ? Date.now() : 0;
     };
-    // Browser captions are best effort. Never restart/stop the recorder or
-    // submit their guesses; Gemini still hears the full bilingual audio turn.
-    r.onerror = r.onend = () => { if (previewRec === r) stopPreview(); };
+    r.onspeechstart = () => { if (valid()) { take.previewBoundaryAt = 0; take.quietAt = 0; } };
+    r.onspeechend = () => {
+      if (valid() && take.previewText) take.previewBoundaryAt = Date.now();
+    };
+    r.onend = () => {
+      // Some browsers end with an interim hypothesis instead of a final result.
+      if (valid() && take.previewText && !take.previewBoundaryAt) take.previewBoundaryAt = Date.now();
+      if (previewRec === r) stopPreview();
+    };
+    // A network/permission error is not evidence that the user finished.
+    r.onerror = () => { if (previewRec === r) stopPreview(); };
+
     try { r.start(); } catch { stopPreview(); }
   }
   async function startGeminiListen() {
@@ -552,7 +569,7 @@
       const mime = pickRecMime();
       const recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
       const take = { recorder, chunks: [], owner, epoch, heard: false, loudAt: 0,
-        quietAt: 0, started: Date.now(), timer: null, stopping: false, cancelled: false };
+        quietAt: 0, previewText: '', previewBoundaryAt: 0, started: Date.now(), timer: null, stopping: false, cancelled: false };
       failedRecording = null;
       capture = take;
       recorder.ondataavailable = event => {
@@ -574,6 +591,13 @@
       take.timer = setInterval(() => {
         if (capture !== take || take.stopping) return;
         const now = Date.now();
+        // Browser endpointing can distinguish speech from a fan/background
+        // noise that keeps RMS permanently above threshold. A new hypothesis
+        // or speech-start cancels this deadline; the user's pause setting wins.
+        if (take.previewBoundaryAt && now - take.previewBoundaryAt >= settings.pauseMs) {
+          finishGeminiListen(true);
+          return;
+        }
         // Detection runs independently of visual animation frames. Lower the
         // continuation threshold so quiet Tamil syllables remain in the turn.
         const level = sampleMeter();

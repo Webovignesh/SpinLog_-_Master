@@ -881,7 +881,7 @@ gone rather than left as links that go nowhere. What was in them that still matt
   back to localStorage then to the `data-due` values in `index.html`; Sage's memory
   falls back to localStorage; the key ring stays on the device.
 
-## Sage voice — v1.9.28
+## Sage voice — v1.9.29
 
 Open **Talk to Sage** inside the chat card. The fullscreen voice room uses a fluid amber orb (blue while speaking) and
 keeps the latest four speaker turns on screen, moving older turns out as new ones
@@ -900,7 +900,7 @@ In **Sage settings → Voice → Speaking & listening**:
   The transcription instruction preserves regional Tamil and English mixing,
   slang, names and numbers. It does not force a Chennai dialect or translate
   Tamil into English. Audio requests count toward the provider's quota.
-- **Live draft captions** use the browser recognizer in the selected language while Gemini records. They appear before upload, are labelled draft, and never trigger chat or tools. Gemini replaces them with its final bilingual transcript. An unsupported or disconnected caption service does not stop capture or retry in a loop. Drafts are optional browser functionality, not guaranteed on every device.
+- **Live draft captions** use the browser recognizer in the selected language while Gemini records. They appear before upload and are labelled draft. Browser final/speech-end signals can finish the recording after the selected pause, even when the level meter misses quiet speech or hears constant background noise. New speech cancels that deadline. Draft text never triggers chat or tools; only the recorded audio goes to Gemini. Gemini replaces them with its final bilingual transcript. An unsupported or disconnected caption service does not stop capture or retry in a loop. Drafts are optional browser functionality, not guaranteed on every device.
 - **Browser recognition** is available as an explicit fallback. The default
   language is Tamil (`ta-IN`); English (India) can be selected. Silence never
   changes the selected language. Browser support and recognition quality vary.

@@ -26,7 +26,7 @@ try {
   page.on('pageerror',e=>errors.push(e.message));
   await page.route('**/*',r=>r.request().url().startsWith(base)?r.continue():r.abort());
   await page.addInitScript(()=>{
-    window.SpeechRecognition=class {start(){} abort(){} stop(){}};
+    window.SpeechRecognition=class {constructor(){window.voicePreview=this;} start(){} abort(){} stop(){}};
     window.recordedRequests=[];window.replies=[];window.failRecognition=true;
     window.SageAI={availableKeys:()=>[{key:'test-only'}],askSage:async text=>{replies.push(text);return {ok:true,text:'Okay, heard you.'};}};
     let history=[];window.dkCloudStore={chatHistory:()=>history,setChat:rows=>history=rows};
@@ -65,10 +65,15 @@ try {
   await page.waitForFunction(()=>replies.length===1 && document.getElementById('sageVoiceState').textContent==='I’m listening');
   const retry=await page.evaluate(()=>recordedRequests[2]);assert.equal(retry.body.contents[0].parts[0].inlineData.data,requests[0].body.contents[0].parts[0].inlineData.data,'retry uses identical saved audio');
   for(let i=0;i<4;i++){
-    await page.waitForTimeout(600);await page.locator('#sageVoiceOrb').click();
+    await page.waitForTimeout(600);
+    if(i===0) {
+      // Captions arrive while Chromium's fake mic keeps producing energy.
+      // The next turn must happen automatically, without an orb click.
+      await page.evaluate(()=>{const item=[{transcript:'what are you doing',confidence:.9}];item.isFinal=true;voicePreview.onresult({resultIndex:0,results:[item]});});
+    } else await page.locator('#sageVoiceOrb').click();
     await page.waitForFunction(n=>replies.length===n && document.getElementById('sageVoiceState').textContent==='I’m listening',i+2);
   }
   await page.locator('#sageVoiceEnd').click();
   assert.deepEqual(errors,[]);
-  console.log('✓ Real MediaRecorder/decoder/WAV path, bounded outage recovery, identical-audio retry, five completed turns and phone recovery controls');
+  console.log('✓ Real MediaRecorder/decoder/WAV path, bounded outage recovery, identical-audio retry, five completed turns automatic caption-to-recording handoff, and phone recovery controls');
 }finally{await browser?.close();server.close();}

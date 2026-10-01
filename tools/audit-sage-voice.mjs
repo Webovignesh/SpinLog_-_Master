@@ -700,3 +700,56 @@ test('final audio STOP releases the mic after playback without waiting for HTTP 
     assert.equal(cancelled,true);assert.equal(h.nodes.get('sageVoiceReplay').hidden,true);
   }finally{h.cleanup();}
 });
+
+
+for (const loud of [false,true]) {
+  test(`recognised final speech advances despite ${loud?'constant background energy':'a meter missing the voice'}`,async()=>{
+    const h=harness({loud});
+    try{
+      await h.open();h.recognition[0].result('what are you doing',true);
+      h.tick(449);assert.equal(h.recordings[0].state,'recording');
+      h.tick(1);assert.equal(h.recordings[0].state,'inactive');
+      assert.equal(h.nodes.get('sageVoiceState').textContent,'Hearing you…');
+      await until(()=>h.recordings.length===2);
+      assert.deepEqual(h.asks,['நேத்து petrol போட்டேன் bro'],'only Gemini final transcript reaches chat');
+      assert.equal(h.requests.filter(r=>!r.body.generationConfig.responseModalities).length,1);
+    }finally{h.cleanup();}
+  });
+}
+test('speech-end finishes an interim draft under background noise',async()=>{
+  const h=harness({loud:true});
+  try{
+    await h.open();h.recognition[0].result('என்ன பண்ற',false);h.recognition[0].onspeechend();
+    h.tick(450);assert.equal(h.recordings[0].state,'inactive');await until(()=>h.asks.length===1);
+  }finally{h.cleanup();}
+});
+test('continuing words cancel the previous endpoint and postpone a quiet-meter handoff',async()=>{
+  const h=harness();
+  try{
+    await h.open();const r=h.recognition[0];
+    r.result('நேத்து',true);h.tick(300);
+    r.onspeechstart();r.result('நேத்து petrol',false);h.tick(300);
+    r.result('நேத்து petrol போட்டேன்',false);h.tick(300);
+    assert.equal(h.recordings[0].state,'recording');assert.equal(h.requests.length,0);
+    r.onspeechend();h.tick(450);assert.equal(h.recordings[0].state,'inactive');
+    await until(()=>h.asks.length===1);
+  }finally{h.cleanup();}
+});
+test('normal recognizer end with a draft completes the audio; stale endpoint cannot stop a new turn',async()=>{
+  const h=harness({loud:true});
+  try{
+    await h.open();const r=h.recognition[0],lateEnd=r.onspeechend;
+    r.result('hello Sage',false);r.onend();h.tick(450);
+    await until(()=>h.recordings.length===2);
+    lateEnd();h.tick(450);assert.equal(h.recordings[1].state,'recording');
+  }finally{h.cleanup();}
+});
+test('relaxed pause and explicit mute are respected by browser endpointing',async()=>{
+  const h=harness({loud:true,storage:{sage_voice_pause:'patient'}});
+  try{
+    await h.open();h.recognition[0].result('சொல்லு டா',true);h.tick(1000);
+    assert.equal(h.recordings[0].state,'recording');
+    h.nodes.get('sageVoiceMic').emit('click');h.tick(3000);await delay(20);
+    assert.equal(h.requests.length,0);assert.equal(h.recordings.length,1);
+  }finally{h.cleanup();}
+});
