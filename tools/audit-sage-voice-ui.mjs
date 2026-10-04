@@ -30,7 +30,7 @@ const server = http.createServer(async (req,res) => {
   try {
     let content = await readFile(filename);
     if (rel === 'index.html') content = content.toString().replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'')
-      .replace('</body>','<script src="src/js/sage-voice.js?v=1.9.31"></script></body>');
+      .replace('</body>','<script src="src/js/sage-voice.js?v=1.9.32"></script></body>');
     res.setHeader('Content-Type', ({'.html':'text/html','.js':'text/javascript','.css':'text/css','.woff2':'font/woff2','.webp':'image/webp'})[path.extname(filename)] || 'application/octet-stream');
     res.end(content);
   } catch {res.writeHead(404).end();}
@@ -73,7 +73,7 @@ try {
     await page.locator('#sageChatMic').click();
     assert.equal(await page.locator('.sage-voice-core').evaluate(el=>getComputedStyle(el).display),'block','new orb CSS bypasses stale unversioned cache');
     for (const asset of ['src/css/styles.css','src/css/home.css','src/css/sage-voice.css','src/js/sage-voice.js']) {
-      assert.ok(await page.evaluate(asset=>[...document.querySelectorAll('link[href],script[src]')].some(el=>(el.href||el.src).endsWith(asset+'?v=1.9.31')),asset),'voice assets use versioned URLs');
+      assert.ok(await page.evaluate(asset=>[...document.querySelectorAll('link[href],script[src]')].some(el=>(el.href||el.src).endsWith(asset+'?v=1.9.32')),asset),'voice assets use versioned URLs');
     }
     await page.evaluate(async()=>{
       await SageVoice.sendVoiceText('Bro, நேத்து petrol போட்டேன்.');
@@ -127,14 +127,10 @@ try {
     assert.ok(b.x>=0 && b.x+b.width<=320 && b.y+b.height<=568,`${selector} fits during audio failure`);
   }
   await page.screenshot({path:path.join(output,'sage-voice-audio-failure-small.png')});
-  await page.evaluate(()=>{
-    document.getElementById('sageVoiceReview').hidden=false;
-    document.getElementById('sageVoiceDraft').value='நாளைக்கு service போகணும்';
-  });
-  const submit=await page.locator('#sageVoiceReview button[type="submit"]').boundingBox();
-  assert.ok(submit.y>=0 && submit.y+submit.height<=568,'transcript review controls fit');
-  await page.screenshot({path:path.join(output,'sage-voice-review-small.png')});
-  console.log('✓ Simulated stale worker cache bypassed; audio failure and transcript review controls fit');
+  for (const selector of ['#sageVoiceReview','#sageVoiceDraft','#sageVoiceMethod','.sage-voice-brand','#sageVoiceSTTBrowser']) {
+    assert.equal(await page.locator(selector).count(),0,`${selector} is removed`);
+  }
+  console.log('✓ Simulated stale worker cache bypassed; removed review/browser/header UI stays absent');
   assert.deepEqual(errors,[]);
   console.log(`✓ No voice UI runtime errors. Screenshots: ${output}`);
 } finally { await browser?.close(); server.close(); }

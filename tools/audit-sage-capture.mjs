@@ -56,7 +56,7 @@ try {
   assert.equal(await page.locator('#sageVoiceState').textContent(),'Couldn’t transcribe');
   for(const [width,height] of [[390,844],[320,568]]){
     await page.setViewportSize({width,height});
-    for(const id of ['sageVoiceSTTRetry','sageVoiceSTTBrowser','sageVoiceEnd']){
+    for(const id of ['sageVoiceSTTRetry','sageVoiceEnd']){
       if(await page.locator('#'+id).isVisible()){const b=await page.locator('#'+id).boundingBox();assert.ok(b.y>=0&&b.y+b.height<=height,`${id} fits ${width}x${height}`);}
     }
   }
@@ -66,14 +66,10 @@ try {
   const retry=await page.evaluate(()=>recordedRequests[2]);assert.equal(retry.body.contents[0].parts[0].inlineData.data,requests[0].body.contents[0].parts[0].inlineData.data,'retry uses identical saved audio');
   for(let i=0;i<4;i++){
     await page.waitForTimeout(600);
-    if(i===0) {
-      // Captions arrive while Chromium's fake mic keeps producing energy.
-      // The next turn must happen automatically, without an orb click.
-      await page.evaluate(()=>{const item=[{transcript:'what are you doing',confidence:.9}];item.isFinal=true;voicePreview.onresult({resultIndex:0,results:[item]});});
-    } else await page.locator('#sageVoiceOrb').click();
+    await page.locator('#sageVoiceOrb').click();
     await page.waitForFunction(n=>replies.length===n && document.getElementById('sageVoiceState').textContent==='I’m listening',i+2);
   }
   await page.locator('#sageVoiceEnd').click();
   assert.deepEqual(errors,[]);
-  console.log('✓ Real MediaRecorder/decoder/WAV path, bounded outage recovery, identical-audio retry, five completed turns automatic caption-to-recording handoff, and phone recovery controls');
+  console.log('✓ Real MediaRecorder/decoder/WAV path, bounded outage recovery, identical-audio retry, five completed turns full-audio handoff, and phone recovery controls');
 }finally{await browser?.close();server.close();}

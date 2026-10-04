@@ -77,9 +77,29 @@ test('explicit commands authorize only the current action and destination, inclu
   const h=harness();
   assert.equal((await h.run('control_voice',{action:'close'},{userText:'open voice mode'})).ok,false);
   assert.equal((await h.run('navigate_section',{section:'home'},{userText:'open documents'})).ok,false);
-  for(const text of ['close voice mode','voice mode close pannu','வாய்ஸ் மோடை மூடு']) {
+  for(const text of ['close voice mode','close voice','voice mode close pannu','வாய்ஸ் மோடை மூடு']) {
     assert.equal((await h.run('control_voice',{action:'close'},{userText:text})).ok,true);
   }
+});
+
+test('reading all documents paginates real attachments, skips missing papers and reports failed files',async()=>{
+  const h=harness();const opened=[];
+  h.root.dkApp.listDocuments=async()=>({ok:true,documents:['RC','Insurance','PUC','Licence','Extra'].map(document=>({document,onFile:document!=='PUC'}))});
+  h.root.dkApp.readDocument=async({document})=>{opened.push(document);return document==='Insurance'?{ok:false,error:'Unavailable'}:{ok:true,fileName:document+'.pdf',_attachFile:{mimeType:'application/pdf',data:'ZmlsZQ=='}};};
+  const first=await h.run('read_documents',{offset:0,limit:3});
+  assert.deepEqual(opened,['RC','Insurance','Licence']);assert.equal(first.total,4);assert.equal(first.nextOffset,3);assert.equal(first.complete,false);
+  assert.equal(first._attachFiles.length,2);assert.equal(first.documents[1].read,false);assert.match(first.documents[1].error,/Unavailable/);
+  const last=await h.run('read_documents',{offset:first.nextOffset});assert.equal(last.complete,true);assert.equal(last._attachFiles[0].name,'Extra');
+});
+test('document batches cap attachments without claiming unread oversized files were read',async()=>{
+  const h=harness();h.root.dkApp.listDocuments=async()=>({ok:true,documents:[{document:'Large policy',onFile:true}]});
+  h.root.dkApp.readDocument=async()=>({ok:true,_attachFile:{mimeType:'application/pdf',data:'a'.repeat(15*1024*1024)}});
+  const result=await h.run('read_documents',{});assert.equal(result._attachFiles.length,0);assert.equal(result.documents[0].read,false);assert.match(result.documents[0].error,/read_document/);
+});
+test('capabilities describe actual controls before data loads and preserve explicit UI guards',async()=>{
+  const h=harness();delete h.root.dkApp;const result=await h.run('get_app_capabilities',{});
+  assert.equal(result.ok,true);assert.ok(result.controls.some(c=>c.name==='read_documents'));assert.ok(result.controls.some(c=>c.name==='control_voice'));
+  assert.equal((await h.run('control_voice',{action:'close'},{userText:'what can you do'})).ok,false);
 });
 
 test('polite requests normalize whitespace without weakening negation protection',async()=>{

@@ -126,7 +126,7 @@ if (manifest.start_url) {
 
 /* ── 3. CSS url() — stylesheet-relative ────────────────────────────────── */
 
-for (const css of ['src/css/styles.css', 'src/css/home.css']) {
+for (const css of ['src/css/styles.css', 'src/css/home.css', 'src/css/sage-voice.css']) {
   // Blank out comments rather than deleting them, so line numbers survive.
   // styles.css documents a --dz-scene override as `url(...)` in prose, which
   // would otherwise be reported as a dangling reference to a file named "...".
@@ -151,6 +151,8 @@ const JS_FILES = [
   'src/js/sage-ai.js',
   'src/js/sage-autofill.js',
   'src/js/sage-ui.js',
+  'src/js/sage-transcription.js',
+  'src/js/sage-voice.js',
   'src/js/home3d.js',
   'src/js/docs3d.js',
   // Vendored three.js is scanned too: since r167 the module build is split and
@@ -195,6 +197,12 @@ for (const rel of JS_FILES) {
   // 4b. importScripts('...') → worker-relative (worker lives at repo root)
   eachMatch(text, /importScripts\(\s*['"]([^'"]+)['"]/g, (m, line) =>
     record({ file: rel, line, ref: m[1], base: fileDir, kind: 'js-importScripts' })
+  );
+
+  // AudioWorklet modules resolve against the script URL, including when the
+  // app is hosted below a path prefix. Query versions do not change the file.
+  eachMatch(text, /\bnew URL\(\s*['"]([^'"]+)['"]\s*,\s*document\.currentScript\.src\s*\)/g, (m, line) =>
+    record({ file: rel, line, ref: m[1], base: fileDir, kind: 'js-worklet-url' })
   );
 
   // 4c. every other path-shaped literal → document-relative
