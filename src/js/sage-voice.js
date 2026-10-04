@@ -1,5 +1,5 @@
 // SPINLOG — SAGE VOICE
-// Tamil/Tanglish audio transcription, explicit browser-language fallback,
+// Tamil/English Live transcription with full-audio fallback,
 // session-owned microphone lifecycle, and a four-turn voice conversation.
 // Audio uses the existing Gemini key. Chat/tools/history share SageAI.
 // Recognition preferences live in Sage settings; captions are ephemeral only
@@ -11,8 +11,7 @@
   // ── Persisted voice preferences ────────────
   const LS_GEM_VOICE = 'sage_voice_gem';      // Gemini prebuilt voice
   const LS_RATE = 'sage_voice_rate';
-  const LS_CAPTION_LANG = 'sage_voice_caption_lang'; // separate from browser-only fallback
-  const LS_STT_LANG = 'sage_voice_lang';      // explicit browser language
+  const LS_TTS_MODEL = 'sage_voice_tts_model';
 
   function load(key, fallback) {
     try {
@@ -31,13 +30,9 @@
       const n = parseFloat(load(LS_RATE, '1.08'));
       return Number.isFinite(n) ? Math.min(1.3, Math.max(0.7, n)) : 1;
     },
-    get sttLang() { return load(LS_STT_LANG, 'ta-IN') === 'en-IN' ? 'en-IN' : 'ta-IN'; },
-    get captionLang() { return load(LS_CAPTION_LANG, 'auto'); },
-    get recognition() { return load('sage_voice_recognition', 'gemini'); },
-    get review() { return load('sage_voice_review', 'false') === 'true'; },
+    get recognition() { return 'gemini'; }, // migrate old browser preferences to audio
     get speed() { return load('sage_voice_speed', 'fast') === 'careful' ? 'careful' : 'fast'; },
-    get pauseMs() { return load('sage_voice_pause', 'quick') === 'patient' ? 2200 : 450; },
-    set sttLang(v) { save(LS_STT_LANG, v); },
+    get pauseMs() { return load('sage_voice_pause', 'quick') === 'patient' ? 1200 : 650; },
   };
 
   // ── State ─────────────────────────────────────────────────────────────
@@ -47,21 +42,18 @@
     session: 0,        // bumped on close; stale async work aborts on mismatch
     muted: false,
     backgrounded: false,
-    recovering: false,
     ttsModel: 'gemini-3.8-flash-lite-tts',
     voiceName: 'Kore',
     voiceRate: 1.08,
     ttsLocked: false, // never change synthesis models after this call has spoken
     resumeAfterReply: false, // automatic audio hold; never overrides a manual mute
-    recognising: false,
     speaking: false,   // TTS audio actually playing
     transcribing: false,
-    reviewing: false,
+    recognitionFailed: false,
     busy: false,       // brain turn in flight
-    captionLang: 'en-IN', // auto captions start English; confirmed Tamil adapts the next turn
     finalText: '',
     speechSeen: false, // mic energy said a human is talking
-    sttMode: 'gemini', // audio first; explicit browser fallback
+    sttMode: 'gemini', // audio only; never substitute browser recognition
     recording: false, // MediaRecorder running (Gemini-ears mode)
     lastSaid: null, // last reply, kept when audio failed so tapping her retries it
     lastMicErr: '', // exact getUserMedia failure name — the mic's own words
@@ -84,15 +76,12 @@
   }
 
 
-  function RecognitionCtor() {
-    return root.SpeechRecognition || root.webkitSpeechRecognition || null;
-  }
   function audioCaptureSupported() {
     return !!(root.MediaRecorder && navigator.mediaDevices?.getUserMedia
       && (root.AudioContext || root.webkitAudioContext)
       && (root.OfflineAudioContext || root.webkitOfflineAudioContext));
   }
-  function sttSupported() { return audioCaptureSupported() || !!RecognitionCtor(); }
+  function sttSupported() { return audioCaptureSupported(); }
 
   // ── Text for the mouth ────────────────────────────────────────────────
   function speakable(text) {
@@ -115,11 +104,11 @@
   let cancelSpeech = null;
   let voiceSession = 0;
   const ttsRequests = new Set();
-  const TTS_MODELS = ['gemini-3.8-flash-lite-tts', 'gemini-3.1-flash-tts-preview', 'gemini-2.5-flash-preview-tts'];
+  const TTS_MODELS = ['gemini-3.8-flash-lite-tts', 'gemini-3.8-flash-tts'];
   const audioKeyRest = new Map();
   // Gemini 3.8 guidance: long identity/accent instructions cause voice drift.
-  // The configured speaker carries identity; use the same small delivery cue.
-  const GEM_VOICE_STYLE = 'Warm, relaxed, gently playful.';
+  // The configured speaker carries identity; leave style empty for both languages.
+  const GEM_VOICE_STYLE = '';
 
   function unlockAudio() {
     const AC = root.AudioContext || root.webkitAudioContext;
@@ -128,6 +117,7 @@
       if (!actx || actx.state === 'closed') actx = new AC();
       if (actx.state === 'suspended') actx.resume().catch(() => {});
       if (meterCtx?.state === 'suspended') meterCtx.resume().catch(() => {});
+      root.SageTranscription?.prepare(actx);
     } catch { /* playback will report the actual error */ }
   }
   function gemKeys() {
@@ -214,17 +204,14 @@
       let reader;
       try {
         watchdog();
-        const modern = model.startsWith('gemini-3.8');
-        const streaming = model !== 'gemini-2.5-flash-preview-tts';
         const body = {
-          contents:[{role:'user',parts:[modern ? {text:clean,speech_metadata:{style:GEM_VOICE_STYLE}} : {text:GEM_VOICE_STYLE+'\nRead only these words, without adding anything:\n'+clean}]}],
-          generationConfig:{responseModalities:['AUDIO'],speechConfig:{voiceConfig:modern ? {voice:S.voiceName} : {prebuiltVoiceConfig:{voiceName:S.voiceName}}}},
+          contents:[{role:'user',parts:[{text:clean,speech_metadata:{style:GEM_VOICE_STYLE}}]}],
+          generationConfig:{responseModalities:['AUDIO'],speechConfig:{voiceConfig:{voice:S.voiceName}},responseFormat:{audio:{mimeType:'AUDIO_L16',sampleRate:24000}}},
         };
-        if (modern) body.generationConfig.responseFormat={audio:{mimeType:'AUDIO_L16',sampleRate:24000}};
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:${streaming?'streamGenerateContent?alt=sse':'generateContent'}`, {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`, {
           method:'POST',signal:controller.signal,headers:{'Content-Type':'application/json','x-goog-api-key':keys[attempt]},body:JSON.stringify(body),
         });
-        if ([400,403,404].includes(res.status) && !S.ttsLocked && TTS_MODELS.indexOf(model)<TTS_MODELS.length-1) {
+        if ([403,404].includes(res.status) && !S.ttsLocked && TTS_MODELS.indexOf(model)<TTS_MODELS.length-1) {
           model=TTS_MODELS[TTS_MODELS.indexOf(model)+1]; S.ttsModel=model; attempt--; continue;
         }
         if (res.status===429) { audioKeyRest.set(keys[attempt],Date.now()+60000); if (attempt+1<keys.length) continue; throw new Error('quota'); }
@@ -327,6 +314,7 @@
         // Contiguous chunks touch sample-for-sample without per-chunk fades.
         source.start(startAt);
         S.ttsLocked = true;
+        save(LS_TTS_MODEL, S.ttsModel);
         setMode('speaking');
         timer = setTimeout(() => {
           finish(false, new Error('play-failed'));
@@ -381,14 +369,9 @@
 
   // One capture owner per turn. Stopping waits for MediaRecorder's final data
   // event; closing/muting invalidates every pending permission and transcription.
-  const GEM_STT_MODEL = 'gemini-3.5-flash';
-  const GEM_STT_FAST_MODEL = 'gemini-3.5-flash-lite';
+  const GEM_STT_MODEL = 'gemini-3.8-flash';
+  const GEM_STT_FAST_MODEL = 'gemini-3.5-flash';
   const GEM_API = 'https://generativelanguage.googleapis.com/v1beta';
-  let rec = null;
-  let endTimer = null;
-  let restartTimer = null;
-  let restarts = 0;
-  let recoveryTimer = null;
   let capture = null;
   let captureEpoch = 0;
   let openingMic = false;
@@ -406,11 +389,8 @@
   let micPending = null;
 
   function current(owner) { return S.open && owner === S.session; }
-  function clearEnd() { clearTimeout(endTimer); endTimer = null; }
-  function clearLangWatch() { /* Language is explicit, never guessed from silence. */ }
-  function stopSupervisor() { clearTimeout(restartTimer); restartTimer = null; }
   function canListen() {
-    return S.open && !S.backgrounded && !S.recovering && !S.muted && !S.busy && !S.speaking && !S.transcribing && !S.reviewing;
+    return S.open && !S.backgrounded && !S.muted && !S.busy && !S.speaking && !S.transcribing && !S.recognitionFailed;
   }
   function micProblem() {
     const messages = {
@@ -429,17 +409,6 @@
     setMode('idle', 'Microphone paused');
     setHint(message);
     paintMic();
-  }
-  function recoverListening(message, delay = 1500) {
-    stopListening();
-    if (S.muted || !S.open) return;
-    S.recovering=true;
-    const owner=S.session;
-    setMode('idle','Reconnecting…');setHint(message);paintMic();
-    recoveryTimer=setTimeout(()=>{
-      S.recovering=false;
-      if(current(owner) && !S.muted) startListening();
-    },delay);
   }
   async function startMeter() {
     if (meterStream && meterStream.getTracks().some(t => t.readyState === 'live')) return meterStream;
@@ -525,30 +494,21 @@
       .find(type => root.MediaRecorder?.isTypeSupported(type)) || '';
   }
   function startListening() {
-    if (!canListen() || openingMic || S.recording || S.recognising) return false;
-    if (S.sttMode === 'gemini') return startGeminiListen();
-    return startBrowserListen();
+    if (!canListen() || openingMic || S.recording) return false;
+    return startGeminiListen();
   }
-  let previewRec = null;
-  function stopPreview() {
-    const r = previewRec;
-    previewRec = null;
-    if (!r) return;
-    r.onresult = r.onend = r.onerror = r.onspeechstart = r.onspeechend = null;
-    try { r.abort(); } catch { /* optional captions only */ }
+  let warmEars = null;
+  let liveDisabled = false;
+  function warmRecognition() {
+    if (liveDisabled || !S.open || S.backgrounded || warmEars || !root.SageTranscription || !root.WebSocket) return;
+    warmEars = root.SageTranscription.connect({key:gemKey(),pauseMs:settings.pauseMs});
   }
-  function previewLanguage() {
-    return ['en-IN', 'ta-IN'].includes(settings.captionLang) ? settings.captionLang : S.captionLang;
-  }
-  function rememberCaptionLanguage(text) {
-    // The final audio transcript is authoritative, never the browser's guess.
-    S.captionLang = /[\u0B80-\u0BFF]/.test(text) ? 'ta-IN' : 'en-IN';
-  }
+  function releaseWarmRecognition() { warmEars?.close(); warmEars = null; }
   function isCloseCommand(text) {
     const command = String(text).toLowerCase().replace(/[.!?,;]+/g, ' ').replace(/\s+/g, ' ').trim()
       .replace(/^(?:(?:hey )?sage|bro)\s+/, '').replace(/^please\s+/, '')
-      .replace(/^(?:can|could|would) you\s+/, '').replace(/\s+(?:please|bro|sage)$/, '');
-    return /^(?:(?:close|exit|stop|leave|end) (?:the )?voice (?:mode|chat)|(?:end|close) (?:the |this )?call|hang up|voice (?:mode|chat) (?:close|stop) (?:pannu|pannunga)|வாய்ஸ் (?:மோட்|மோடை|மோடு|மோடைப்) (?:மூடு|மூடுங்க|க்ளோஸ் பண்ணு|க்ளோஸ் பண்ணுங்க)|காலை (?:கட் பண்ணு|முடி))$/u.test(command);
+      .replace(/^(?:can|could|would) you\s+/, '').replace(/^please\s+/, '').replace(/\s+(?:please|bro|sage)$/, '').trim();
+    return /^(?:(?:close|exit|stop|leave|end) (?:the )?voice(?: (?:mode|chat))?|(?:end|close) (?:the |this )?call|hang up|voice(?: (?:mode|chat))? (?:close|stop) (?:pannu|pannunga)|வாய்ஸ் (?:மோட்|மோடை|மோடு|மோடைப்) (?:மூடு|மூடுங்க|க்ளோஸ் பண்ணு|க்ளோஸ் பண்ணுங்க)|காலை (?:கட் பண்ணு|முடி))$/u.test(command);
   }
   function cleanRepeatedPhrases(raw) {
     let text = String(raw || '').trim();
@@ -572,74 +532,36 @@
     }
     return text;
   }
-  function startPreview(take) {
-    stopPreview();
-    const Ctor = RecognitionCtor();
-    if (!Ctor) return;
-    let r;
-    try { r = new Ctor(); } catch { return; }
-    previewRec = r;
-    r.lang = previewLanguage();
-    r.continuous = true;
-    r.interimResults = true;
-    r.maxAlternatives = 1;
-    const valid = () => previewRec === r && capture === take && !take.stopping
-      && current(take.owner) && (S.recording || openingMic) && !S.muted;
-    r.onresult = event => {
-      if (!valid()) return;
-      // Rebuild this recognizer's hypothesis: interim words can be revised.
-      const results = Array.from(event.results);
-      const text = results.map(result => result[0]?.transcript || '').join(' ').trim();
-      if (!text) return;
-      paintCaption(cleanRepeatedPhrases(text), true, true);
-      // Captions prove speech occurred even when the local level meter misses
-      // a quiet voice. They signal turn boundaries, never the submitted words.
-      take.heard = true;
-      if (!S.recording) take.earlySpeech = true;
-      if (text !== take.previewText) take.quietAt = 0;
-      take.previewText = text;
-      take.previewFinal = results.every(result => result.isFinal);
-      take.previewBoundaryAt = results.at(-1)?.isFinal ? Date.now() : 0;
-    };
-    r.onspeechstart = () => { if (valid()) { take.previewBoundaryAt = 0; take.quietAt = 0; } };
-    r.onspeechend = () => {
-      if (valid() && take.previewText) take.previewBoundaryAt = Date.now();
-    };
-    r.onend = () => {
-      // Some browsers end with an interim hypothesis instead of a final result.
-      if (valid() && take.previewText && !take.previewBoundaryAt) take.previewBoundaryAt = Date.now();
-      if (previewRec === r) { stopPreview(); retryPreview(); }
-    };
-    function retryPreview() {
-      if (take.previewText || take.previewRetries) return;
-      take.previewRetries = 1;
-      take.previewRetry = setTimeout(() => {
-        if (capture === take && !take.stopping && current(take.owner) && (S.recording || openingMic) && !S.muted && !S.backgrounded) startPreview(take);
-      }, 300);
-    }
-    // A network/permission error is not evidence that the user finished.
-    r.onerror = event => {
-      if (previewRec !== r) return;
-      stopPreview();
-      if (['network', 'no-speech'].includes(event.error)) retryPreview();
-    };
-
-    try { r.start(); } catch { stopPreview(); }
-  }
   async function startGeminiListen() {
     if (!canListen() || openingMic || S.recording) return false;
     const owner = S.session;
     const epoch = ++captureEpoch;
     openingMic = true;
-    setMode('listening', 'Connecting microphone…');
+    setMode('idle', 'Opening microphone…');
     const take = { recorder:null, chunks:[], owner, epoch, heard:false, loudAt:0,
-      quietAt:0, previewText:'', previewBoundaryAt:0, started:Date.now(), timer:null, stopping:false, cancelled:false };
+      quietAt:0, previewText:'', started:Date.now(), timer:null, stopping:false, cancelled:false };
     failedRecording = null;
     capture = take;
     paintCaption('', false);
-    // Start caption networking during the opening gesture, in parallel with
-    // device permission and the audio meter, rather than waiting for both.
-    startPreview(take);
+    warmRecognition();
+    take.live = warmEars; warmEars = null;
+    if (take.live) {
+      // Binding happens before awaiting permission. Buffered first words are
+      // sent after setupComplete, never dropped while networking warms up.
+      take.live.bind({
+        onText:(text, final) => {
+          if (!current(owner) || capture !== take || take.cancelled || take.stopping) return;
+          const changed = take.previewText !== text;
+          take.heard = true; take.previewText = text;
+          paintCaption(text, !final);
+          // Late committed words are not renewed microphone activity.
+          if (!final && changed) take.quietAt = 0;
+        },
+        onBoundary:() => {
+          if (current(owner) && capture === take && !take.stopping && take.previewText) finishGeminiListen(true);
+        },
+      });
+    }
     try {
       const stream = await startMeter();
       if (!current(owner) || epoch !== captureEpoch || capture !== take || !canListen()) return false;
@@ -661,20 +583,32 @@
       };
       S.recording = true;
       recorder.start(100);
+      const pcmStarted = Date.now();
+      root.SageTranscription?.attach(stream, actx, frame => {
+        if (capture !== take || take.cancelled) return;
+        take.live?.push(frame.pcm);
+        take.pcmLevel = frame.rms;
+      }).then(handle => {
+        if (!current(owner) || capture !== take || take.cancelled || take.stopping) { handle?.stop(); return; }
+        take.pcm = handle;
+        take.liveGap = Date.now() - pcmStarted > 120;
+        if (!handle) { take.live?.close(); take.live = null; }
+      }).catch(() => {
+        // A worklet failure must not abandon the already-running recorder.
+        take.live?.close(); take.live = null;
+      });
       take.timer = setInterval(() => {
         if (capture !== take || take.stopping) return;
         const now = Date.now();
-        // Browser endpointing can distinguish speech from a fan/background
-        // noise that keeps RMS permanently above threshold. A new hypothesis
-        // or speech-start cancels this deadline; the user's pause setting wins.
-        if (take.previewBoundaryAt && now - take.previewBoundaryAt >= settings.pauseMs) {
-          finishGeminiListen(true);
-          return;
-        }
         // Detection runs independently of visual animation frames. Lower the
         // continuation threshold so quiet Tamil syllables remain in the turn.
-        const level = sampleMeter();
-        const loud = level > Math.max(take.heard ? 0.0045 : 0.007, noiseFloor * (take.heard ? 1.5 : 2));
+        const level = take.pcmLevel ?? sampleMeter();
+        take.peakLevel = Math.max((take.peakLevel || 0) * 0.995, level);
+        // A voice falling back to a fan's steady floor is a pause even when
+        // the absolute level remains above the old 0.0045 threshold.
+        const threshold = Math.max(take.heard ? 0.003 : 0.005, noiseFloor * 1.6,
+          take.heard ? take.peakLevel * 0.22 : 0);
+        const loud = level > threshold;
         if (loud) {
           take.quietAt = 0;
           if (!take.loudAt) take.loudAt = now;
@@ -707,14 +641,14 @@
     } finally { if (epoch === captureEpoch) openingMic = false; }
   }
   function cancelGeminiListen() {
-    stopPreview();
     const take = capture;
     capture = null;
     S.recording = false;
     if (!take) return;
     take.cancelled = true;
+    take.live?.close();
+    take.pcm?.stop();
     clearInterval(take.timer);
-    clearTimeout(take.previewRetry);
     take.chunks = [];
     try { if (take.recorder && take.recorder.state !== 'inactive') take.recorder.stop(); } catch { /* already stopped */ }
   }
@@ -722,15 +656,9 @@
     const take = capture;
     if (!take || take.stopping || !take.recorder) return;
     if (!commit) { cancelGeminiListen(); return; }
-    // A final, exact exit command needs neither an audio upload nor a model.
-    if (!settings.review && take.previewFinal && isCloseCommand(take.previewText)) {
-      sendVoiceText(take.previewText);
-      return;
-    }
+    // Only the settled, authoritative transcript may execute a close command.
     take.stopping = true;
-    stopPreview();
     clearInterval(take.timer);
-    clearTimeout(take.previewRetry);
     S.recording = false;
     S.transcribing = true;
     setMode('transcribing');
@@ -743,18 +671,23 @@
   async function completeCapture(take) {
     if (take.cancelled || capture !== take || !current(take.owner)) return;
     clearInterval(take.timer);
-    clearTimeout(take.previewRetry);
-    capture = null;
     S.recording = false;
     S.transcribing = true;
     setMode('transcribing');
-    if (take.earlySpeech && take.previewText) {
-      S.transcribing = false;
-      // Words spoken before MediaRecorder was ready are not in its audio.
-      // Preserve the draft for review rather than submit a clipped recording.
-      acceptTranscript({ transcript:take.previewText, unclear:true });
+    await take.pcm?.stop();
+    const liveText = take.liveGap ? null : await take.live?.end();
+    const liveFailed = take.live && !take.live.available;
+    take.live?.close();
+    if (take.cancelled || capture !== take || !current(take.owner)) return;
+    capture = null;
+    if (liveText) {
+      take.chunks = []; S.transcribing = false;
+      acceptTranscript({transcript:liveText,unclear:false});
       return;
     }
+    // A rejected/slow Live route never loses this utterance or repeatedly
+    // reconnects. Use the same complete audio, including its first syllable.
+    if (liveFailed) { liveDisabled = true; releaseWarmRecognition(); }
     const recording = {blob:new Blob(take.chunks, {type:take.recorder.mimeType || 'audio/webm'}), b64:null, retryAt:0, previewText:take.previewText};
     take.chunks = [];
     await transcribeRecording(recording, take.owner, take.epoch);
@@ -784,9 +717,8 @@
       stopMeter();
       failedRecording = recording;
       recording.retryAt = err.retryAt || 0;
-      S.reviewing = true;
+      S.recognitionFailed = true;
       $('sageVoiceSTTError').hidden = false;
-      $('sageVoiceSTTBrowser').hidden = !RecognitionCtor();
       setMode('idle', 'Couldn’t transcribe');
       setHint(recognitionProblem(err));
       paintMic();
@@ -794,26 +726,26 @@
   }
   function recognitionProblem(err) {
     const code = err.message;
-    if (code === 'quota') return 'Recognition quota is busy. Your recording is kept. Wait a minute and retry, or use Tamil browser recognition.';
+    if (code === 'quota') return 'Recognition quota is busy. Your recording is kept. Wait a minute and retry, or retry the saved recording.';
     if (code === 'no-key' || code === 'stt-auth') return 'Recognition key was rejected. Check your Gemini key in settings, then retry this recording.';
-    if (code === 'stt-access') return 'Recognition access was denied. Check API/key restrictions, or use Tamil browser recognition.';
-    if (code === 'stt-model') return 'No supported recognition model was available. Retry or use Tamil browser recognition.';
+    if (code === 'stt-access') return 'Recognition access was denied. Check API/key restrictions, or retry the saved recording.';
+    if (code === 'stt-model') return 'No supported recognition model was available. Check model access, then retry the saved recording.';
     if (code === 'stt-400') return 'The recognition service rejected the audio request (400). Your recording is kept for retry.';
     if (code === 'invalid-transcript') return 'Recognition returned an unreadable transcript. Retry the saved recording.';
-    if (code === 'stt-blocked') return 'The recognition service did not return a transcript. Retry or use Tamil browser recognition.';
+    if (code === 'stt-blocked') return 'The recognition service did not return a transcript. Retry the saved recording.';
     if (code === 'timeout' || err.name === 'AbortError') return 'Recognition timed out. Your recording is kept—tap Retry recording.';
     if (code === 'network' || /^stt-5/.test(code)) return 'Recognition could not reach the service. Check your connection and retry the saved recording.';
-    return 'This browser could not read the recording. Retry or use Tamil browser recognition.';
+    return 'This browser could not read the recording. Retry the saved recording.';
   }
   async function retryRecording() {
     if (!S.open || !failedRecording || S.transcribing || S.backgrounded) return;
     const recording = failedRecording;
     if (recording.retryAt > Date.now()) {
-      setHint(`Recognition quota is busy. Retry in ${Math.ceil((recording.retryAt-Date.now())/1000)} seconds, or use Tamil browser recognition.`);
+      setHint(`Recognition quota is busy. Retry the saved recording in ${Math.ceil((recording.retryAt-Date.now())/1000)} seconds.`);
       return;
     }
     stopListening();
-    S.reviewing = false;
+    S.recognitionFailed = false;
     S.transcribing = true;
     $('sageVoiceSTTError').hidden = true;
     setMode('transcribing'); setHint('Retrying your saved recording…');
@@ -857,16 +789,14 @@
     const keys = gemKeys().slice(0, 2);
     if (!keys.length) throw new Error('no-key');
     const preferred = settings.speed === 'fast' ? GEM_STT_FAST_MODEL : GEM_STT_MODEL;
-    const models = settings.speed === 'fast'
-      ? [preferred, 'gemini-3.1-flash-lite', 'gemini-2.5-flash-lite']
-      : [preferred, 'gemini-2.5-flash'];
+    const models = [...new Set([preferred, 'gemini-3.5-flash', 'gemini-2.5-flash'])];
     let model = sttRoute?.preferred === preferred ? sttRoute.model : preferred;
     let simple = sttRoute?.preferred === preferred && sttRoute.simple;
     let keyIndex = 0;
     const controller = new AbortController();
     sttController = controller;
     // One deadline and at most three attempts for the SAME recording.
-    const timer = setTimeout(() => controller.abort(), 15000);
+    const timer = setTimeout(() => controller.abort(), 10000);
     try {
       for (let attempt=0; attempt<3; attempt++) {
         if (!current(owner) || controller.signal.aborted) throw new Error('cancelled');
@@ -937,106 +867,28 @@
       if (canListen()) startListening();
       return;
     }
-    if (!result.unclear) rememberCaptionLanguage(text);
-    if (settings.review || result.unclear) {
-      S.reviewing = true;
-      $('sageVoiceReview').hidden = false;
-      $('sageVoiceDraft').value = text;
-      setMode('reviewing');
-      setHint(result.unclear ? 'Some words were unclear. Check this before sending.' : 'Edit any words before sending.');
-      $('sageVoiceDraft').focus();
+    if (result.unclear) {
+      // No confirmation form and no guessed mutation. Ask aloud and immediately
+      // return to hands-free listening; the uncertain draft stays out of tools.
+      stopListening(); S.busy = true;
+      paintCaption('', false); addLine('you', text);
+      const clarification = /[\u0B80-\u0BFF]/.test(text)
+        ? 'அந்த வார்த்தை சரியா கேக்கல. இன்னொரு தடவை சொல்லு டா.'
+        : 'I missed part of that. Could you say it once more?';
+      addLine('her', clarification);
+      deliverReply(clarification, S.session);
       return;
     }
     sendVoiceText(text);
   }
-  function startBrowserListen() {
-    const Ctor = RecognitionCtor();
-    if (!Ctor) { pauseListening('Browser recognition is unavailable. Choose Tamil + Tanglish in Sage settings.'); return false; }
-    const owner = S.session;
-    const r = new Ctor();
-    rec = r;
-    r.lang = settings.sttLang;
-    r.continuous = true;
-    r.interimResults = true;
-    r.maxAlternatives = 3;
-    S.recognising = true; // includes starting, prevents duplicate start calls
-    let final = '';
-    let interim = '';
-    let uncertain = false;
-    let silentEnd = false;
-    const startedAt = Date.now();
-    const valid = () => current(owner) && rec === r && canListen();
-    const submit = () => {
-      if (!valid()) return;
-      const text = final.trim();
-      if (!text) { r.stop(); return; }
-      stopListening();
-      acceptTranscript({ transcript: text, unclear: uncertain });
-    };
-    r.onresult = event => {
-      if (!valid()) return;
-      final = ''; interim = ''; uncertain = false;
-      for (const result of event.results) {
-        if (result.isFinal) {
-          final += result[0].transcript + ' ';
-          if (result[0].confidence > 0 && result[0].confidence < 0.65) uncertain = true;
-        } else interim += result[0].transcript;
-      }
-      restarts = 0;
-      paintCaption(final + interim, true);
-      clearEnd();
-      // Never submit old finals while a later phrase is still interim.
-      if (!interim) endTimer = setTimeout(submit, settings.pauseMs);
-    };
-    r.onend = () => {
-      if (!valid()) return;
-      S.recognising = false;
-      clearEnd();
-      if (interim.trim()) {
-        const text = (final + interim).trim();
-        stopListening();
-        acceptTranscript({ transcript: text, unclear: true });
-        return;
-      }
-      if (final.trim()) { submit(); return; }
-      rec = null;
-      // Browsers end recognition after normal periods of silence. Those ends
-      // are healthy; only repeated immediate failures consume the retry limit.
-      if (silentEnd || Date.now() - startedAt >= 5000) restarts = 0;
-      if (++restarts > 4) { recoverListening('Recognition reconnecting. Your mic will resume automatically.', 3000); return; }
-      restartTimer = setTimeout(() => { if (current(owner)) startListening(); }, Math.min(3000, restarts * 500));
-    };
-    r.onerror = event => {
-      if (!valid()) return;
-      if (event.error === 'no-speech') { silentEnd = true; return; }
-      if (event.error === 'aborted') return;
-      if (event.error === 'network') { recoverListening('Recognition connection lost. Reconnecting…', 3000); return; }
-      const message = event.error === 'not-allowed' ? 'Allow microphone access, then tap to retry.'
-        : event.error === 'language-not-supported' ? 'This browser does not support the selected language. Choose Tamil + Tanglish in settings.'
-        : 'Browser recognition failed. Check your connection or choose Tamil + Tanglish in settings.';
-      pauseListening(message);
-    };
-    setMode('listening');
-    setHint(settings.sttLang === 'ta-IN' ? 'Listening in Tamil. Change the language in Sage settings if needed.' : 'Listening in English (India).');
-    try { r.start(); } catch { pauseListening('Could not start recognition. Tap the mic to retry.'); }
-    return true;
-  }
   function stopListening() {
-    clearTimeout(recoveryTimer); recoveryTimer=null; S.recovering=false;
     captureEpoch++;
     openingMic = false;
-    clearEnd(); stopSupervisor();
     if (sttController) sttController.abort();
     sttController = null;
     S.transcribing = false;
     cancelGeminiListen();
-    const r = rec;
-    rec = null;
-    S.recognising = false;
-    if (r) {
-      r.onend = r.onresult = r.onerror = r.onstart = null;
-      try { r.abort(); } catch { /* inactive */ }
-    }
+
   }
 
   function pokeOrb(v) {
@@ -1070,15 +922,14 @@
     const label = custom || {
       idle: 'Tap the mic to talk',
       transcribing: 'Hearing you…',
-      reviewing: 'Check what I heard',
       listening: 'I’m listening',
       thinking: 'Thinking…',
-      speaking: 'Sage is speaking',
+      speaking: 'Speaking',
     }[mode] || 'Voice';
     if (e.state) e.state.textContent = label;
     const instruction = $('sageVoiceInstruction');
-    if (instruction) instruction.textContent = { listening: 'Speak naturally. Pause when you’re done.', thinking: 'You’ll hear the reply as soon as it’s ready.', transcribing: 'Catching every word.', speaking: 'Tap the orb to interrupt.', reviewing: 'Make sure these are your words.', idle: 'Take your time. I’m here.' }[mode] || '';
-    if (e.orb) e.orb.setAttribute('aria-label', mode === 'speaking' ? 'Interrupt Sage' : mode === 'listening' ? 'Finish speaking and send' : S.lastSaid ? 'Replay Sage’s reply' : 'Sage voice orb');
+    if (instruction) instruction.textContent = { listening: 'Speak naturally. Pause when you’re done.', thinking: 'You’ll hear the reply as soon as it’s ready.', transcribing: 'Catching every word.', speaking: 'Tap the orb to interrupt.', idle: 'Take your time. I’m here.' }[mode] || '';
+    if (e.orb) e.orb.setAttribute('aria-label', mode === 'speaking' ? 'Interrupt reply' : mode === 'listening' ? 'Finish speaking and send' : S.lastSaid ? 'Restore audio' : 'Conversation controls');
     paintMic();
   }
 
@@ -1102,7 +953,7 @@
       e.caption.textContent = '';
       return;
     }
-    e.caption.innerHTML = `<span class="sage-voice-you">${draft ? 'draft' : 'you'} · </span>${esc(f.length > 200 ? f.slice(-200) : f)}`
+    e.caption.innerHTML = `<span class="sage-voice-you">you · </span>${esc(f.length > 200 ? f.slice(-200) : f)}`
       + (live ? '<span class="sage-voice-caret" aria-hidden="true"></span>' : '');
   }
 
@@ -1116,7 +967,7 @@
     if (!e.lines || !text) return;
     const div = document.createElement('p');
     div.className = `sage-voice-line ${who === 'you' ? 'is-you' : 'is-her'}`;
-    div.innerHTML = `<strong>${who === 'you' ? 'You' : 'Sage'}</strong><span>${esc(String(text))}</span>`;
+    div.innerHTML = `<strong>${who === 'you' ? 'You' : 'Reply'}</strong><span>${esc(String(text))}</span>`;
     const previous = [...e.lines.children];
     const tops = previous.map(line => line.getBoundingClientRect().top);
     e.lines.appendChild(div);
@@ -1136,7 +987,7 @@
     const e = els();
     if (!e.mic) return;
     e.mic.classList.toggle('is-off', S.muted);
-    e.mic.classList.toggle('is-live', S.recording || S.recognising);
+    e.mic.classList.toggle('is-live', S.recording);
     e.mic.setAttribute('aria-pressed', String(S.muted));
     e.mic.setAttribute('aria-label', S.muted ? 'Resume microphone' : 'Mute microphone');
     e.mic.title = S.muted ? 'Resume microphone' : 'Mute microphone';
@@ -1180,6 +1031,7 @@
   }
   async function deliverReply(text, owner) {
     S.lastSaid = text;
+    warmRecognition(); // connect the next turn while this reply plays
     let failure;
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
@@ -1259,7 +1111,6 @@
   async function sendVoiceText(raw) {
     const said = cleanRepeatedPhrases(raw);
     if (!said || S.busy || !S.open) return;
-    rememberCaptionLanguage(said);
     if (isCloseCommand(said)) {
       pushTurn({ role: 'user', text: said, at: Date.now(), via: 'voice' });
       close();
@@ -1338,27 +1189,24 @@
     const e = els();
     if (!e.overlay) return false;
     if (S.open) return true;
-    S.captionLang = 'en-IN';
     S.lastFocus = document.activeElement || null;
     S.open = true;
     S.backgrounded = false;
     S.voiceName = settings.gemVoice;
     S.voiceRate = settings.rate;
-    S.ttsModel = TTS_MODELS[0];
+    const storedModel = load(LS_TTS_MODEL, TTS_MODELS[0]);
+    S.ttsModel = TTS_MODELS.includes(storedModel) ? storedModel : TTS_MODELS[0];
     S.ttsLocked = false;
     sttRoute = null; failedRecording = null;
     $('sageVoiceSTTError').hidden = true;
     S.session++;
-    restarts = 0;
     S.muted = false;
     S.resumeAfterReply = false;
-    S.sttMode = settings.recognition === 'browser' ? 'web' : 'gemini';
-    const method = $('sageVoiceMethod');
-    if (method) method.textContent = S.sttMode === 'gemini' ? `Tamil + Tanglish · ${settings.speed === 'fast' ? 'Fast' : 'Careful'}` : (settings.sttLang === 'ta-IN' ? 'Tamil · Browser' : 'English · Browser');
+    S.sttMode = 'gemini';
+    liveDisabled = false; releaseWarmRecognition();
     e.overlay.setAttribute('data-recognition', S.sttMode);
     S.lastSaid = null;
-    S.reviewing = false;
-    $('sageVoiceReview').hidden = true;
+    S.recognitionFailed = false;
     S.busy = false;
     S.finalText = '';
     S.speechSeen = false;
@@ -1373,11 +1221,11 @@
     unlockAudio(); // synchronous: this tap is the gesture that allows sound
 
     // The next capture starts after each completed spoken reply.
-    if (S.sttMode === 'gemini' && !gemKey()) {
+    if (!gemKey()) {
       pauseListening('Add or unlock your Gemini key in Sage settings to use Tamil + Tanglish audio.');
-    } else if (S.sttMode === 'gemini' && !audioCaptureSupported()) {
-      pauseListening('Audio recording is unavailable in this browser. Choose Browser recognition with Tamil in Sage settings.');
-    } else { setMode('listening'); startListening(); }
+    } else if (!audioCaptureSupported()) {
+      pauseListening('Audio recording is unavailable. Open this site in a browser with microphone recording support.');
+    } else { warmRecognition(); startListening(); }
     return true;
   }
 
@@ -1385,6 +1233,7 @@
     const e = els();
     S.open = false;
     failedRecording = null;
+    releaseWarmRecognition();
     $('sageVoiceSTTError').hidden = true;
     S.session++;
     S.busy = false;
@@ -1392,12 +1241,7 @@
     stopListening();
     stopAllAudio();
     stopMeter();
-    S.reviewing = false;
-    $('sageVoiceReview').hidden = true;
-    try { if (rec) { rec.onend = null; rec.onerror = null; rec.onresult = null; } } catch { /* ignore */ }
-    rec = null;
-    clearEnd();
-    clearLangWatch();
+    S.recognitionFailed = false;
     S.finalText = '';
     S.speechSeen = false;
     if (e.overlay) {
@@ -1459,7 +1303,7 @@
           if (!S.busy && !S.muted) { setMode('listening'); startListening(); }
           return;
         }
-        if (S.busy || S.transcribing || S.reviewing) return;
+        if (S.busy || S.transcribing || S.recognitionFailed) return;
         if (S.lastSaid) {
           stopListening();
           S.busy = true;
@@ -1477,46 +1321,18 @@
         S.muted = !S.muted;
         meterStream?.getTracks().forEach(t => { t.enabled = !S.muted; });
         if (S.muted) {
+          releaseWarmRecognition();
           stopListening();
-          if (!S.busy && !S.speaking && !S.reviewing) setMode('idle', 'Microphone paused');
+          if (!S.busy && !S.speaking && !S.recognitionFailed) setMode('idle', 'Microphone paused');
           setHint('Mic off. Tap again when you’re ready.');
-        } else { setHint(''); restarts = 0; startListening(); }
+        } else { setHint(''); startListening(); }
         paintMic();
       });
     }
     $('sageVoiceSTTRetry')?.addEventListener('click', retryRecording);
-    $('sageVoiceSTTBrowser')?.addEventListener('click', () => {
-      if (!S.open || !RecognitionCtor()) return;
-      stopListening(); failedRecording=null; S.reviewing=false;
-      $('sageVoiceSTTError').hidden=true;
-      S.sttMode='web'; settings.sttLang='ta-IN';
-      $('sageVoiceMethod').textContent='Tamil · Browser';
-      $('sageVoiceOverlay').setAttribute('data-recognition','web');
-      setHint('Say that again in Tamil. Browser recognition is active for this call.');
-      if (!S.muted) startListening();
-    });
-    $('sageVoiceReview')?.addEventListener('submit', ev => {
-      ev.preventDefault();
-      const text = $('sageVoiceDraft').value.trim();
-      if (!text || !S.open || !S.reviewing) return;
-      S.reviewing = false;
-      $('sageVoiceReview').hidden = true;
-      sendVoiceText(text);
-    });
-    $('sageVoiceRetry')?.addEventListener('click', () => {
-      S.reviewing = false;
-      $('sageVoiceReview').hidden = true;
-      S.muted = false;
-      meterStream?.getTracks().forEach(t => { t.enabled = true; });
-      startListening();
-    });
     const preferences = [
-      ['sageVoiceRecognition', 'sage_voice_recognition', settings.recognition],
-      ['sageVoiceLanguage', LS_STT_LANG, settings.sttLang],
-      ['sageVoiceCaptionLanguage', LS_CAPTION_LANG, settings.captionLang],
       ['sageVoicePause', 'sage_voice_pause', load('sage_voice_pause', 'quick')],
       ['sageVoiceSpeed', 'sage_voice_speed', settings.speed],
-      ['sageVoiceReviewSetting', 'sage_voice_review', settings.review],
     ];
     preferences.forEach(([id, key, value]) => {
       const input = $(id);
@@ -1529,7 +1345,8 @@
       if (!S.open) return;
       S.backgrounded=!!document.hidden;
       if (document.hidden) {
-        if (S.recording || S.recognising || openingMic) stopListening();
+        if (S.recording || openingMic) stopListening();
+        releaseWarmRecognition();
         stopMeter();
       } else {
         unlockAudio();

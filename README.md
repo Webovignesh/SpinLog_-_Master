@@ -881,116 +881,99 @@ gone rather than left as links that go nowhere. What was in them that still matt
   back to localStorage then to the `data-due` values in `index.html`; Sage's memory
   falls back to localStorage; the key ring stays on the device.
 
-## Sage voice — v1.9.29
+## Sage voice — v1.9.32
 
-Open **Talk to Sage** inside the chat card. The fullscreen voice room uses a fluid amber orb (blue while speaking) and
-keeps the latest four speaker turns on screen, moving older turns out as new ones
-arrive. Completed voice turns remain in the normal chat history. Tap the orb to
-send a recording early or interrupt a spoken reply; use the microphone button to
-mute, and End, Escape or app Back to leave. The transcript is centered; there is
-no duplicate close button in the header. The backdrop is translucent and blurred.
-Type **go to voice mode**, **open voice chat** or **let's talk** to open it directly
-from chat without an AI round trip. The activity pill appears only for site lookups.
+Open **Talk to Sage** inside the chat card, or type **go to voice mode**, **open
+voice chat** or **let’s talk**. The translucent room centers the latest four
+speaker turns around the orb. Older turns move out; completed exchanges remain
+in chat history. The room has no branding header, transcript-review form,
+browser-recognition switch or replay button. Tap the orb to finish a recording
+or interrupt speech; use the microphone to mute and **End**, Escape or app Back
+to leave. Explicit **close voice** commands also end the call locally. Greetings,
+questions about closing and negated commands do not close it. The activity pill
+appears only for actual site lookups.
 
-In **Sage settings → Voice → Speaking & listening**:
+### Listening and turn handoff
 
-- **Tamil + Tanglish · Gemini audio** is the default. Missing keys or unsupported recording pause with an explanation;
-  the app never silently switches to the browser recognizer. Each complete recording is converted locally to mono
-  16 kHz PCM WAV and sent to the existing Gemini API using the configured key.
-  The transcription instruction preserves regional Tamil and English mixing,
-  slang, names and numbers. It does not force a Chennai dialect or translate
-  Tamil into English. Audio requests count toward the provider's quota.
-- **Live draft captions** use the browser recognizer in the selected language while Gemini records. They appear before upload and are labelled draft. Browser final/speech-end signals can finish the recording after the selected pause, even when the level meter misses quiet speech or hears constant background noise. New speech cancels that deadline. Draft text never triggers chat or tools; only the recorded audio goes to Gemini. Gemini replaces them with its final bilingual transcript. An unsupported or disconnected caption service does not stop capture or retry in a loop. Drafts are optional browser functionality, not guaranteed on every device.
-- **Browser recognition** is available as an explicit fallback. The default
-  language is Tamil (`ta-IN`); English (India) can be selected. Silence never
-  changes the selected language. Browser support and recognition quality vary.
-- **Fast transcription** uses Gemini 3.5 Flash-Lite by default. Choose **Careful**
-  to use Gemini 3.5 Flash for difficult speech. Both keep the same Tamil/Tanglish
-  instructions and transcript-review safeguards; compare accuracy with your own audio.
-- The default pause is 0.45 seconds; a saved **Relaxed · 2.2 seconds** preference
-  is preserved. Audio turns are capped at
-  45 seconds; silent recording buffers are discarded locally every 15 seconds
-  while the microphone keeps listening. Empty transcripts and normal browser
-  silence timeouts also rearm listening without uploading silence. Tap the orb to submit quiet speech manually.
-- Enable **Let me check every transcript before sending** to edit each transcript.
-  Gemini-marked unclear speech and low-confidence browser results require review
-  even when that preference is off. These signals are imperfect; they cannot
-  guarantee a correct transcript.
+The primary recognition path streams mono 16 kHz PCM from an AudioWorklet to
+**Gemini 3.8 Live**. It uses input transcription only: the Live model’s generated
+audio and answers are never played or used as user text. SageAI continues to own
+tools and history; the selected TTS speaker owns audible replies. English,
+Tamil and Tanglish share automatic language detection, without a Tamil-first
+browser draft. Recognition instructions preserve whole Chennai/Theni phrases,
+names and numbers, without translating speech or inventing slang.
 
-The microphone meter shares the AudioContext unlocked by the opening gesture,
-so it does not create a potentially suspended context after permission resolves.
-Speech detection samples audio every 100 ms independently of visual animation
-frames, with a lower continuation threshold for quiet syllables. The room says
-“listening” only once MediaRecorder starts. First-use microphone permission and
-the browser caption service’s cold connection still depend on the device.
+The WebSocket starts alongside microphone permission. PCM is buffered until
+`setupComplete`, and the next connection is warmed while the reply plays.
+MediaRecorder starts immediately when permission resolves and preserves the
+whole utterance as a fallback. An existing gesture-unlocked AudioContext and
+microphone stream are reused across turns. “Listening” appears only after the
+recorder actually starts. A slow worklet startup uses the full recording rather
+than submitting a potentially missing first word.
 
-Preferences save immediately and apply to the next voice session. Hands-free
-capture resumes after the audio source finishes or you interrupt it. Browser
-recognition disconnects and transient synthesis failures reconnect with backoff;
-permission failures and blocked playback require a tap.
+Local audio-level sampling runs every 100 ms independently of animation frames.
+The default pause is **Quick · 0.65 seconds**; **Patient · 1.2 seconds** is available.
+Server speech-end detection also handles steady background noise. Cutoff flushes
+the last PCM packet and sends `audioStreamEnd`; late input-transcript segments
+settle before one complete sentence is submitted. `waitingForInput` is not an
+end marker. Turns are capped at 45 seconds; empty recordings are discarded
+locally every 15 seconds while the room stays open.
 
-Gemini transcription retries the **same recording**, with at most three HTTP attempts
-inside one 15-second deadline. Unsupported models fall back from 3.5 Flash-Lite to
-3.1 Flash-Lite and then legacy 2.5 Flash-Lite (Careful: 3.5 Flash to 2.5 Flash), and
-the successful route is remembered for the call. Gemini 3 uses `thinkingLevel`,
-with a retry without that option only if the provider rejects it. Authentication,
-model access, quota, network, unreadable responses and decode failures have distinct
-messages. Persistent failure holds the recording in memory and displays **Retry
-recording** / **Use Tamil browser** instead of discarding speech and cycling between
-Listening and Reconnecting. Quota retry waits at least a minute and honors a longer
-Retry-After value. Closing the room or choosing browser recognition drops the
-saved audio. Browser fallback is explicit and applies only to this call.
+If Live or AudioWorklet is unavailable, the same full recording is decoded to
+16 kHz PCM WAV for Gemini multimodal transcription. **Fast** uses Gemini 3.5
+Flash; **Careful** starts with Gemini 3.8 Flash. Requests have a shared ten-second
+deadline and at most three attempts. There is no browser speech fallback.
+Unclear speech gets a short spoken clarification and listening resumes without
+executing a guessed command. Persistent authentication, access, quota or network
+failures retain the audio for **Retry recording** with a specific explanation.
+Closing drops saved audio and invalidates late results. Hidden tabs release
+capture; returning resumes unless manually muted. Provider calls use the
+configured Gemini key and count toward its quota.
 
-Failed speech stays
-available through **Play reply**, and a manual mute is always respected. Browser
-recognition also reconnects after repeated short disconnects, instead of permanently
-muting after four retries. The room stays open across tab switches: hidden tabs
-release the mic, and returning resumes capture unless you muted it. Closing the
-room cancels outstanding voice audio requests and invalidates late results; it
-does not roll back tool actions already submitted to SageAI.
+Google’s [Live capabilities](https://ai.google.dev/gemini-api/docs/live-api/capabilities)
+list Tamil, while [Gemini 3.5 Transcribe’s language list](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-transcribe)
+does not, as checked on 2026-10-04. Dedicated Transcribe is therefore not the
+primary bilingual recognizer. The [WebSocket reference](https://ai.google.dev/api/live)
+defines setup ordering, independent input-transcription delivery and stream-end
+signals used here. Microphone permission, network delay and real speech still
+need testing on the target device; mocks do not establish recognition accuracy.
 
-Replies use one synthesis request for the complete mixed-language reply, with one
-session-fixed voice (Kore by default) and a warm adult feminine style anchored
-to that speaker’s natural English identity across both languages. The delivery
-instruction avoids a separate Tamil narrator accent, vocal fry, creaking and
-exaggerated whispering. This guides generation; it cannot guarantee identical
-accent/timbre across independently generated replies. Tamil text stays in Tamil script for pronunciation. Regional
-transcription and reply instructions cover Chennai and Theni phrases, including
-whole phrases such as “sollu da”; examples must not be inserted unless spoken.
-This is prompting, not a newly trained Tamil recognition model.
+### One reply speaker
 
-Gemini 3.8 Flash-Lite TTS streams PCM audio into a gesture-unlocked Web Audio
-context, so playback can start before generation finishes. PCM packets are
-coalesced into at least 120 ms of audio (a shorter final packet is flushed at EOF),
-then scheduled contiguously on the Web Audio clock with a small startup cushion.
-Playback never waits for JavaScript `onended` to start the next chunk. Odd-byte
-packet boundaries preserve the unfinished 16-bit sample; a truncated sample
-fails explicitly. Interrupting cancels every scheduled source. This removes
-avoidable chunk gaps, but cannot repair distortion already in generated audio. Unsupported model or
-configuration responses fall back to 3.1 Flash TTS, then 2.5 Flash TTS; the session
-remembers the supported model. After the first playback, the model is locked for
-the call: a later failure offers replay instead of silently changing the voice.
-The legacy 2.5 fallback buffers its response.
-Separate synthesis calls for short sentences have been removed, reducing request
-count and cross-sentence timbre changes. Default playback speed remains 1.08×.
-Missing, silent or truncated audio offers replay. No other voice provider or
-browser speaker is substituted. Streaming requests have a 20-second inactivity
-watchdog; recognition has a 15-second deadline.
+Each complete mixed-language reply uses one Gemini 3.8 TTS synthesis request,
+with the chosen speaker (Kore by default) and playback rate fixed for the call.
+The style instruction is empty, following Google’s guidance to avoid unnecessary
+identity/accent direction. Tamil stays in Tamil script for pronunciation. There
+is no browser voice, separate Tamil narrator, or legacy 3.1/2.5 TTS fallback.
+A supported 3.8 model is remembered across calls and locked after playback starts;
+a subsequent error cannot silently switch it. This removes application-driven
+voice changes; it cannot guarantee identical generated timbre on every reply.
 
-Voice answers lead with Gemini 3.5 Flash-Lite at minimal thinking, falling back to
-the existing Flash chain. Speech synthesis is unchanged. A separate serial AI
-queue and per-model 1.5-second start spacing keep background Flash requests from
-delaying voice Flash-Lite. Calls to the same model still share spacing. Explicit
-model-scoped 429s rest only that model and honor provider retry delays; unknown or
-project-wide limits still rest the key. Success on another model cannot erase a
-quota rest. Reply failures show an actionable status, keep the user turn, and
-resume listening without synthesizing canned errors as Sage replies. AI voice requests time out after 12 seconds per attempt, with at most
-three attempts per model turn, including configuration retries. Tool results still
-precede the final answer. Versioned assets prevent old worker caches from mixing
-with this release. These controls reduce avoidable waits; provider latency and
-voice consistency still need real-device testing.
+Streaming 24 kHz PCM packets are coalesced into at least 120 ms of audio and
+scheduled contiguously on the Web Audio clock. Odd-byte transport splits retain
+the unfinished sample, interruption cancels scheduled sources, and a final STOP
+ends network waiting. A 20-second inactivity watchdog bounds stalls. Silent or
+incomplete replies retry once before playback; already-started speech is not
+repeated. Transient failures resume listening with a status rather than offering
+a replay button. These checks remove avoidable gaps but cannot repair distortion
+already present in generated audio. See [Google’s TTS guidance](https://ai.google.dev/gemini-api/docs/generate-content/speech-generation).
 
-Gemini 3.5 Transcribe Live was evaluated against [Google's live transcription guide](https://ai.google.dev/gemini-api/docs/live-api/live-transcribe). It supports partial captions, but Tamil is absent from its documented language list as checked on 2026-09-29. It is therefore not the default for this bilingual room. Final transcription remains Gemini multimodal audio; no Tamil accuracy or end-to-end latency guarantee is inferred from mocked tests.
+Voice answers use Gemini 3.5 Flash-Lite with minimal thinking, a separate serial
+queue and per-model request spacing. Tools must complete before claims of success.
+AI attempts time out after 12 seconds with at most three attempts per model turn.
+Existing quota rests and confirmation rules remain in force.
+
+### Website and document knowledge
+
+Sage’s prompt includes current voice state and the real website controls.
+`get_app_capabilities` exposes actual tool descriptions and pages.
+`read_documents` opens stored files in batches of up to three, forwarding the
+real attachment bytes to the model, with pagination and per-file failures.
+Combined attachments are capped at 10 MB; larger files are read individually.
+Document contents are data, not tool instructions. File names alone never count
+as reading a document, and unavailable files are reported rather than invented.
+The assistant can inspect all stored papers when asked, using subsequent batches,
+and use existing site tools subject to their current-request and deletion guards.
 
 ### Plan and notification cleanup
 
@@ -1012,15 +995,10 @@ while the app is closed. Existing daily caps, quiet hours and category settings
 still apply. Live AI generation was removed from reminder delivery to avoid a
 network wait between checking a plan and showing its alert.
 
-The Gemini path transcribes a completed utterance, then uses the existing SageAI
-chat/tools and Gemini TTS pipeline. It is not a streaming speech-to-speech service.
-Real Tamil/slang accuracy and audio latency still depend on the microphone,
-provider, network and actual speech, and need testing on the target device.
-
 ### Voice checks
 
 ```sh
-node --test tools/audit-sage-voice.mjs tools/audit-sage-voice-latency.mjs tools/audit-sage-chat-command.mjs
+node --test tools/audit-sage-voice.mjs tools/audit-sage-controls.mjs tools/audit-sage-voice-latency.mjs tools/audit-sage-chat-command.mjs tools/audit-sage-pcm.mjs
 # Install fake-indexeddb, or set SAGE_TEST_NODE_MODULES to its node_modules directory:
 node --test tools/audit-sage-reminders.mjs
 node tools/audit-refs.mjs
@@ -1028,23 +1006,27 @@ node tools/audit-boot.mjs
 # With Playwright and Chromium installed:
 node tools/audit-sage-voice-ui.mjs
 node tools/audit-sage-capture.mjs
+node tools/audit-sage-live-browser.mjs
+node tools/audit-sage-audio-clock.mjs
 ```
 
-The deterministic regression suite covers final recorder chunks, WAV payloads,
-review/correction, four-turn history, silence, permissions, mute, cancellation,
-late results, browser fallback, quota failures, speech interruption, playback
-completion, blocked/silent/truncated audio, model fallback, streamed playback,
-eight consecutive exchanges, Tamil-script replies and chat activation. Reminder
-tests use fake-indexeddb and a simulated cloud to exercise cross-context delivery,
-retry delays, expiry, hard deletion and denied-delete recovery. The UI
-audit renders the actual page markup and styles at 1280×900, 390×844 and 320×568
-with mocked voice services and no external requests. It checks control visibility,
-keyboard focus, settings typography, recovery controls and an upgrade with a
-simulated stale service-worker cache, and writes screenshots to
-`/tmp/sage-voice-preview` (override with `SAGE_SCREENSHOT_DIR`). Set
-`PLAYWRIGHT_CHROMIUM_EXECUTABLE` to use an existing Chromium binary. The capture audit additionally runs real Chromium MediaRecorder and Web Audio decoding,
-checks PCM payloads, simulates a service outage, retries identical audio and completes
-five spoken turns. Provider responses remain mocked; these checks do not verify live
-API access or subjective recognition accuracy.
+The deterministic regression suite covers final recorder chunks, PCM resampling,
+WAV fallback, delayed Live setup, first-packet buffering, late final/interim
+segments, automatic cutoff under steady noise, spoken clarification, four-turn
+history, permissions, mute, cancellation, stale results, quota handling, silent
+and truncated replies, cached TTS identity, streamed playback, repeated exchanges,
+Tamil-script replies, chat activation and actual document attachment forwarding.
+Reminder tests use fake-indexeddb and a simulated cloud for cross-context delivery,
+retry delays, expiry, hard deletion and denied-delete recovery.
 
-Model references: [streaming speech generation](https://ai.google.dev/gemini-api/docs/generate-content/speech-generation), [Flash-Lite audio support](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash-lite), [legacy model access changes](https://ai.google.dev/gemini-api/docs/changelog), [thinking controls](https://ai.google.dev/gemini-api/docs/thinking).
+Browser audits render the real page at desktop and small-screen sizes, check
+controls, focus, settings typography and stale service-worker upgrades, and save
+screenshots to `/tmp/sage-voice-preview` (override with `SAGE_SCREENSHOT_DIR`). Set
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE` to use an existing Chromium binary. The capture
+audit uses real Chromium MediaRecorder and audio decoding, retries identical
+audio after an outage, and completes five turns. The Live browser audit uses a
+real synthetic microphone and production AudioWorklet with a delayed mock
+WebSocket, five automatic bilingual turns and resource cleanup. The audio-clock
+audit renders scheduled PCM offline to check sample continuity. Provider replies
+remain mocked: none of these tests verifies live API access, real Tamil accuracy
+or subjective accent/timbre.

@@ -61,6 +61,22 @@ test('tool results still precede the spoken answer in the fast request lane',asy
   } finally {h.cleanup();}
 });
 
+test('multiple stored documents arrive as readable attachments rather than base64 in tool results',async()=>{
+  const h=harness(async(url,init,n)=>n===1?{ok:true,status:200,json:async()=>({candidates:[{content:{parts:[{functionCall:{name:'read_documents',args:{offset:0}}}]},finishReason:'STOP'}]})}:answer('I read both files.'));
+  try {
+    const reply=await h.AI.converse({voice:true,purpose:'chat',system:'test',history:[{role:'user',text:'read all my docs'}],
+      tools:[{name:'read_documents',parameters:{type:'OBJECT',properties:{}}}],
+      onTool:async()=>({ok:true,complete:true,documents:[{document:'RC',read:true},{document:'Policy',read:true}],_attachFiles:[
+        {name:'RC',mimeType:'application/pdf',data:'UkM='},{name:'Policy',mimeType:'image/png',data:'UG9saWN5'}]})});
+    assert.equal(reply.ok,true);
+    const parts=h.requests[1].body.contents.at(-1).parts;
+    assert.equal(parts.filter(p=>p.inlineData).length,2);
+    assert.equal(parts[0].functionResponse.response._attachFiles,undefined);
+    assert.ok(parts.some(p=>p.text?.includes('Stored document: RC')));
+    assert.equal(reply.calls[0].result._attachFiles,undefined,'large file bytes are not retained in tool history');
+  }finally{h.cleanup();}
+});
+
 test('spoken answers preserve Tamil script and instruct full regional phrases',async()=>{
   const h=harness(async()=>answer('சொல்லு டா, என்ன விஷயம்?'));
   try {const reply=await h.AI.askSage('நான் பேசுறது கேக்குதா',{voice:true});
