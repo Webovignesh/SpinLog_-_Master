@@ -52,8 +52,6 @@
 .sage-voice-btn.is-live { background:#292820; border-color:#d7b18a38; color:#ffcc9e; box-shadow:none; animation:none; }
 .sage-voice-btn.is-off { opacity:1; color:#9da1ae; }
 .sage-voice-btn.is-end { width:auto; min-width:108px; gap:10px; padding:0 23px; border:0; border-radius:32px; background:#edeae5; color:#19191c; }
-.sage-voice-replay { display:inline-flex; align-items:center; gap:8px; padding:0 16px; height:46px; border:1px solid #deb89350; border-radius:24px; background:#30271f; color:#ffd2ac; font:500 12px/1 var(--sl-read); cursor:pointer; }
-.sage-voice-replay[hidden] { display:none; }
 .sage-voice-hint { flex:none; max-width:560px; min-height:32px; margin:14px auto 0; color:#9396a0; font:400 11px/1.5 var(--sl-read); text-align:center; }
 .sage-voice-hint:empty { display:block; }
 .sage-voice-review { flex:none; width:min(100%,620px); box-sizing:border-box; padding:12px; margin:8px auto 0; border:1px solid #ffffff1e; border-radius:14px; background:#1a1c22; }
@@ -75,7 +73,6 @@
  .sage-voice-line { font-size:14px; padding:7px 0; gap:2px; }
  .sage-voice-entry { padding:10px 12px; }
  .sage-voice-entry > span { max-width:120px; font-size:11px; }
- .sage-voice-replay { padding:0 11px; font-size:11px; }
  .sage-voice-controls { gap:10px; }
 }
 @media(max-height:650px) {

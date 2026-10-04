@@ -18,7 +18,7 @@ try {
       // Offline contexts are suspended until rendering starts; all other calls
       // and the audio clock are real. The scheduler is extracted unchanged.
       const actx=new Proxy(context,{get(target,key){if(key==='state')return 'running';const value=target[key];return typeof value==='function'?value.bind(target):value;}});
-      const make=new Function('actx',`const S={open:true}, voiceSession=1, settings={rate:1.08}, playbackSources=new Map(); let playbackNextAt=0; function setMode(){}; ${scheduler}; return playSpeech;`);
+      const make=new Function('actx',`const S={open:true,voiceRate:1.08}, voiceSession=1, settings={rate:1.08}, playbackSources=new Map(); let playbackNextAt=0; function setMode(){}; ${scheduler}; return playSpeech;`);
       const play=make(actx),rate=24000,samples=new Float32Array(12000);
       for(let i=0;i<samples.length;i++)samples[i]=Math.sin(2*Math.PI*317*i/rate)*.3;
       const jobs=[];

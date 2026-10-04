@@ -22,21 +22,21 @@ function harness(overrides={}) {
 test('explicit navigation opens the page and ends voice; an offer never navigates',async()=>{
   const h=harness();assert.equal((await h.run('open_section',{section:'service'})).offered,'service');
   assert.equal(h.section,null);assert.equal(h.open,true);
-  assert.equal((await h.run('navigate_section',{section:'docs',highlight:'untrusted selector'})).opened,'docs');
+  assert.equal((await h.run('navigate_section',{section:'docs',highlight:'untrusted selector'},{userText:'open documents'})).opened,'docs');
   assert.equal(h.section,'docs');assert.equal(h.open,false);
 });
 test('unknown destinations and failed navigation leave the call intact',async()=>{
   const h=harness();assert.equal((await h.run('navigate_section',{section:'javascript:alert(1)'})).ok,false);
   assert.equal(h.open,true);assert.equal(h.section,null);
   h.root.dkApp.goToSection=async()=>({ok:false,error:'Unavailable'});
-  assert.equal((await h.run('navigate_section',{section:'docs'})).ok,false);assert.equal(h.open,true);
+  assert.equal((await h.run('navigate_section',{section:'docs'},{userText:'open documents'})).ok,false);assert.equal(h.open,true);
 });
 test('voice and settings work before data loads, and only accept whitelisted controls',async()=>{
   const h=harness();delete h.root.dkApp;
   assert.equal((await h.run('control_voice',{action:'delete'})).ok,false);assert.equal(h.open,true);
-  assert.equal((await h.run('control_voice',{action:'close'})).ok,true);assert.equal(h.open,false);
-  assert.equal((await h.run('control_voice',{action:'open'})).ok,true);assert.equal(h.open,true);
-  assert.equal((await h.run('open_sage_settings',{tab:'voice'})).ok,true);assert.equal(h.tab,'voice');assert.equal(h.open,false);
+  assert.equal((await h.run('control_voice',{action:'close'},{userText:'close voice mode'})).ok,true);assert.equal(h.open,false);
+  assert.equal((await h.run('control_voice',{action:'open'},{userText:'open voice mode'})).ok,true);assert.equal(h.open,true);
+  assert.equal((await h.run('open_sage_settings',{tab:'voice'},{userText:'open voice settings'})).ok,true);assert.equal(h.tab,'voice');assert.equal(h.open,false);
   assert.equal((await h.run('open_sage_settings',{tab:'anything'})).ok,false);
 });
 function services(rows) {
@@ -61,4 +61,29 @@ test('missing prices do not become invented zero-cost winners; empty filters hav
     {id:2,date:'2026-01-01',type:'Mods/Updates',cost:'unknown'}]);
   assert.equal((await list()).mostExpensive.everything,null);
   const empty=await list({type:'Showroom'});assert.equal(empty.total,0);assert.equal(empty.mostExpensive.modsAndUpdates,null);
+});
+
+test('hello and historical/negated command mentions cannot dismiss the call through any UI tool',async()=>{
+  for(const text of ['hello','hi Sage','வணக்கம்','hello, how are you',"don't close voice mode",'how do I close voice mode','earlier I said close voice mode','say close voice mode','why did you open documents']) {
+    const h=harness(),context={userText:text};
+    for(const [name,args] of [['control_voice',{action:'close'}],['navigate_section',{section:'home'}],['open_sage_settings',{tab:'voice'}]]) {
+      assert.equal((await h.run(name,args,context)).ok,false,text);
+      assert.equal(h.root.SageTools.declarations(context).some(t=>t.name===name),false);
+    }
+    assert.equal(h.open,true);assert.equal(h.section,null);assert.equal(h.tab,null);
+  }
+});
+test('explicit commands authorize only the current action and destination, including Tamil and Tanglish',async()=>{
+  const h=harness();
+  assert.equal((await h.run('control_voice',{action:'close'},{userText:'open voice mode'})).ok,false);
+  assert.equal((await h.run('navigate_section',{section:'home'},{userText:'open documents'})).ok,false);
+  for(const text of ['close voice mode','voice mode close pannu','வாய்ஸ் மோடை மூடு']) {
+    assert.equal((await h.run('control_voice',{action:'close'},{userText:text})).ok,true);
+  }
+});
+
+test('polite requests normalize whitespace without weakening negation protection',async()=>{
+  const h=harness();
+  assert.equal((await h.run('navigate_section',{section:'docs'},{userText:'Sage, could you please open   the documents page?'})).ok,true);
+  assert.equal((await h.run('control_voice',{action:'close'},{userText:'Please do not close voice mode'})).ok,false);
 });

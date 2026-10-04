@@ -50,6 +50,7 @@
     recovering: false,
     ttsModel: 'gemini-3.8-flash-lite-tts',
     voiceName: 'Kore',
+    voiceRate: 1.08,
     ttsLocked: false, // never change synthesis models after this call has spoken
     resumeAfterReply: false, // automatic audio hold; never overrides a manual mute
     recognising: false,
@@ -116,7 +117,9 @@
   const ttsRequests = new Set();
   const TTS_MODELS = ['gemini-3.8-flash-lite-tts', 'gemini-3.1-flash-tts-preview', 'gemini-2.5-flash-preview-tts'];
   const audioKeyRest = new Map();
-  const GEM_VOICE_STYLE = 'One adult feminine voice; warm, low and playfully seductive, with a natural conversational pace. Use the selected speaker’s natural English voice and accent as the identity for the entire reply. Carry that same pitch, resonance, softness and vocal placement into Tamil and Tanglish; only the language changes. Speak Tamil clearly and conversationally without switching to a formal Tamil narrator or exaggerating a regional accent. Keep gentle airy warmth with clean, supported phonation: no vocal fry, rasp, creaking or exaggerated whispering.';
+  // Gemini 3.8 guidance: long identity/accent instructions cause voice drift.
+  // The configured speaker carries identity; use the same small delivery cue.
+  const GEM_VOICE_STYLE = 'Warm, relaxed, gently playful.';
 
   function unlockAudio() {
     const AC = root.AudioContext || root.webkitAudioContext;
@@ -275,7 +278,10 @@
         playbackError = playbackError || err;
         controller.abort(); stopPlayback();
         await Promise.all(playback);
-        throw playbackError || (err.name==='AbortError' ? new Error('timeout') : err);
+        const failure = playbackError || err;
+        if (failure.name === 'AbortError') failure.code = 'timeout';
+        failure.audioStarted = started;
+        throw failure;
       } finally {clearTimeout(timer);ttsRequests.delete(controller);try {await reader?.cancel();}catch{/* closed */}}
     }
     throw new Error('no-audio');
@@ -295,7 +301,7 @@
     buffer.copyToChannel(audio.samples, 0);
     const source = actx.createBufferSource();
     source.buffer = buffer;
-    const rate = settings.rate;
+    const rate = S.voiceRate;
     source.playbackRate.value = rate;
     source.connect(actx.destination);
     const now = actx.currentTime;
@@ -338,6 +344,18 @@
     stopPlayback();
     if (cancelSpeech) { cancelSpeech(); cancelSpeech = null; }
   }
+  async function prepareSpeech(text, my) {
+    if (actx && actx.state !== 'running') {
+      let timer;
+      try {
+        await Promise.race([actx.resume(), new Promise(resolve => { timer = setTimeout(resolve, 350); })]);
+      } catch { /* A blocked browser still needs the existing orb gesture. */ }
+      finally { clearTimeout(timer); }
+    }
+    if (!S.open || my !== voiceSession) return false;
+    if (!actx || actx.state !== 'running') throw new Error('play-blocked');
+    return streamReply(text, my);
+  }
   async function speak(text) {
     S.speaking = true;
     setMode('thinking', 'Preparing voice…');
@@ -346,7 +364,7 @@
     let cancel;
     const interrupted = new Promise(resolve => { cancel = () => resolve(false); cancelSpeech = cancel; });
     try {
-      return await Promise.race([streamReply(text, my), interrupted]);
+      return await Promise.race([prepareSpeech(text, my), interrupted]);
     } finally {
       if (cancelSpeech === cancel) cancelSpeech = null;
       if (my === voiceSession) {
@@ -566,7 +584,7 @@
     r.interimResults = true;
     r.maxAlternatives = 1;
     const valid = () => previewRec === r && capture === take && !take.stopping
-      && current(take.owner) && S.recording && !S.muted;
+      && current(take.owner) && (S.recording || openingMic) && !S.muted;
     r.onresult = event => {
       if (!valid()) return;
       // Rebuild this recognizer's hypothesis: interim words can be revised.
@@ -577,6 +595,7 @@
       // Captions prove speech occurred even when the local level meter misses
       // a quiet voice. They signal turn boundaries, never the submitted words.
       take.heard = true;
+      if (!S.recording) take.earlySpeech = true;
       if (text !== take.previewText) take.quietAt = 0;
       take.previewText = text;
       take.previewFinal = results.every(result => result.isFinal);
@@ -595,7 +614,7 @@
       if (take.previewText || take.previewRetries) return;
       take.previewRetries = 1;
       take.previewRetry = setTimeout(() => {
-        if (capture === take && !take.stopping && current(take.owner) && S.recording && !S.muted && !S.backgrounded) startPreview(take);
+        if (capture === take && !take.stopping && current(take.owner) && (S.recording || openingMic) && !S.muted && !S.backgrounded) startPreview(take);
       }, 300);
     }
     // A network/permission error is not evidence that the user finished.
@@ -613,15 +632,21 @@
     const epoch = ++captureEpoch;
     openingMic = true;
     setMode('listening', 'Connecting microphone…');
+    const take = { recorder:null, chunks:[], owner, epoch, heard:false, loudAt:0,
+      quietAt:0, previewText:'', previewBoundaryAt:0, started:Date.now(), timer:null, stopping:false, cancelled:false };
+    failedRecording = null;
+    capture = take;
+    paintCaption('', false);
+    // Start caption networking during the opening gesture, in parallel with
+    // device permission and the audio meter, rather than waiting for both.
+    startPreview(take);
     try {
       const stream = await startMeter();
-      if (!current(owner) || epoch !== captureEpoch || !canListen()) return false;
+      if (!current(owner) || epoch !== captureEpoch || capture !== take || !canListen()) return false;
       const mime = pickRecMime();
       const recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
-      const take = { recorder, chunks: [], owner, epoch, heard: false, loudAt: 0,
-        quietAt: 0, previewText: '', previewBoundaryAt: 0, started: Date.now(), timer: null, stopping: false, cancelled: false };
-      failedRecording = null;
-      capture = take;
+      take.recorder = recorder;
+      take.started = Date.now();
       recorder.ondataavailable = event => {
         if (!take.cancelled && event.data?.size) take.chunks.push(event.data);
       };
@@ -632,12 +657,10 @@
       recorder.onstart = () => {
         if (!current(owner) || capture !== take || take.cancelled) return;
         setMode('listening');
-        setHint(S.lastSaid ? 'Reply audio is unavailable. Keep talking, or tap Play reply.' : 'Speak naturally. Pause to send, or tap the orb when you’re done.');
+        setHint('Speak naturally. Pause to send, or tap the orb when you’re done.');
       };
       S.recording = true;
       recorder.start(100);
-      paintCaption('', false);
-      startPreview(take);
       take.timer = setInterval(() => {
         if (capture !== take || take.stopping) return;
         const now = Date.now();
@@ -693,11 +716,11 @@
     clearInterval(take.timer);
     clearTimeout(take.previewRetry);
     take.chunks = [];
-    try { if (take.recorder.state !== 'inactive') take.recorder.stop(); } catch { /* already stopped */ }
+    try { if (take.recorder && take.recorder.state !== 'inactive') take.recorder.stop(); } catch { /* already stopped */ }
   }
   function finishGeminiListen(commit) {
     const take = capture;
-    if (!take || take.stopping) return;
+    if (!take || take.stopping || !take.recorder) return;
     if (!commit) { cancelGeminiListen(); return; }
     // A final, exact exit command needs neither an audio upload nor a model.
     if (!settings.review && take.previewFinal && isCloseCommand(take.previewText)) {
@@ -725,7 +748,14 @@
     S.recording = false;
     S.transcribing = true;
     setMode('transcribing');
-    const recording = {blob:new Blob(take.chunks, {type:take.recorder.mimeType || 'audio/webm'}), b64:null, retryAt:0};
+    if (take.earlySpeech && take.previewText) {
+      S.transcribing = false;
+      // Words spoken before MediaRecorder was ready are not in its audio.
+      // Preserve the draft for review rather than submit a clipped recording.
+      acceptTranscript({ transcript:take.previewText, unclear:true });
+      return;
+    }
+    const recording = {blob:new Blob(take.chunks, {type:take.recorder.mimeType || 'audio/webm'}), b64:null, retryAt:0, previewText:take.previewText};
     take.chunks = [];
     await transcribeRecording(recording, take.owner, take.epoch);
   }
@@ -742,7 +772,10 @@
       if (!current(owner) || epoch !== captureEpoch) return;
       failedRecording = null;
       S.transcribing = false;
-      acceptTranscript(result);
+      // A command inferred from audio must not dismiss a call when the live
+      // words disagree (for example a greeting hallucinated as an exit).
+      const closeDisagrees = isCloseCommand(result.transcript) && recording.previewText && !isCloseCommand(recording.previewText);
+      acceptTranscript(closeDisagrees ? { ...result, unclear:true } : result);
     } catch (err) {
       if (!current(owner) || epoch !== captureEpoch) return;
       // A failed upload is not a new listening turn. Keep this utterance and
@@ -1140,38 +1173,62 @@
   }
 
   function audioProblem(err) {
-    if (err?.message === 'quota') return 'Voice quota reached. Try again shortly.';
-    if (err?.message === 'play-blocked') return 'Sound is blocked. Tap Play reply to enable audio.';
-    if (err?.message === 'silent-audio') return 'The voice service returned silence. Tap Play reply to retry.';
-    if (err?.message === 'no-key') return 'A Gemini key is needed for spoken replies.';
-    return 'The reply could not play. Tap Play reply to retry.';
+    if (err?.message === 'quota') return 'Voice quota reached. Your reply is saved in chat. Try again shortly.';
+    if (err?.message === 'play-blocked') return 'Sound is blocked by the browser. Tap the orb to enable audio.';
+    if (err?.message === 'no-key') return 'Add or unlock a Gemini key in Sage settings for spoken replies.';
+    return 'Audio is unavailable right now. Your reply is saved in chat. You can keep talking.';
   }
   async function deliverReply(text, owner) {
     S.lastSaid = text;
-    $('sageVoiceReplay').hidden = true;
-    try {
-      const completed = await speak(text);
-      if (!current(owner)) return;
-      // An explicit interruption also ends the reply, but never a playback error.
-      S.lastSaid = null;
-      S.busy = false;
-      if (S.resumeAfterReply) {
-        S.resumeAfterReply = false;
-        S.muted = false;
-        meterStream?.getTracks().forEach(t => { t.enabled = true; });
-        paintMic();
+    let failure;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const completed = await speak(text);
+        if (!current(owner)) return;
+        S.lastSaid = null;
+        S.busy = false;
+        if (S.resumeAfterReply) {
+          S.resumeAfterReply = false;
+          S.muted = false;
+          meterStream?.getTracks().forEach(t => { t.enabled = true; });
+          paintMic();
+        }
+        setMode('idle');
+        setHint(S.muted ? 'Mic off. Tap the mic when you’re ready.' : '');
+        if (!S.muted) startListening();
+        return completed;
+      } catch (err) {
+        if (!current(owner)) return;
+        failure = err;
+        const transient = err.name === 'TypeError' || err.name === 'AbortError'
+          || /^(?:tts-5\d\d|tts-408|silent-audio|incomplete-audio|tts-stream|timeout)$/.test(err.message);
+        if (attempt || err.audioStarted || !transient || S.backgrounded) break;
+        const token = voiceSession;
+        setMode('thinking', 'Restoring audio…');
+        setHint('');
+        await new Promise(resolve => setTimeout(resolve, 400));
+        if (!current(owner)) return;
+        if (voiceSession !== token) {
+          S.lastSaid = null; S.busy = false;
+          if (canListen()) startListening();
+          return;
+        }
+        if (S.backgrounded) break;
       }
+    }
+    if (!current(owner)) return;
+    S.busy = false;
+    if (failure?.message === 'play-blocked') {
+      S.resumeAfterReply = !S.muted;
+      pauseListening(audioProblem(failure));
+    } else {
+      // A persistent service outage must not create endless retries or a
+      // disconnected-looking call. Resume the existing hands-free session.
+      S.lastSaid = null;
+      S.resumeAfterReply = false;
       setMode('idle');
-      setHint(S.muted ? 'Mic off. Tap the mic when you’re ready.' : '');
-      if (!S.muted) startListening();
-      return completed;
-    } catch (err) {
-      if (!current(owner)) return;
-      S.busy = false;
-      S.resumeAfterReply = S.resumeAfterReply || !S.muted;
-      if(err.message==='play-blocked') pauseListening(audioProblem(err));
-      else recoverListening(audioProblem(err));
-      $('sageVoiceReplay').hidden = false;
+      if (!S.muted && !S.backgrounded) await startListening();
+      if (current(owner)) setHint(audioProblem(failure));
     }
   }
 
@@ -1286,6 +1343,7 @@
     S.open = true;
     S.backgrounded = false;
     S.voiceName = settings.gemVoice;
+    S.voiceRate = settings.rate;
     S.ttsModel = TTS_MODELS[0];
     S.ttsLocked = false;
     sttRoute = null; failedRecording = null;
@@ -1301,7 +1359,6 @@
     S.lastSaid = null;
     S.reviewing = false;
     $('sageVoiceReview').hidden = true;
-    $('sageVoiceReplay').hidden = true;
     S.busy = false;
     S.finalText = '';
     S.speechSeen = false;
@@ -1427,13 +1484,6 @@
         paintMic();
       });
     }
-    $('sageVoiceReplay')?.addEventListener('click', () => {
-      if (!S.open || S.busy || !S.lastSaid) return;
-      unlockAudio();
-      stopListening();
-      S.busy = true;
-      deliverReply(S.lastSaid, S.session);
-    });
     $('sageVoiceSTTRetry')?.addEventListener('click', retryRecording);
     $('sageVoiceSTTBrowser')?.addEventListener('click', () => {
       if (!S.open || !RecognitionCtor()) return;

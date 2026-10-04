@@ -111,7 +111,7 @@ function harness(options = {}) {
   return { root, nodes, streams, recordings, recognition, asks, requests, decoded, storage, playback, contexts,
     get history() { return history; },
     tick(ms) { now += ms; [...intervals.values()].forEach(fn => fn()); },
-    async open() { root.SageVoice.open(); await until(() => recordings.length || recognition.length); },
+    async open() { root.SageVoice.open(); await until(() => recordings.length || (options.storage?.sage_voice_recognition === 'browser' && recognition.length)); },
     async finish() { nodes.get('sageVoiceOrb').emit('click'); await until(() => requests.some(r => !r.body.generationConfig.responseModalities)); },
     cleanup() { root.SageVoice.close(); timers.forEach(clearTimeout); }, newStream,
   };
@@ -344,11 +344,11 @@ for (const [name,option] of [['silent PCM','silentAudio'],['empty PCM','emptyAud
     const h = harness({[option]:true});
     try {
       await h.open(); await h.root.SageVoice.sendVoiceText('test failed playback');
-      assert.equal(h.recordings.length,1);
+      assert.equal(h.recordings.length,option==='audioBlocked'?1:2);
       assert.equal(h.playback.length,0);
-      assert.equal(h.nodes.get('sageVoiceReplay').hidden,false);
+      assert.equal(h.nodes.has('sageVoiceReplay'),false);
       assert.equal(h.nodes.get('sageVoiceMic').getAttribute('aria-pressed'),option==='audioBlocked'?'true':'false');
-      assert.match(h.nodes.get('sageVoiceHint').textContent,/Play reply/);
+      assert.match(h.nodes.get('sageVoiceHint').textContent,/orb|saved in chat/);
     } finally { h.cleanup(); }
   });
 }
@@ -401,21 +401,16 @@ test('fast recognition and a 450ms pause are defaults; careful preferences remai
   } finally {h.cleanup();careful.cleanup();}
 });
 
-test('a successful replay clears the failure hint and resumes hands-free listening', async () => {
+test('temporary silence retries automatically, then resumes listening without a replay button', async () => {
   const options={silentAudio:true}, h=harness(options);
   try {
-    await h.open(); await h.root.SageVoice.sendVoiceText('reply');
-    assert.equal(h.nodes.get('sageVoiceReplay').hidden,false);
-    options.silentAudio=false;
-    h.nodes.get('sageVoiceReplay').emit('click');
-    await until(()=>h.playback.length===1);
-    await until(()=>h.recordings.length===2);
-    assert.equal(h.nodes.get('sageVoiceMic').getAttribute('aria-pressed'),'false');
-    assert.doesNotMatch(h.nodes.get('sageVoiceHint').textContent,/Play reply/);
-    assert.equal(h.nodes.get('sageVoiceReplay').hidden,true);
+    await h.open(); const fetch=h.root.fetch; let count=0;
+    h.root.fetch=(...args)=>{if(++count===2) options.silentAudio=false;return fetch(...args);};
+    await h.root.SageVoice.sendVoiceText('reply');
+    assert.equal(count,2);assert.equal(h.playback.length,1);assert.equal(h.recordings.length,2);
+    assert.equal(h.nodes.has('sageVoiceReplay'),false);assert.equal(h.history.length,2);
   } finally {h.cleanup();}
 });
-
 
 test('empty transcription returns to listening instead of muting',async()=>{
   const h=harness({transcript:{transcript:'',unclear:false}});
@@ -458,30 +453,29 @@ test('browser no-speech timeouts keep rearming beyond the failure retry limit',a
   } finally {h.cleanup();}
 });
 
-test('successful playback retry preserves an explicit manual mute',async()=>{
+test('automatic playback retry preserves an explicit manual mute',async()=>{
   const options={silentAudio:true},h=harness(options);
   try {
     await h.open();h.nodes.get('sageVoiceMic').emit('click');
+    const fetch=h.root.fetch;let count=0;
+    h.root.fetch=(...args)=>{if(++count===2) options.silentAudio=false;return fetch(...args);};
     await h.root.SageVoice.sendVoiceText('reply while muted');
-    options.silentAudio=false;h.nodes.get('sageVoiceReplay').emit('click');
-    await until(()=>h.playback.length===1);await delay(20);
-    assert.equal(h.recordings.length,1);
+    assert.equal(h.playback.length,1);assert.equal(h.recordings.length,1);
     assert.equal(h.nodes.get('sageVoiceMic').getAttribute('aria-pressed'),'true');
   } finally {h.cleanup();}
 });
 
-test('replay stops a manually resumed recording before audio and restarts after it ends',async()=>{
-  const options={silentAudio:true,holdPlayback:true,fastRestarts:true},h=harness(options);
+test('the microphone stays off throughout the automatic retry and resumed audio',async()=>{
+  const options={silentAudio:true,holdPlayback:true},h=harness(options);
   try {
-    await h.open();await h.root.SageVoice.sendVoiceText('reply');
+    await h.open();const fetch=h.root.fetch;let count=0;
+    h.root.fetch=(...args)=>{if(++count===2) options.silentAudio=false;return fetch(...args);};
+    const reply=h.root.SageVoice.sendVoiceText('reply');
+    await until(()=>h.playback.length===1);assert.equal(h.recordings.length,1);
+    assert.equal(h.recordings[0].state,'inactive');h.playback[0].end();await reply;
     await until(()=>h.recordings.length===2);
-    options.silentAudio=false;h.nodes.get('sageVoiceReplay').emit('click');
-    await until(()=>h.playback.length===1);
-    assert.equal(h.recordings[1].state,'inactive');
-    h.playback[0].end();await until(()=>h.recordings.length===3);
   } finally {h.cleanup();}
 });
-
 
 test('speech beginning at the silent-buffer deadline is not discarded',async()=>{
   const h=harness({loud:true});
@@ -521,12 +515,12 @@ test('streaming TTS falls back once per session when newer model is unavailable'
     assert.ok(h.requests.every(r=>r.body.generationConfig.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName==='Kore'));
   } finally {h.cleanup();}
 });
-test('truncated audio stream offers replay and automatically recovers the mic',async()=>{
+test('truncated audio before playback retries once and then recovers the mic',async()=>{
   const h=harness({fastRestarts:true});
   try {await h.open();h.root.fetch=async()=>({ok:true,headers:new Headers({'content-type':'text/event-stream'}),
     body:new ReadableStream({start(c){c.enqueue(new TextEncoder().encode('data: '+JSON.stringify({candidates:[{content:{parts:[{inlineData:{data:speechPCM.toString('base64'),mimeType:'audio/L16;rate=24000'}}]}}]})+'\n\n'));c.close();}})});
     await h.root.SageVoice.sendVoiceText('reply');await until(()=>h.recordings.length===2);
-    assert.equal(h.nodes.get('sageVoiceReplay').hidden,false);assert.equal(h.nodes.get('sageVoiceMic').getAttribute('aria-pressed'),'false');
+    assert.equal(h.nodes.has('sageVoiceReplay'),false);assert.equal(h.nodes.get('sageVoiceMic').getAttribute('aria-pressed'),'false');
   } finally {h.cleanup();}
 });
 
@@ -628,6 +622,7 @@ test('cold opening reuses one gesture-created context and waits for recorder rea
   try{
     h.root.SageVoice.open();
     assert.equal(h.contexts.length,1,'audio context is created before the permission promise resolves');
+    assert.equal(h.recognition.length,1,'caption startup does not wait for microphone setup');
     assert.equal(h.nodes.get('sageVoiceState').textContent,'Connecting microphone…');
     allow(h.newStream());await until(()=>h.recordings.length===1);
     assert.equal(h.contexts.length,1,'meter shares the unlocked context');
@@ -673,18 +668,18 @@ test('tiny and odd-byte PCM packets are reassembled without missing or shifted s
     for(let i=0;i<samples.length;i++)assert.equal(samples[i],bytes.readInt16LE(i*2)/32768);
   }finally{h.cleanup();}
 });
-test('Tamil and English use the same English-led delivery and cannot switch models after speaking',async()=>{
+test('Tamil and English use a short constant style and cannot switch models after speaking',async()=>{
   const h=harness();
   try{
     await h.open();await h.root.SageVoice.sendVoiceText('hello');
     const body=h.requests[0].body,style=body.contents[0].parts[0].speech_metadata.style;
-    assert.match(style,/natural English voice/);assert.match(style,/Carry that same pitch/);
-    assert.match(style,/no vocal fry/);assert.doesNotMatch(style,/Tamil-native/);
+    assert.equal(style,'Warm, relaxed, gently playful.');
+    assert.doesNotMatch(style,/identity|pitch|accent|English|Tamil|feminine/);
     assert.equal(body.generationConfig.speechConfig.voiceConfig.voice,'Kore');
     let requests=0;h.root.fetch=async()=>{requests++;return {ok:false,status:404};};
     await h.root.SageVoice.sendVoiceText('சொல்லு டா');
     assert.equal(requests,1,'no silent model/voice switch mid-call');
-    assert.equal(h.nodes.get('sageVoiceReplay').hidden,false);
+    assert.equal(h.nodes.has('sageVoiceReplay'),false);
   }finally{h.cleanup();}
 });
 
@@ -697,7 +692,7 @@ test('final audio STOP releases the mic after playback without waiting for HTTP 
     })});
     await h.root.SageVoice.sendVoiceText('reply');
     await until(()=>h.recordings.length===2);
-    assert.equal(cancelled,true);assert.equal(h.nodes.get('sageVoiceReplay').hidden,true);
+    assert.equal(cancelled,true);assert.equal(h.nodes.has('sageVoiceReplay'),false);
   }finally{h.cleanup();}
 });
 
@@ -822,5 +817,75 @@ test('review preference still reviews a close command before acting',async()=>{
   try {await h.open();h.recognition[0].result('close voice mode',true);h.tick(500);
     await until(()=>!h.nodes.get('sageVoiceReview').hidden);assert.equal(h.root.SageVoice.isOpen(),true);
     h.nodes.get('sageVoiceReview').emit('submit');assert.equal(h.root.SageVoice.isOpen(),false);
+  }finally{h.cleanup();}
+});
+
+test('captions arriving during slow microphone setup stay visible and are reviewed instead of lost',async()=>{
+  let allow;const h=harness({getUserMedia:()=>new Promise(resolve=>{allow=resolve;})});
+  try {h.root.SageVoice.open();h.recognition[0].result('hello Sage',true);
+    assert.match(h.nodes.get('sageVoiceCaption').innerHTML,/hello Sage/);
+    allow(h.newStream());await until(()=>h.recordings.length===1);
+    assert.match(h.nodes.get('sageVoiceCaption').innerHTML,/hello Sage/);
+    h.tick(500);await until(()=>!h.nodes.get('sageVoiceReview').hidden);
+    assert.equal(h.nodes.get('sageVoiceDraft').value,'hello Sage');assert.equal(h.requests.length,0);
+    assert.equal(h.root.SageVoice.isOpen(),true);
+  }finally{h.cleanup();}
+});
+test('a greeting draft prevents a contradictory final exit transcript from closing the call',async()=>{
+  const h=harness({transcript:{transcript:'close voice mode',unclear:false}});
+  try {await h.open();h.recognition[0].result('hello',true);h.tick(500);
+    await until(()=>!h.nodes.get('sageVoiceReview').hidden);
+    assert.equal(h.root.SageVoice.isOpen(),true);assert.equal(h.asks.length,0);
+  }finally{h.cleanup();}
+});
+test('transient HTTP failures retry the same speaker once, without another brain turn',async()=>{
+  const h=harness();try{await h.open();const fetch=h.root.fetch;let count=0;
+    h.root.fetch=(...args)=>++count===1?Promise.resolve({ok:false,status:503}):fetch(...args);
+    await h.root.SageVoice.sendVoiceText('hello');
+    assert.equal(count,2);assert.equal(h.asks.length,1);assert.equal(h.playback.length,1);assert.equal(h.history.length,2);
+  }finally{h.cleanup();}
+});
+test('closing during automatic audio recovery cancels the retry',async()=>{
+  const h=harness({silentAudio:true});try{await h.open();const pending=h.root.SageVoice.sendVoiceText('hello');
+    await until(()=>h.nodes.get('sageVoiceState').textContent==='Restoring audio…');h.root.SageVoice.close();await pending;
+    assert.equal(h.requests.length,1);assert.equal(h.playback.length,0);assert.equal(h.recordings.length,1);
+  }finally{h.cleanup();}
+});
+test('backgrounding during retry does not leave a busy call when returning',async()=>{
+  const h=harness({silentAudio:true});try{await h.open();const pending=h.root.SageVoice.sendVoiceText('hello');
+    await until(()=>h.nodes.get('sageVoiceState').textContent==='Restoring audio…');
+    h.root.document.hidden=true;h.root.document.events.visibilitychange.forEach(fn=>fn());await pending;
+    h.root.document.hidden=false;h.root.document.events.visibilitychange.forEach(fn=>fn());
+    await until(()=>h.recordings.length===2);assert.equal(h.requests.length,1);
+  }finally{h.cleanup();}
+});
+test('temporarily suspended output resumes automatically before requesting speech',async()=>{
+  const h=harness();try{await h.open();const ctx=h.contexts[0];ctx.state='suspended';ctx.resume=async()=>{ctx.state='running';};
+    await h.root.SageVoice.sendVoiceText('hello');assert.equal(h.playback.length,1);assert.equal(h.recordings.length,2);
+    assert.equal(h.nodes.get('sageVoiceMic').getAttribute('aria-pressed'),'false');
+  }finally{h.cleanup();}
+});
+test('speaker, style and playback speed stay identical across Tamil and English in one call',async()=>{
+  const h=harness({storage:{sage_voice_gem:'Aoede',sage_voice_rate:'1.08'}});
+  try{await h.open();await h.root.SageVoice.sendVoiceText('hello');h.storage.set('sage_voice_gem','Kore');h.storage.set('sage_voice_rate','1.3');
+    await h.root.SageVoice.sendVoiceText('வணக்கம்');
+    const speech=h.requests.filter(r=>r.body.generationConfig.responseModalities);
+    assert.equal(speech.length,2);assert.equal(speech[0].url,speech[1].url);
+    for(const r of speech){assert.equal(r.body.generationConfig.speechConfig.voiceConfig.voice,'Aoede');assert.equal(r.body.contents[0].parts[0].speech_metadata.style,'Warm, relaxed, gently playful.');}
+    assert.ok(h.playback.every(p=>p.playbackRate.value===1.08));
+  }finally{h.cleanup();}
+});
+
+test('audio that has already started is not repeated after a broken stream',async()=>{
+  const h=harness({holdPlayback:true});let count=0;
+  try{await h.open();h.root.fetch=async()=>{count++;return {ok:true,headers:new Headers({'content-type':'text/event-stream'}),body:new ReadableStream({start(c){c.enqueue(pcmEvent(Buffer.concat([speechPCM,speechPCM])));c.close();}})};};
+    await h.root.SageVoice.sendVoiceText('hello');assert.equal(count,1);assert.equal(h.playback.length,1);
+    assert.equal(h.recordings.length,2);assert.equal(h.root.SageVoice.isOpen(),true);
+  }finally{h.cleanup();}
+});
+test('voice quota does not trigger a rapid retry loop or close the call',async()=>{
+  const h=harness();let count=0;try{await h.open();h.root.fetch=async()=>{count++;return {ok:false,status:429};};
+    await h.root.SageVoice.sendVoiceText('hello');assert.equal(count,1);assert.equal(h.recordings.length,2);
+    assert.equal(h.root.SageVoice.isOpen(),true);assert.match(h.nodes.get('sageVoiceHint').textContent,/quota/);
   }finally{h.cleanup();}
 });
