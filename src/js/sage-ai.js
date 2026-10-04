@@ -3147,7 +3147,7 @@
     }
 
     const context = buildContext({ mood });
-    const tools = (opts.tools !== false && root.SageTools) ? root.SageTools.declarations() : null;
+    const tools = (opts.tools !== false && root.SageTools) ? root.SageTools.declarations({ userText: asked }) : null;
 
     // One message can carry several files now. `attachment` is the single-file
     // shape this used to take and is still accepted.
@@ -3202,7 +3202,7 @@
       tools,
       onTool: async (name, args) => {
         if (opts.onTool) opts.onTool(name, args);
-        return root.SageTools.run(name, args);
+        return root.SageTools.run(name, args, { userText: asked });
       },
       history: [...(opts.history || []).slice(-CHAT_MAX_TURNS), { role: 'user', parts: askParts }],
       temperature: 1.0,

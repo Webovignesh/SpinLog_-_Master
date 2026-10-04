@@ -17,7 +17,7 @@ function harness(fetch){
     fetch:async(url,init)=>{requests.push({url,body:JSON.parse(init.body)});return fetch(url,init,requests.length);}};
   root.self=root;vm.runInNewContext(source,root);
   root.SageAI.addKey('fake-test-key-one');
-  return {AI:root.SageAI,delays,requests,cleanup(){timers.forEach(clearTimeout);}};
+  return {root,AI:root.SageAI,delays,requests,cleanup(){timers.forEach(clearTimeout);}};
 }
 
 test('voice starts while background HTTP is pending; ordinary requests remain serialized',async()=>{
@@ -136,5 +136,18 @@ test('closing a voice session during tool execution stops later tools and follow
   try {const calls=[];const reply=await h.AI.converse({voice:true,history:[{role:'user',text:'End this call'}],
     isCancelled:()=>cancelled,onTool:async name=>{calls.push(name);cancelled=true;return {ok:true};}});
     assert.equal(reply.reason,'cancelled');assert.deepEqual(calls,['control_voice']);assert.equal(h.requests.length,1);
+  }finally{h.cleanup();}
+});
+
+test('a model repeating an old close command cannot end a new hello turn',async()=>{
+  const h=harness(async(url,init,n)=>n===1?{ok:true,status:200,json:async()=>({candidates:[{content:{parts:[{functionCall:{name:'control_voice',args:{action:'close'}}}]},finishReason:'STOP'}]})}:answer('Hello!'));
+  try {
+    let closed=false;
+    h.root.SageVoice={close(){closed=true;}};
+    vm.runInNewContext(await readFile(new URL('../src/js/sage-tools.js',import.meta.url),'utf8'),h.root);
+    const reply=await h.AI.askSage('hello',{voice:true,history:[{role:'user',text:'close voice mode'}]});
+    assert.equal(reply.ok,true);assert.equal(closed,false);
+    assert.equal(h.requests[0].body.tools[0].functionDeclarations.some(t=>t.name==='control_voice'),false);
+    assert.equal(h.requests[1].body.contents.at(-1).parts[0].functionResponse.response.ok,false);
   }finally{h.cleanup();}
 });

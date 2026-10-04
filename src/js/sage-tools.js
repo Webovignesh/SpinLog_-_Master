@@ -1033,8 +1033,34 @@
     'get_vehicle_profile', 'get_health_report', 'control_voice', 'open_sage_settings',
   ]);
 
-  function declarations() {
-    return TOOLS;
+  // UI-changing tools require intent from THIS user turn, never conversation
+  // history or a model-supplied reason. A greeting cannot dismiss the call.
+  const UI_CONTROLS = new Set(['control_voice', 'navigate_section', 'open_sage_settings']);
+  function uiIntent(raw) {
+    const text = String(raw || '').toLowerCase().replace(/[.!?,;]+/g, ' ').replace(/\s+/g, ' ').trim()
+      .replace(/^(?:(?:hey )?sage|bro)\s+/, '').replace(/^please\s+/, '')
+      .replace(/^(?:can|could|would) you\s+/, '').replace(/^please\s+/, '')
+      .replace(/\s+(?:please|bro|sage)$/, '').trim();
+    if (/^(?:(?:close|exit|stop|leave|end) (?:the )?voice (?:mode|chat)|(?:end|close) (?:the |this )?call|hang up|voice (?:mode|chat) (?:close|stop) (?:pannu|pannunga)|வாய்ஸ் (?:மோட்|மோடை|மோடு|மோடைப்) (?:மூடு|மூடுங்க|க்ளோஸ் பண்ணு|க்ளோஸ் பண்ணுங்க)|காலை (?:கட் பண்ணு|முடி))$/u.test(text)) return { name:'control_voice', action:'close' };
+    if (/^(?:(?:open|start|activate|enable|go to|switch to) (?:the )?voice (?:mode|chat)|voice (?:mode|chat) (?:open|start) (?:pannu|pannunga))$/.test(text)) return { name:'control_voice', action:'open' };
+    const request = text.match(/^(?:open|show(?: me)?|go to|take me to|switch to) (?:the |my )?(.+?)(?: page| section)?$/)
+      || text.match(/^(.+?) (?:open pannu|open pannunga|காட்டு|திற|ஓபன் பண்ணு)$/u);
+    if (!request) return null;
+    const target = request[1];
+    const pages = {home:'home',dashboard:'home',service:'service','service history':'service',documents:'docs',docs:'docs',chat:'sage','sage chat':'sage',sage:'sage','சர்வீஸ்':'service','டாக்குமென்ட்ஸ்':'docs'};
+    if (pages[target]) return { name:'navigate_section', section:pages[target] };
+    const panels = {'sage settings':'memory',settings:'memory','voice settings':'voice','memory settings':'memory','timing settings':'timing','notification settings':'alerts','alert settings':'alerts'};
+    if (panels[target]) return { name:'open_sage_settings', tab:panels[target] };
+    return null;
+  }
+  function uiAllowed(name, args, context) {
+    if (!UI_CONTROLS.has(name)) return true;
+    const intent = uiIntent(context?.userText);
+    return !!intent && intent.name === name && Object.entries(intent).every(([key,value]) => key === 'name' || args?.[key] === value);
+  }
+  function declarations(context) {
+    const intent = uiIntent(context?.userText);
+    return TOOLS.filter(tool => !UI_CONTROLS.has(tool.name) || tool.name === intent?.name);
   }
 
   function isWrite(name) {
@@ -1169,9 +1195,11 @@
    * mid-turn, and an unknown tool or a missing app is something she needs told
    * about so she can say it out loud instead of guessing at an outcome.
    */
-  async function run(name, args) {
+  async function run(name, args, context) {
     const handler = HANDLERS[name];
     if (!handler) return { ok: false, error: `There is no control called "${name}".` };
+
+    if (!uiAllowed(name, args, context)) return { ok:false, error:'The current user message did not request this UI action. Keep the call and page open; answer their message.' };
 
     const app = root.dkApp;
     // Her memory and her own state do not live in the app, so they still answer
@@ -1193,7 +1221,7 @@
   }
 
   root.SageTools = {
-    declarations, run, isWrite, describe, iconFor,
+    declarations, run, isWrite, describe, iconFor, uiIntent,
     TOOLS, HANDLERS, WRITES, APP_FREE, DOING, ICONS,
   };
 })(typeof self !== 'undefined' ? self : this);
