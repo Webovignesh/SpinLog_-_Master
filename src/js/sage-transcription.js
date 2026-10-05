@@ -5,8 +5,8 @@
   const MODEL = 'gemini-3.8-live'; // Live documents Tamil support; Transcribe 3.5 does not list it.
   const WS = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
   const workletURL = document.currentScript?.src
-    ? new URL('sage-pcm-worklet.js?v=1.9.32', document.currentScript.src).href
-    : 'src/js/sage-pcm-worklet.js?v=1.9.32';
+    ? new URL('sage-pcm-worklet.js?v=1.9.33', document.currentScript.src).href
+    : 'src/js/sage-pcm-worklet.js?v=1.9.33';
   const prepared = new WeakMap();
   function prepare(context) {
     if (!context?.audioWorklet || !root.AudioWorkletNode) return Promise.resolve(false);
@@ -15,13 +15,13 @@
   }
   function connect({key, pauseMs = 650, onText = () => {}, onBoundary = () => {}}) {
     let socket, ready = false, closed = false, failure = null, queue = [], queuedBytes = 0;
-    let text = '', interim = '', ending = false, boundarySeen = false, finalWait = null;
+    let text = '', interim = '', ending = false, boundarySeen = false, finalAfterEnd = false, finalWait = null;
     let settleTimer, deadline, connectTimer, boundaryTimer;
     let resolveReady;
     const connected = new Promise(resolve => { resolveReady = resolve; });
     const settle = () => {
       clearTimeout(settleTimer); settleTimer = null;
-      if (!ending || !boundarySeen || interim || !text.trim()) return;
+      if (!ending || !(boundarySeen || finalAfterEnd) || interim || !text.trim()) return;
       // Input transcription has no ordering guarantee against model output.
       // Allow late input segments to settle instead of submitting half a turn.
       settleTimer = setTimeout(() => finish(text.trim()), 180);
@@ -93,6 +93,7 @@
             // Native Live emits incremental committed text, not a browser's
             // language-specific replacement hypothesis.
             text += content.inputTranscription.text;
+            if (ending) finalAfterEnd = true;
             interim = ''; if (!ending) boundarySeen = false;
             clearTimeout(boundaryTimer); boundaryTimer = null;
             onText(text.trim(), true); settle();
@@ -131,7 +132,9 @@
         ending = true;
         return new Promise(resolve => {
           finalWait = resolve;
-          deadline = setTimeout(() => finish(null), 1800);
+          // A connected provider can remain silent. Close that unusable route
+          // too, so every subsequent turn does not repeat the same wait.
+          deadline = setTimeout(fail, 1800);
           if (!send({realtimeInput:{audioStreamEnd:true}})) { finish(null); return; }
           // A recent committed segment still gets a settling window; an old
           // partial must await a new final event or use the recorded fallback.
@@ -151,6 +154,7 @@
     const source = context.createMediaStreamSource(stream);
     const node = new root.AudioWorkletNode(context, 'sage-pcm-capture');
     let active = true, flushed;
+    node.onprocessorerror = () => { if (active) onPCM({failed:true}); };
     node.port.onmessage = event => {
       if (event.data.flushed) { flushed?.(); return; }
       if (active && event.data.pcm) onPCM(event.data);
@@ -166,7 +170,9 @@
           flushed = () => { clearTimeout(timer); resolve(); };
           node.port.postMessage('flush');
         });
-        active = false; node.port.onmessage = null; source.disconnect(); node.disconnect();
+        active = false; node.port.onmessage = null; node.onprocessorerror = null;
+        try { source.disconnect(); } catch { /* already released */ }
+        try { node.disconnect(); } catch { /* already released */ }
       },
     };
   }
