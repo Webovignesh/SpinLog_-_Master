@@ -46,7 +46,7 @@ function harness(options = {}) {
     static isTypeSupported() { return true; }
     constructor() { this.state = 'inactive'; this.mimeType = 'audio/webm;codecs=opus'; recordings.push(this); }
     start() { this.state = 'recording'; this.onstart?.(); this.ondataavailable?.({ data: new Blob(['first-']) }); }
-    stop() { this.state = 'inactive'; setTimeout(() => { this.ondataavailable?.({ data: new Blob(['LAST']) }); this.onstop?.(); }, 0); }
+    stop() { this.state = 'inactive'; setTimeout(() => { this.ondataavailable?.({ data: new Blob(['LAST']) }); if(!options.noStopEvent)this.onstop?.(); }, 0); }
   }
   class Recognition {
     constructor() { recognition.push(this); }
@@ -75,7 +75,7 @@ function harness(options = {}) {
     close() { return Promise.resolve(); }
     createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
     createAnalyser() { return { fftSize: 1024, disconnect(){},getByteTimeDomainData(data) { data.fill(options.loud ? 136 : 128); } }; }
-    async decodeAudioData(buffer) { decoded.push(Buffer.from(buffer).toString()); return { duration: 0.1 }; }
+    async decodeAudioData(buffer) { decoded.push(Buffer.from(buffer).toString()); if(options.hangDecode)return new Promise(()=>{}); return { duration: 0.1 }; }
   }
   class OfflineAudioContext {
     createBufferSource() { return { connect() {}, start() {} }; }
@@ -101,7 +101,7 @@ function harness(options = {}) {
   }
   class Worklet {
     constructor() { worklets.push(this);this.port={onmessage:null,postMessage:()=>this.port.onmessage?.({data:{flushed:true}})}; }
-    connect() {} disconnect() {this.disconnected=true;}
+    connect() {} disconnect() {this.disconnected=true;if(options.throwWorkletStop)throw new Error('capture node already closed');}
     frame(rms=0.08,pcm=speechPCM.buffer.slice(speechPCM.byteOffset,speechPCM.byteOffset+speechPCM.byteLength)) {this.port.onmessage?.({data:{rms,pcm}});}
   }
   const storage = new Map(Object.entries(options.storage || {}));
@@ -111,7 +111,7 @@ function harness(options = {}) {
     atob: b64 => Buffer.from(b64, 'base64').toString('binary'),
     btoa: binary => Buffer.from(binary,'binary').toString('base64'),
     localStorage: { getItem: k => storage.get(k) ?? null, setItem: (k,v) => storage.set(k,v) },
-    setTimeout(fn,ms) { const timer = setTimeout(fn,options.fastRestarts && ms >= 500 && ms <= 3000 ? 0 : ms); timers.add(timer); return timer; }, clearTimeout,
+    setTimeout(fn,ms) { const timer = setTimeout(fn,options.fastTimeouts && ms >= 1000 ? 30 : options.fastRestarts && ms >= 500 && ms <= 3000 ? 0 : ms); timers.add(timer); return timer; }, clearTimeout,
     setInterval(fn) { const id = Symbol(); intervals.set(id,fn); return id; }, clearInterval: id => intervals.delete(id),
     requestAnimationFrame: () => 1, cancelAnimationFrame() {}, matchMedia: () => ({ matches: true }),
     Date: class extends Date { static now() { return now; } },
@@ -765,6 +765,64 @@ test('Live failure uses the same full recording and avoids another unavailable c
     await h.finish();await until(()=>h.recordings.length===2);
     assert.equal(h.decoded[0],'first-LAST');assert.deepEqual(h.asks,['நேத்து petrol போட்டேன் bro']);
     assert.equal(h.sockets.length,1);assert.equal(h.root.SageVoice.isOpen(),true);
+  }finally{h.cleanup();}
+});
+test('committed input after stream end submits without waiting for generated acknowledgement audio',async()=>{
+  const h=harness({live:true,liveEnd:ws=>ws.message({serverContent:{inputTranscription:{text:'Hello there'}}})});
+  try{await h.open();await until(()=>h.worklets.length===1);h.worklets[0].frame();
+    h.nodes.get('sageVoiceOrb').emit('click');await until(()=>h.recordings.length===2);
+    assert.deepEqual(h.asks,['Hello there']);assert.equal(h.decoded.length,0);
+    assert.equal(h.requests.length,1,'no redundant batch upload');
+  }finally{h.cleanup();}
+});
+test('stalled audio decoding cannot leave the room at Hearing you forever',async()=>{
+  const h=harness({hangDecode:true,fastTimeouts:true});
+  try{await h.open();h.nodes.get('sageVoiceOrb').emit('click');
+    await until(()=>h.nodes.get('sageVoiceState').textContent==='Couldn’t transcribe');
+    assert.match(h.nodes.get('sageVoiceHint').textContent,/timed out|recording/i);
+    assert.equal(h.asks.length,0);assert.equal(h.root.SageVoice.isOpen(),true);
+  }finally{h.cleanup();}
+});
+test('a stalled response body is bounded even when fetch headers arrived successfully',async()=>{
+  const h=harness({fastTimeouts:true,transcribe:async()=>({ok:true,json:()=>new Promise(()=>{})})});
+  try{await h.open();h.nodes.get('sageVoiceOrb').emit('click');
+    await until(()=>h.nodes.get('sageVoiceState').textContent==='Couldn’t transcribe');
+    assert.match(h.nodes.get('sageVoiceHint').textContent,/timed out/);
+    assert.equal(h.asks.length,0);assert.equal(h.root.SageVoice.isOpen(),true);
+  }finally{h.cleanup();}
+});
+test('a worklet cleanup exception preserves recognition and does not strand the turn',async()=>{
+  const h=harness({live:true,throwWorkletStop:true,liveEnd:ws=>ws.message({serverContent:{inputTranscription:{text:'சொல்லு டா'},turnComplete:true}})});
+  try{await h.open();await until(()=>h.worklets.length===1);h.worklets[0].frame();
+    h.nodes.get('sageVoiceOrb').emit('click');await until(()=>h.recordings.length===2);
+    assert.deepEqual(h.asks,['சொல்லு டா']);assert.equal(h.root.SageVoice.isOpen(),true);
+  }finally{h.cleanup();}
+});
+test('a silent Live session falls back to captured PCM once and skips unavailable recognition on the next turn',async()=>{
+  const h=harness({live:true,fastTimeouts:true,hangDecode:true});
+  try{await h.open();await until(()=>h.worklets.length===1);h.worklets[0].frame();h.worklets[0].frame();
+    h.nodes.get('sageVoiceOrb').emit('click');await until(()=>h.recordings.length===2);
+    assert.deepEqual(h.asks,['நேத்து petrol போட்டேன் bro']);assert.equal(h.decoded.length,0);
+    const stt=h.requests.find(r=>!r.body.generationConfig.responseModalities).body;
+    const wav=Buffer.from(stt.contents[0].parts[0].inlineData.data,'base64');
+    assert.equal(wav.readUInt32LE(24),16000);assert.equal(wav.readUInt32LE(40),speechPCM.length*2);
+    assert.equal(wav.subarray(44).equals(Buffer.concat([speechPCM,speechPCM])),true,'all PCM, including the prefix, is reused');
+    assert.equal(h.sockets.length,1);assert.equal(h.sockets[0].readyState,3);
+    assert.equal(h.recognition.length,0);
+  }finally{h.cleanup();}
+});
+test('a missing recorder stop event still completes one PCM utterance and ignores a late event',async()=>{
+  const h=harness({live:true,noStopEvent:true,liveEnd:ws=>ws.message({serverContent:{inputTranscription:{text:'Hello'},turnComplete:true}})});
+  try{await h.open();await until(()=>h.worklets.length===1);h.worklets[0].frame();
+    const first=h.recordings[0];h.nodes.get('sageVoiceOrb').emit('click');await until(()=>h.recordings.length===2);
+    first.onstop();await delay(50);assert.deepEqual(h.asks,['Hello']);assert.equal(h.history.length,2);
+  }finally{h.cleanup();}
+});
+test('a crashed worklet cannot hold recording on its stale last loud frame',async()=>{
+  const h=harness({live:true});
+  try{await h.open();await until(()=>h.worklets.length===1);h.worklets[0].frame(.03);h.tick(100);h.tick(110);
+    h.worklets[0].onprocessorerror();h.tick(300);h.tick(700);await until(()=>h.recordings.length===2);
+    assert.equal(h.decoded[0],'first-LAST');assert.equal(h.asks.length,1);assert.equal(h.root.SageVoice.isOpen(),true);
   }finally{h.cleanup();}
 });
 test('old Live captions and endpoint messages cannot affect the next call after close',async()=>{

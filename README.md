@@ -881,7 +881,7 @@ gone rather than left as links that go nowhere. What was in them that still matt
   back to localStorage then to the `data-due` values in `index.html`; Sage's memory
   falls back to localStorage; the key ring stays on the device.
 
-## Sage voice — v1.9.32
+## Sage voice — v1.9.33
 
 Open **Talk to Sage** inside the chat card, or type **go to voice mode**, **open
 voice chat** or **let’s talk**. The translucent room centers the latest four
@@ -915,12 +915,19 @@ Local audio-level sampling runs every 100 ms independently of animation frames.
 The default pause is **Quick · 0.65 seconds**; **Patient · 1.2 seconds** is available.
 Server speech-end detection also handles steady background noise. Cutoff flushes
 the last PCM packet and sends `audioStreamEnd`; late input-transcript segments
-settle before one complete sentence is submitted. `waitingForInput` is not an
-end marker. Turns are capped at 45 seconds; empty recordings are discarded
+settle before one complete sentence is submitted. A committed input segment
+after stream end can finalize without waiting for generated acknowledgement
+audio. A silent Live connection is closed and disabled for the rest of the call.
+`waitingForInput` is not an end marker. Turns are capped at 45 seconds; empty
+recordings are discarded
 locally every 15 seconds while the room stays open.
 
-If Live or AudioWorklet is unavailable, the same full recording is decoded to
-16 kHz PCM WAV for Gemini multimodal transcription. **Fast** uses Gemini 3.5
+If Live is unavailable, captured PCM is reused directly as WAV for Gemini
+multimodal transcription. If the worklet starts late, fails or is unsupported,
+the complete MediaRecorder audio is decoded instead. Cleanup exceptions, a
+missing recorder stop event, stalled decoding and stalled response bodies have
+bounded recovery; they cannot leave the room indefinitely at “Hearing you…”.
+**Fast** uses Gemini 3.5
 Flash; **Careful** starts with Gemini 3.8 Flash. Requests have a shared ten-second
 deadline and at most three attempts. There is no browser speech fallback.
 Unclear speech gets a short spoken clarification and listening resumes without
@@ -935,7 +942,11 @@ list Tamil, while [Gemini 3.5 Transcribe’s language list](https://ai.google.de
 does not, as checked on 2026-10-04. Dedicated Transcribe is therefore not the
 primary bilingual recognizer. The [WebSocket reference](https://ai.google.dev/api/live)
 defines setup ordering, independent input-transcription delivery and stream-end
-signals used here. Microphone permission, network delay and real speech still
+signals used here. The handoff regression cases cover committed input without
+generated audio,
+silent Live sessions, decoder/response-body hangs, cleanup failures and a
+missing recorder stop event. Microphone permission, network delay and real
+speech still
 need testing on the target device; mocks do not establish recognition accuracy.
 
 ### One reply speaker
@@ -1026,7 +1037,9 @@ screenshots to `/tmp/sage-voice-preview` (override with `SAGE_SCREENSHOT_DIR`). 
 audit uses real Chromium MediaRecorder and audio decoding, retries identical
 audio after an outage, and completes five turns. The Live browser audit uses a
 real synthetic microphone and production AudioWorklet with a delayed mock
-WebSocket, five automatic bilingual turns and resource cleanup. The audio-clock
+WebSocket, five automatic bilingual turns, a transcript without model
+acknowledgement, exact-PCM fallback from a silent provider and resource cleanup.
+The audio-clock
 audit renders scheduled PCM offline to check sample continuity. Provider replies
 remain mocked: none of these tests verifies live API access, real Tamil accuracy
 or subjective accent/timbre.
