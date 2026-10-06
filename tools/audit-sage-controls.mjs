@@ -15,7 +15,7 @@ function harness(overrides={}) {
     SageVoice:{open(){open=true;return true;},close(){open=false;},minimize(){if(!open)return false;docked=true;return true;},expand(){if(!open)return false;docked=false;return true;},},
     SageUI:{open(t){tab=t;},isOpen:()=>!!tab},...overrides};
   root.self=root;vm.runInNewContext(toolsSource,root);
-  root.dkApp={goToSection:appMethod('goToSection','saveParkLocation',{setActiveSection:s=>{section=s;}}),
+  root.dkApp={goToSection:appMethod('goToSection','saveParkLocation',{setActiveSection:s=>{section=s;},document:{querySelector:()=>({id:section})}}),
     openSection:appMethod('openSection','goToSection',{})};
   return {root,run:root.SageTools.run,get open(){return open;},get section(){return section;},get tab(){return tab;},get docked(){return docked;}};
 }
@@ -33,7 +33,7 @@ test('unknown destinations and failed navigation leave the call intact',async()=
 });
 test('navigation waits for the actual section swap and cancellation is not reported as opened',async()=>{
   let finish;
-  const method=appMethod('goToSection','saveParkLocation',{setActiveSection:()=>new Promise(resolve=>{finish=resolve;})});
+  const method=appMethod('goToSection','saveParkLocation',{document:{querySelector:()=>({id:'docs'})},setActiveSection:()=>new Promise(resolve=>{finish=resolve;})});
   let finished=false;const action=method({section:'service'}).then(result=>{finished=true;return result;});
   await Promise.resolve();assert.equal(finished,false);finish(false);
   assert.equal((await action).ok,false);
@@ -170,11 +170,32 @@ test('file picker preparation requires an upload request and never claims a comp
 
 test('in-app Back/Next stops at session boundaries and cancels without losing its position',async()=>{
   const trail=['home','service','docs'];let allow=true;const routed=[];
-  const context={sectionTrail:trail,sectionTrailIndex:2,setActiveSection:async(section,mode)=>{routed.push({section,mode});return allow;}};
+  let active='docs';
+  const context={sectionTrail:trail,sectionTrailIndex:2,document:{querySelector:()=>({id:active})},setActiveSection:async(section,mode)=>{routed.push({section,mode});if(allow)active=section;return allow;}};
   const navigate=appMethod('navigateHistory','prepareFileUpload',context);
   assert.equal((await navigate({direction:'forward'})).ok,false);assert.equal(routed.length,0);
   allow=false;assert.equal((await navigate({direction:'back'})).ok,false);assert.equal(context.sectionTrailIndex,2);
   allow=true;assert.equal((await navigate({direction:'back'})).opened,'service');assert.equal(context.sectionTrailIndex,1);
   assert.equal((await navigate({direction:'back'})).opened,'home');assert.equal((await navigate({direction:'back'})).ok,false);
   assert.equal((await navigate({direction:'forward'})).opened,'service');assert.equal(routed.at(-1).mode,'trail');
+});
+
+test('main screen/page aliases and a correction route to actual Home',async()=>{
+  for(const text of ['go to main screen','go to the main page','open the home screen',"It's not a main screen, go to main page."]) {
+    const h=harness(),intent=h.root.SageTools.uiIntent(text);
+    assert.equal(intent.section,'home',text);
+    const result=await h.run(intent.name,{section:intent.section},{userText:text});
+    assert.equal(result.opened,'home');assert.equal(h.section,'home');assert.equal(h.docked,true);
+  }
+});
+test('router success without a real page swap cannot produce a navigation acknowledgement',async()=>{
+  const method=appMethod('goToSection','saveParkLocation',{setActiveSection:async()=>true,document:{querySelector:()=>({id:'sage'})}});
+  const result=await method({section:'home'});assert.equal(result.ok,false);assert.match(result.error,/did not become active/);
+});
+test('form controls reject greetings, negated edits, explanations and historical instructions',async()=>{
+  let writes=0;const h=harness({SagePageControls:{fill(){writes++;return {ok:true};}}});
+  for(const text of ['hello',"don't fill the cost",'how do I select Showroom','what can you fill','earlier I said select Showroom','say select Showroom'])
+    assert.equal((await h.run('fill_page_fields',{fields:[{field:'serviceType',value:'Showroom'}]},{userText:text})).ok,false,text);
+  assert.equal(writes,0);
+  assert.equal((await h.run('fill_page_fields',{fields:[{field:'serviceType',value:'Showroom'}]},{userText:'select Showroom'})).ok,true);assert.equal(writes,1);
 });

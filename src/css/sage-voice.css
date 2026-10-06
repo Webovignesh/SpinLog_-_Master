@@ -1,4 +1,4 @@
-/* Sage voice room v1.9.37. Loaded after the app styles with its own version URL. */
+/* Sage voice room v1.9.38. Loaded after the app styles with its own version URL. */
 .sage-voice-entry { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 18px; font-family:var(--sl-read); }
 .sage-voice-entry > span { color:#989ba4; font:400 12px/1.5 var(--sl-read); }
 .sage-chat-mic { display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; width:auto; min-width:128px; height:40px; padding:0 14px; gap:8px; border:1px solid #ffd2ae40; border-radius:12px; background:#2c251f; color:#ffd6b5; font:600 12px/1 var(--sl-read); white-space:nowrap; box-shadow:none; animation:none; cursor:pointer; }
@@ -101,10 +101,13 @@
 .sage-listening-settings > small { color: #aaaab4; line-height: 1.6; font-size: 0.72rem; }
 
 
-/* Only the movable, reactive orb remains in the corner. */
-.sage-voice-overlay.is-docked { inset:auto; width:88px; height:88px; display:flex; visibility:visible; opacity:1; pointer-events:auto; padding:0; align-items:stretch; background:none; backdrop-filter:none; -webkit-backdrop-filter:none; transition:none; }
-.sage-voice-overlay.is-docked .sage-voice-card { width:88px; height:88px; max-height:none; min-height:0; padding:4px; border:0; border-radius:50%; background:none; box-shadow:none; backdrop-filter:none; -webkit-backdrop-filter:none; transform:none; opacity:1; overflow:visible; }
-.is-docked .sage-voice-stage { height:80px; min-height:0; padding:0; }
-.is-docked .sage-voice-orb { width:80px; height:80px; touch-action:none; cursor:grab; }
+/* A movable, reactive orb with a small mode pill. The page stays interactive. */
+.sage-voice-overlay.is-docked { inset:auto; width:144px; height:172px; display:flex; visibility:visible; opacity:1; pointer-events:none; padding:0; align-items:stretch; background:none; backdrop-filter:none; -webkit-backdrop-filter:none; transition:none; }
+.sage-voice-overlay.is-docked .sage-voice-card { width:144px; height:172px; max-height:none; min-height:0; padding:4px; border:0; border-radius:0; background:none; box-shadow:none; backdrop-filter:none; -webkit-backdrop-filter:none; transform:none; opacity:1; overflow:visible; }
+.is-docked .sage-voice-stage { height:164px; min-height:0; padding:0; justify-content:flex-start; }
+.is-docked .sage-voice-orb { width:136px; height:136px; touch-action:none; cursor:grab; pointer-events:auto; }
 .is-docked .sage-voice-orb:active { cursor:grabbing; }
-.is-docked :is(.sage-voice-window-controls,.sage-voice-state,.sage-voice-instruction,.sage-voice-bars,.sage-voice-captions,.sage-voice-activity,.sage-voice-controls,.sage-voice-hint,.sage-voice-file) { display:none!important; }
+.is-docked .sage-voice-state { display:block; max-width:144px; margin:-2px 0 0; padding:6px 11px; border:1px solid #ffd4b22b; border-radius:999px; background:#17181ed9; color:#ffe4cf; font:500 11px/1.2 var(--sl-read); white-space:nowrap; box-shadow:0 4px 18px #0003; backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); }
+.is-docked .sage-voice-state::before { content:''; display:inline-block; width:5px; height:5px; margin-right:6px; border-radius:50%; background:#ffc18f; vertical-align:1px; }
+.is-docked[data-voice-mode="listening"] .sage-voice-state::before { background:#9fd8b4; }
+.is-docked :is(.sage-voice-window-controls,.sage-voice-instruction,.sage-voice-bars,.sage-voice-captions,.sage-voice-activity,.sage-voice-controls,.sage-voice-hint,.sage-voice-file) { display:none!important; }
