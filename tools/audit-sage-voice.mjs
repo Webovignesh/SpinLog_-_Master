@@ -101,9 +101,9 @@ function harness(options = {}) {
     close() { this.readyState = 3; }
   }
   class Worklet {
-    constructor() { worklets.push(this);this.port={onmessage:null,postMessage:()=>this.port.onmessage?.({data:{flushed:true}})}; }
+    constructor() { worklets.push(this);this.port={onmessage:null,postMessage:()=>{if(!options.noPCMFlush)this.port.onmessage?.({data:{flushed:true}});}}; }
     connect() {} disconnect() {this.disconnected=true;if(options.throwWorkletStop)throw new Error('capture node already closed');}
-    frame(rms=0.08,pcm=speechPCM.buffer.slice(speechPCM.byteOffset,speechPCM.byteOffset+speechPCM.byteLength),vad={}) {this.port.onmessage?.({data:{rms,pcm,...vad}});}
+    frame(rms=0.08,pcm=speechPCM.buffer.slice(speechPCM.byteOffset,speechPCM.byteOffset+speechPCM.byteLength),vad={}) {this.lastFrame={rms,pcm,...vad};this.port.onmessage?.({data:this.lastFrame});}
   }
   const storage = new Map(Object.entries(options.storage || {}));
   const root = { document, navigator: { onLine: true, mediaDevices: { getUserMedia: options.getUserMedia || (async () => newStream()) } },
@@ -132,7 +132,12 @@ function harness(options = {}) {
   vm.runInNewContext(source, root, { filename: 'sage-voice.js' });
   return { root, nodes, streams, recordings, recognition, asks, requests, decoded, storage, playback, contexts,sockets,worklets,analysers,animationFrames,
     get history() { return history; },
-    tick(ms) { now += ms; [...intervals.values()].forEach(fn => fn()); },
+    tick(ms) { now += ms;
+      // A running worklet emits packets during silence too. Advancing the
+      // endpoint clock should not accidentally simulate a capture failure.
+      const node=worklets.at(-1);
+      if(!options.stallPCM && ms>250 && node?.lastFrame && (node.lastFrame.rms===0 || node.lastFrame.speechMs===0) && !node.disconnected)node.port.onmessage?.({data:node.lastFrame});
+      [...intervals.values()].forEach(fn => fn()); },
     animate() { const frames=[...animationFrames.values()];animationFrames.clear();frames.forEach(fn=>fn()); },
     async open() { root.SageVoice.open(); await until(() => recordings.length || (options.storage?.sage_voice_recognition === 'browser' && recognition.length)); },
     async finish() { nodes.get('sageVoiceOrb').emit('click'); await until(() => requests.some(r => !r.body.generationConfig.responseModalities)); },
@@ -1177,6 +1182,111 @@ test('a failed parked socket is retired before the next speech and a replacement
     h.playback[1].end();await until(()=>h.recordings.length===3);
     assert.deepEqual(h.asks,['Hello','Hello']);assert.equal(h.sockets.length,2);
     assert.equal(h.requests.length,2,'no repeated batch or switching speech');
+  }finally{h.cleanup();}
+});
+
+test('committed and interim Live captions have word boundaries without duplicating cumulative drafts',async()=>{
+  const h=harness({live:true});
+  try {await h.open();await until(()=>h.worklets.length===1);h.worklets[0].frame();
+    const ws=h.sockets[0];
+    ws.message({serverContent:{inputTranscription:{text:'Open'}}});await delay(5);
+    ws.message({serverContent:{interimInputTranscription:{text:'the service page'}}});await delay(5);
+    assert.match(h.nodes.get('sageVoiceCaption').innerHTML,/Open the service page/);
+    ws.message({serverContent:{interimInputTranscription:{text:' open the documents page'}}});await delay(5);
+    assert.match(h.nodes.get('sageVoiceCaption').innerHTML,/Open the documents page/);
+    assert.doesNotMatch(h.nodes.get('sageVoiceCaption').innerHTML,/OpenOpen|Open Open/);
+    ws.message({serverContent:{inputTranscription:{text:'the documents page'}}});await delay(5);
+    h.nodes.get('sageVoiceOrb').emit('click');await until(()=>h.recordings.length===2);
+    assert.deepEqual(h.asks,['Open the documents page']);assert.equal(h.decoded.length,0);
+  }finally{h.cleanup();}
+});
+test('a queued Blob from a parked turn cannot become the next turn transcript',async()=>{
+  const h=harness({live:true});let decode;const captions=[];
+  try {const ears=h.root.SageTranscription.connect({key:'test-only',onText:t=>captions.push(t)});
+    await ears.connected;const ws=h.sockets[0];ears.push(new ArrayBuffer(3200));
+    ws.onmessage({data:{text:()=>new Promise(resolve=>{decode=resolve;})}});await delay(5);
+    ears.park();ears.bind({onText:t=>captions.push(t),onBoundary(){}});ears.push(new ArrayBuffer(3200));
+    ws.message({serverContent:{inputTranscription:{text:'Fresh words'}}});
+    decode(JSON.stringify({serverContent:{inputTranscription:{text:'Stale close voice mode'}}}));await delay(10);
+    assert.deepEqual(captions,['Fresh words']);assert.equal(ears.text,'Fresh words');ears.close();
+  }finally{h.cleanup();}
+});
+
+test('Live does not add a longer speech-start gate than the local short-word confirmation',async()=>{
+  const h=harness({live:true});
+  try {await h.open();await until(()=>h.worklets.length===1 && h.sockets[0].sent.some(m=>m.setup));
+    const detection=h.sockets[0].sent.find(m=>m.setup).setup.realtimeInputConfig.automaticActivityDetection;
+    assert.equal(detection.disabled,false);assert.ok(detection.prefixPaddingMs<=120);
+    h.worklets[0].frame(.04,undefined,{speechMs:100,activeMs:100});
+    assert.equal(h.sockets[0].sent.some(m=>m.realtimeInput?.audio),false,'local noise gate still applies');
+    h.worklets[0].frame(.04,undefined,{speechMs:60,activeMs:100});
+    assert.equal(h.sockets[0].sent.some(m=>m.realtimeInput?.audio),true,'a short first word streams with its prefix');
+  }finally{h.cleanup();}
+});
+test('a worklet that stalls mid-sentence uses the complete recorder, never its partial PCM or caption',async()=>{
+  const h=harness({live:true,stallPCM:true,transcript:{transcript:'Open the documents page',unclear:false}});
+  try {await h.open();await until(()=>h.worklets.length===1);h.worklets[0].frame();
+    h.sockets[0].message({serverContent:{inputTranscription:{text:'Open'}}});await delay(10);
+    h.tick(600);h.nodes.get('sageVoiceOrb').emit('click');await until(()=>h.recordings.length===2);
+    assert.equal(h.decoded[0],'first-LAST');assert.deepEqual(h.asks,['Open the documents page']);
+    assert.equal(h.requests.filter(r=>!r.body.generationConfig.responseModalities).length,1);
+  }finally{h.cleanup();}
+});
+test('an unacknowledged worklet flush uses the full recording instead of clipping the last packet',async()=>{
+  const h=harness({live:true,noPCMFlush:true,transcript:{transcript:'Open documents',unclear:false}});
+  try {await h.open();await until(()=>h.worklets.length===1);h.worklets[0].frame();
+    h.sockets[0].message({serverContent:{inputTranscription:{text:'Open'}}});await delay(10);
+    h.nodes.get('sageVoiceOrb').emit('click');await until(()=>h.recordings.length===2);
+    assert.equal(h.decoded[0],'first-LAST');assert.deepEqual(h.asks,['Open documents']);
+  }finally{h.cleanup();}
+});
+test('a browser final arriving after stop and onend is used once without re-uploading audio',async()=>{
+  const h=harness({transcribe:async()=>sttError(429)});
+  try {await h.open();await h.finish();await until(()=>h.recordings.length===2);
+    const native=h.recognition.at(-1);native.result('Open the',false);
+    native.stop=()=>{native.onend?.();setTimeout(()=>native.result('Open the documents page',true),350);};
+    h.nodes.get('sageVoiceOrb').emit('click');await until(()=>h.recordings.length===3);
+    assert.deepEqual(h.asks,['Open the documents page']);
+    assert.equal(h.requests.filter(r=>!r.body.generationConfig.responseModalities).length,2,'only the original quota walk');
+  }finally{h.cleanup();}
+});
+test('a browser restart without onstart is bounded just like the first startup',async()=>{
+  const h=harness({transcribe:async()=>sttError(429),fastTimeouts:true});
+  try {await h.open();await h.finish();await until(()=>h.recordings.length===2);
+    const native=h.recognition.at(-1);native.start=()=>{native.starts++;};
+    native.onerror?.({error:'no-speech'});native.onend?.();
+    await until(()=>h.nodes.get('sageVoiceState').textContent==='Recognition unavailable');
+    assert.equal(native.starts,2);assert.equal(h.root.SageVoice.isOpen(),true);
+  }finally{h.cleanup();}
+});
+test('a configured key resting from the reply service is not mistaken for a missing key or allowed to retry quota',async()=>{
+  const h=harness({noKey:true});
+  try {
+    h.root.SageAI.getKeys=()=>[{id:'test',key:'configured-but-resting'}];
+    h.root.SageAI.readBackoff=()=>({keys:{test:{kind:'quota',until:220000}}});
+    await h.open();assert.equal(h.recognition.length,1);
+    assert.equal(h.recognition[0].lang,'en-IN');assert.equal(h.recordings[0].state,'recording');
+    assert.doesNotMatch(h.nodes.get('sageVoiceHint').textContent,/Add or unlock|key was rejected/);
+    h.recognition[0].result('open documents',true);h.nodes.get('sageVoiceOrb').emit('click');
+    await until(()=>h.recordings.length===2);
+    assert.deepEqual(h.asks,['open documents']);assert.equal(h.requests.length,0,'respect the whole-key cooldown');
+    assert.equal(h.root.SageVoice.isOpen(),true);assert.equal(h.streams.length,1);
+  }finally{h.cleanup();}
+});
+test('voice text strips Markdown while preserving filenames, English compounds, full captions and chat history',async()=>{
+  const reply='**Viky**, check [your bill](https://example.test): `service_bill_2.pdf` and vitamin-a. Keep backup__bill__2.pdf.';
+  const h=harness({live:true,askSage:async()=>({ok:true,text:reply})});
+  try {await h.open();await until(()=>h.worklets.length===1);h.worklets[0].frame();
+    const words='Please keep the first words. '+ 'All of these words matter. '.repeat(12);
+    h.sockets[0].message({serverContent:{interimInputTranscription:{text:words}}});await delay(10);
+    assert.match(h.nodes.get('sageVoiceCaption').innerHTML,/Please keep the first words/);
+    await h.root.SageVoice.sendVoiceText('read my bill');
+    const html=h.nodes.get('sageVoiceLines').children.at(-1).innerHTML;
+    assert.match(html,/Viky, check your bill: service_bill_2.pdf and vitamin-a/);
+    assert.doesNotMatch(html,/\*\*|`|https:\/\/example/);
+    assert.match(h.requests[0].body.contents[0].parts[0].text,/service_bill_2.pdf and vitamin-a/);
+    assert.match(html,/backup__bill__2.pdf/);
+    assert.equal(h.history.at(-1).text,reply);
   }finally{h.cleanup();}
 });
 test('a browser service error cannot start an automatic recognition-error loop',async()=>{

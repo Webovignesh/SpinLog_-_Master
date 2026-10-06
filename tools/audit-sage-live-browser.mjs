@@ -21,7 +21,7 @@ const server=http.createServer(async(req,res)=>{
   if(!file.startsWith(root+path.sep)){res.writeHead(403).end();return;}
   try{let data=await readFile(file);
     if(rel==='index.html')data=data.toString().replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace('</body>',
-      '<script src="src/js/sage-transcription.js?v=1.9.39"></script><script src="src/js/sage-voice.js?v=1.9.39"></script></body>');
+      '<script src="src/js/sage-transcription.js?v=1.9.40"></script><script src="src/js/sage-voice.js?v=1.9.40"></script></body>');
     res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.css':'text/css'})[path.extname(file)]||'application/octet-stream');res.end(data);
   }catch{res.writeHead(404).end();}
 });

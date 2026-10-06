@@ -5,9 +5,20 @@
   const MODEL = 'gemini-3.5-transcribe-live'; // Dedicated speech recognition, never a reply voice.
   const WS = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
   const workletURL = document.currentScript?.src
-    ? new URL('sage-pcm-worklet.js?v=1.9.39', document.currentScript.src).href
-    : 'src/js/sage-pcm-worklet.js?v=1.9.39';
+    ? new URL('sage-pcm-worklet.js?v=1.9.40', document.currentScript.src).href
+    : 'src/js/sage-pcm-worklet.js?v=1.9.40';
   const prepared = new WeakMap();
+  function joinText(committed, incoming, snapshot = false) {
+    if (!committed) return incoming;
+    if (!incoming) return committed;
+    // Some transports send a cumulative hypothesis, others send new words.
+    // Only remove an identical *prefix*: repeated words elsewhere are speech.
+    const base = committed.trimEnd(), draft = incoming.trimStart();
+    if (snapshot && draft.toLowerCase() === base.toLowerCase()) return committed;
+    if (snapshot && draft.toLowerCase().startsWith(base.toLowerCase()) && draft.length > base.length
+      && /^[\s.,;:!?)]/.test(draft.slice(base.length))) return base + draft.slice(base.length);
+    return committed + (!/\s$/.test(committed) && !/^[\s.,;:!?)]/.test(incoming) ? ' ' : '') + incoming;
+  }
   function prepare(context) {
     if (!context?.audioWorklet || !root.AudioWorkletNode) return Promise.resolve(false);
     if (!prepared.has(context)) prepared.set(context, context.audioWorklet.addModule(workletURL).then(() => true).catch(() => {
@@ -19,7 +30,7 @@
   function connect({key, pauseMs = 650, onText = () => {}, onBoundary = () => {}}) {
     let socket, ready = false, closed = false, failure = null, queue = [], queuedBytes = 0;
     let text = '', interim = '', ending = false, parked = false, receiving = false, boundarySeen = false, finalAfterEnd = false, finalWait = null;
-    let settleTimer, deadline, connectTimer, boundaryTimer;
+    let settleTimer, deadline, connectTimer, boundaryTimer, turn = 0;
     let resolveReady;
     const connected = new Promise(resolve => { resolveReady = resolve; });
     const settle = () => {
@@ -72,13 +83,16 @@
             customVocabulary:['SpinLog','KTM Duke','odometer','PUC','mileage']},
           realtimeInputConfig:{automaticActivityDetection:{disabled:false,
             startOfSpeechSensitivity:'START_SENSITIVITY_HIGH',endOfSpeechSensitivity:'END_SENSITIVITY_HIGH',
-            prefixPaddingMs:300,silenceDurationMs:Math.max(550,pauseMs)}},
+            // Local VAD already confirms 120 ms and keeps 500 ms of prefix.
+            // A second 300 ms start gate would miss a short "hi".
+            prefixPaddingMs:100,silenceDurationMs:Math.max(550,pauseMs)}},
         }}));
       };
       // Blob and string frames are both used by browser WebSockets. Serialize
       // decoding so a late Blob cannot overtake a newer text/final frame.
       let messages = Promise.resolve();
       socket.onmessage = event => {
+        const arrivedIn = turn;
         messages = messages.then(async () => {
           if (closed || failure) return;
           const raw = typeof event.data === 'string' ? event.data : await event.data.text();
@@ -91,24 +105,24 @@
             for (const pcm of pending) if (!sendPCM(pcm)) break;
           }
           const content = message.serverContent;
-          if (!content || parked || !receiving) return;
-          if (content.interimInputTranscription?.text) {
-            interim = content.interimInputTranscription.text;
-            if (!ending) boundarySeen = false;
-            clearTimeout(boundaryTimer); boundaryTimer = null;
-            clearTimeout(settleTimer); settleTimer = null;
-            onText((text + interim).trim(), false);
-          }
+          if (!content || arrivedIn !== turn || parked || !receiving) return;
           if (content.inputTranscription?.text) {
             // Native Live emits incremental committed text, not a browser's
             // language-specific replacement hypothesis.
             const segment = content.inputTranscription.text;
-            if (text && !/\s$/.test(text) && !/^[\s.,;:!?)]/.test(segment)) text += ' ';
-            text += segment;
+            text = joinText(text, segment);
             if (ending) finalAfterEnd = true;
             interim = ''; if (!ending) boundarySeen = false;
             clearTimeout(boundaryTimer); boundaryTimer = null;
             onText(text.trim(), true); settle();
+          }
+          if (typeof content.interimInputTranscription?.text === 'string') {
+            interim = content.interimInputTranscription.text;
+            if (!ending) boundarySeen = false;
+            clearTimeout(boundaryTimer); boundaryTimer = null;
+            clearTimeout(settleTimer); settleTimer = null;
+            onText(joinText(text, interim, true).trim(), !interim);
+            settle();
           }
           // Committed words can arrive WHILE he is speaking. Only a provider
           // endpoint, or the caller's local pause + audioStreamEnd, ends a turn.
@@ -128,13 +142,14 @@
       bind(handlers) {
         // Each utterance gets new text/handlers, while the working transport
         // remains connected. Late frames while Sage speaks are ignored.
+        turn++;
         clearTimeout(boundaryTimer); clearTimeout(settleTimer);
         text = interim = ''; ending = parked = receiving = boundarySeen = finalAfterEnd = false;
         onText = handlers.onText; onBoundary = handlers.onBoundary;
       },
       get available() { return !closed && !failure; },
       get failure() { return failure; },
-      get text() { return (text + interim).trim(); },
+      get text() { return joinText(text, interim, true).trim(); },
       push(buffer) {
         if (closed || failure || ending) return false;
         receiving = true;
@@ -166,6 +181,7 @@
         });
       },
       park() {
+        turn++;
         parked = true; receiving = false;
         clearTimeout(boundaryTimer); clearTimeout(settleTimer);
         onText = onBoundary = () => {};
@@ -182,7 +198,7 @@
     if (!await prepare(context)) return null;
     const source = context.createMediaStreamSource(stream);
     const node = new root.AudioWorkletNode(context, 'sage-pcm-capture');
-    let active = true, flushed;
+    let active = true, flushed, stopping;
     node.onprocessorerror = () => { if (active) onPCM({failed:true}); };
     node.port.onmessage = event => {
       if (event.data.flushed) { flushed?.(); return; }
@@ -192,16 +208,24 @@
     // routing the microphone back into speakers or adding an echo.
     source.connect(node); node.connect(context.destination);
     return {
-      async stop() {
-        if (!active) return;
-        await new Promise(resolve => {
-          const timer = setTimeout(resolve, 100);
-          flushed = () => { clearTimeout(timer); resolve(); };
-          node.port.postMessage('flush');
-        });
-        active = false; node.port.postMessage('close'); node.port.onmessage = null; node.onprocessorerror = null;
-        try { source.disconnect(); } catch { /* already released */ }
-        try { node.disconnect(); } catch { /* already released */ }
+      stop() {
+        return stopping ||= (async () => {
+          let complete = false;
+          try {
+            complete = await new Promise(resolve => {
+              const timer = setTimeout(() => resolve(false), 100);
+              flushed = () => { clearTimeout(timer); resolve(true); };
+              node.port.postMessage('flush');
+            });
+          } finally {
+            active = false;
+            try { node.port.postMessage('close'); } catch { /* failed processor */ }
+            node.port.onmessage = null; node.onprocessorerror = null;
+            try { source.disconnect(); } catch { /* already released */ }
+            try { node.disconnect(); } catch { /* already released */ }
+          }
+          return complete;
+        })();
       },
     };
   }

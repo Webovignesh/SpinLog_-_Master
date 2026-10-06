@@ -188,6 +188,40 @@ test('main screen/page aliases and a correction route to actual Home',async()=>{
     assert.equal(result.opened,'home');assert.equal(h.section,'home');assert.equal(h.docked,true);
   }
 });
+
+test('compound requests authorize each named UI action, with no invented destination',async()=>{
+  const h=harness(),context={userText:'open service and then open documents and minimize yourself'};
+  assert.equal((await h.run('navigate_section',{section:'service'},context)).ok,true);
+  assert.equal((await h.run('navigate_section',{section:'docs'},context)).ok,true);
+  assert.equal((await h.run('control_voice',{action:'minimize'},context)).ok,true);
+  assert.equal((await h.run('navigate_section',{section:'home'},context)).ok,false);
+  assert.equal((await h.run('control_voice',{action:'close'},context)).ok,false);
+  assert.equal(h.root.SageTools.declarations(context).some(t=>t.name==='navigate_section'),true);
+  assert.equal(h.root.SageTools.declarations(context).some(t=>t.name==='control_voice'),true);
+});
+test('a question or historical sentence containing several commands cannot execute its later clause',async()=>{
+  for(const text of ['Earlier I said open service and close voice mode','how do I open documents and close voice mode',"don't open documents and close voice mode",'if I say open service then close voice mode','she said open service and close voice mode']) {
+    const h=harness();assert.equal((await h.run('control_voice',{action:'close'},{userText:text})).ok,false,text);
+    assert.equal(h.open,true);
+  }
+});
+test('action-like words and negation in notes remain draft content and cannot close the call',async()=>{
+  const h=harness();h.root.SagePageControls={fill:()=>({ok:true,saved:false})};
+  for(const text of ["set notes to don't forget the helmet",'set notes to open documents and close voice mode','set notes to "open documents and then close voice mode"',"set notes to 'open documents and then close voice mode'"]) {
+    const context={userText:text};
+    assert.equal((await h.run('fill_page_fields',{fields:[{field:'notes',value:'draft'}]},context)).ok,true,text);
+    assert.equal((await h.run('control_voice',{action:'close'},context)).ok,false,text);
+    assert.equal(h.open,true);
+  }
+});
+test('natural direct requests support compound controls while hypothetical statements stay inert',async()=>{
+  for(const prefix of ['I want you to','I need you to',"I'd like you to",'I want to']) {
+    const h=harness(),context={userText:prefix+' open service then minimize yourself'};
+    assert.equal((await h.run('navigate_section',{section:'service'},context)).ok,true);
+    assert.equal((await h.run('control_voice',{action:'minimize'},context)).ok,true);
+  }
+  const h=harness();assert.equal((await h.run('control_voice',{action:'close'},{userText:'I would like to know how to open service and close voice mode'})).ok,false);
+});
 test('router success without a real page swap cannot produce a navigation acknowledgement',async()=>{
   const method=appMethod('goToSection','saveParkLocation',{setActiveSection:async()=>true,document:{querySelector:()=>({id:'sage'})}});
   const result=await method({section:'home'});assert.equal(result.ok,false);assert.match(result.error,/did not become active/);

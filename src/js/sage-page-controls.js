@@ -16,12 +16,16 @@
     'coverEditInput','parkFieldLabel','parkFieldLevel','parkFieldUntil','parkFieldNotes','dkSearchInput',
   ];
   const $ = id => document.getElementById(id);
-  const modalClosers = {serviceEditModal:'serviceEditClose',docAddModal:'docAddClose',coverEditModal:'coverEditClose',historicNotesModal:'historicNotesSkip',parkHistoryModal:'parkHistoryClose',sageSettingsModal:null};
+  const modalClosers = {serviceEditModal:'serviceEditClose',docAddModal:'docAddClose',coverEditModal:'coverEditClose',historicNotesModal:'historicNotesCancel',parkHistoryModal:'parkHistoryClose',sageSettingsModal:null};
   const normalize = value => String(value).trim().toLowerCase().replace(/\s+/g,' ');
+  const aliases = {odo:['odometer','odo','odo (km)'],cost:['cost','amount'],date:['date','service date'],nextDue:['next due','next due date'],notes:['notes']};
+  const named = (el,id,text) => [label(el,id),...(aliases[el.name] || [])].some(name => normalize(name) === normalize(text));
   const calendarField = el => el.type === 'date' && el.dataset.dkCal === 'true';
   const editable = el => !el.disabled && (!el.readOnly || calendarField(el));
   function activeModal() {
-    return Object.keys(modalClosers).map($).filter(el => el && !el.hidden && el.getAttribute('aria-hidden') === 'false'
+    const dialogs = [...document.querySelectorAll('.sl-modal-overlay,.sl-slide-overlay,[role="dialog"][aria-modal="true"]')]
+      .filter(el => !el.closest('#sageVoiceOverlay')).map(el => el.closest('[aria-hidden]') || el);
+    return [...new Set([...Object.keys(modalClosers).map($),...dialogs])].filter(el => el && !el.closest('[hidden],[aria-hidden="true"]')
       && el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden')
       .sort((a,b) => (Number(getComputedStyle(a).zIndex) || 0) - (Number(getComputedStyle(b).zIndex) || 0)).at(-1);
   }
@@ -41,7 +45,7 @@
   }
   function visible(el) {
     const node = surface(el);
-    if (!node || node.closest('[hidden],[aria-hidden="true"]') || !node.getClientRects().length) return false;
+    if (!node || node.closest('[hidden],[aria-hidden="true"]') || !node.getClientRects().length || getComputedStyle(node).visibility === 'hidden') return false;
     const filters = node.closest('.history-tools');
     if (filters && !filters.classList.contains('is-open')) return false;
     const modal = activeModal();
@@ -72,7 +76,24 @@
   function inspect() {
     return {ok:true,section:document.querySelector('main section.active')?.id || null,
       fields:[...fields()].filter(([,el]) => visible(el)).map(([id,el]) => descriptor(id,el)),
+      actions:availableActions(),
       note:'These are the live visible controls. Form fields are drafts until saved through the existing data tools or form. Files must be chosen by the user. Never claim a draft was saved.'};
+  }
+  function actionTarget(action) {
+    const section = document.querySelector('main section.active')?.id;
+    const prefix = {service:'serviceHistory',docs:'docsHistory'}[section];
+    const suffix = {show_filters:'FilterToggle',hide_filters:'FilterToggle',clear_filters:'ClearFilters',next_results:'Next',previous_results:'Prev'}[action];
+    if (prefix && suffix) return $(prefix+suffix);
+    if (action === 'close_search') return $('dkSearchInput');
+    return null;
+  }
+  function availableActions() {
+    const actions = ['show_filters','hide_filters','clear_filters','next_results','previous_results','close_search']
+      .filter(action => { const el = actionTarget(action); return el && visible(el) && !el.disabled; });
+    const modal = activeModal();
+    if (modal && (modal.id === 'sageSettingsModal' || $(modalClosers[modal.id]))) actions.push('close_form');
+    if (!modal) actions.push('open_search');
+    return actions;
   }
   function validate(el,value) {
     if (typeof value !== 'string' || value.length > 2000) throw new Error('Use a string of at most 2000 characters.');
@@ -125,6 +146,7 @@
   async function openForm({form} = {}) {
     const section = {service_entry:'service',document_upload:'docs'}[form];
     if (!section) return {ok:false,error:'Choose service_entry or document_upload. For existing records use the read/update tools.'};
+    if (activeModal()) return {ok:false,error:'Close the current form or dialog before opening another.'};
     const result = await root.dkApp?.goToSection({section});
     if (!result?.ok) return result || {ok:false,error:'The app is still starting.'};
     root.SageVoice?.minimize?.();
@@ -153,22 +175,37 @@
     let target;
     if (prefix && suffix) target = $(prefix+suffix);
     else if (action === 'open_search') {
-      const opened = await root.dkApp?.goToSection({section:'sage'});
+      if (activeModal()) return {ok:false,error:'Close the current form or dialog before opening search.'};
+      const section = $('dkSearchInput')?.closest('main section')?.id;
+      if (!section) return {ok:false,error:'Search is unavailable.'};
+      const opened = await root.dkApp?.goToSection({section});
       if (!opened?.ok) return opened || {ok:false,error:'Search could not open.'};
       target = $('dkSearchInput');
     } else if (action === 'close_search') target = $('dkSearchInput');
-    if (!target || !target.getClientRects().length || target.disabled) return {ok:false,error:'That control is unavailable on the current page.'};
+    if (!target || !visible(target) || target.disabled) return {ok:false,error:'That control is unavailable on the current page.'};
     if (action === 'open_search') { target.focus(); target.dispatchEvent(new Event('input',{bubbles:true})); }
     else if (action === 'close_search') target.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
     else if (!suffix?.endsWith('Toggle') || target.getAttribute('aria-expanded') !== String(action === 'show_filters')) target.click();
+    if (suffix?.endsWith('Toggle') && target.getAttribute('aria-expanded') !== String(action === 'show_filters')) return {ok:false,error:'The filter panel did not change.'};
     root.SageVoice?.minimize?.();
     return {...inspect(),activated:action,saved:false};
   }
   // Unambiguous simple UI requests skip a model round-trip. Values still use
   // the same live field validation/handlers; ambiguous speech goes to SageAI.
+  function commandText(raw) {
+    return String(raw || '').trim().replace(/[.!?]+$/,'').replace(/^(?:i (?:want|need)(?: you)? to|i(?:'d| would) like (?:you )?to)\s+/i,'').replace(/^(?:sage[, ]+)?(?:please\s+)?(?:(?:can|could|would) you\s+)?(?:please\s+)?/i,'');
+  }
+  function canHandle(raw) {
+    const text = commandText(raw);
+    if (intent(raw)) return true;
+    const select = text.match(/^(?:select|choose)\s+(.+)$/i);
+    if (select) return [...fields()].some(([,el]) => (choices(el) || []).some(choice => normalize(choice.label) === normalize(select[1]) || normalize(choice.value) === normalize(select[1])));
+    const set = text.match(/^(?:set|fill|enter|change)\s+(?:the )?(.+?)\s+(?:to|with|as)\s+(.+)$/i);
+    if (!set) return false;
+    return [...fields()].some(([id,el]) => named(el,id,set[1]));
+  }
   function intent(raw) {
-    const text = String(raw || '').trim().replace(/[.!?]+$/,'').replace(/^please\s+/i,'');
-    if (/\b(?:don't|do not|never|not|how|why|earlier|said|say)\b/i.test(text)) return null;
+    const text = commandText(raw);
     const form = text.match(/^open (?:the )?(service (?:entry )?form|(?:add )?document (?:upload )?form)$/i);
     if (form) return {name:'open_page_form',form:/^service/i.test(form[1]) ? 'service_entry' : 'document_upload'};
     const action = {'show filters':'show_filters','hide filters':'hide_filters','clear filters':'clear_filters','next results':'next_results','previous results':'previous_results','open search':'open_search','close search':'close_search','close form':'close_form','close the form':'close_form','close settings':'close_form'}[text.toLowerCase()];
@@ -183,12 +220,11 @@
     }
     const set = text.match(/^(?:set|fill|enter|change)\s+(?:the )?(.+?)\s+(?:to|with|as)\s+(.+)$/i);
     if (!set) return null;
-    const aliases = {odo:['odometer','odo','odo (km)'],cost:['cost','amount'],date:['date','service date'],nextDue:['next due','next due date'],notes:['notes']};
-    const matches = [...fields()].filter(([id,el]) => visible(el) && editable(el) &&
-      [label(el,id),...(aliases[el.name] || [])].some(name => normalize(name) === normalize(set[1])));
+    const matches = [...fields()].filter(([id,el]) => visible(el) && editable(el) && named(el,id,set[1]));
     if (matches.length !== 1) return null;
     const [id,el] = matches[0];
-    try { return {name:'fill_page_fields',fields:[{field:id,value:validate(el,set[2]).value}]}; } catch { return null; }
+    const value = set[2].replace(/^(?:"([\s\S]*)"|'([\s\S]*)')$/,(_,double,single) => double ?? single);
+    try { return {name:'fill_page_fields',fields:[{field:id,value:validate(el,value).value}]}; } catch { return null; }
   }
-  root.SagePageControls = {inspect,fill,openForm,action,intent};
+  root.SagePageControls = {inspect,fill,openForm,action,intent,canHandle};
 })(typeof self !== 'undefined' ? self : this);

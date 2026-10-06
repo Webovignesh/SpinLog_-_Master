@@ -1119,8 +1119,11 @@
   // UI-changing tools require intent from THIS user turn, never conversation
   // history or a model-supplied reason. A greeting cannot dismiss the call.
   const UI_CONTROLS = new Set(['control_voice', 'navigate_section', 'navigate_history', 'open_sage_settings']);
+  function directRequest(raw) {
+    return String(raw || '').trim().replace(/^(?:i (?:want|need)(?: you)? to|i(?:'d| would) like (?:you )?to)\s+/i,'');
+  }
   function uiIntent(raw) {
-    let text = String(raw || '').normalize('NFC').toLowerCase().replace(/[.!?,;]+/g, ' ').replace(/\s+/g, ' ').trim();
+    let text = directRequest(raw).normalize('NFC').toLowerCase().replace(/[.!?,;]+/g, ' ').replace(/\s+/g, ' ').trim();
     // A correction can reject the current screen and request a new one in
     // the same turn: “It's not the main screen, go to the main page.”
     const correction = String(raw || '').toLowerCase().match(/^(?:it's|it is|that's|that is|this is)\b[^,;.!?]*[,;.!?]\s*((?:please )?(?:go to|take me to|open|show(?: me)?|switch to)\s+.+)$/);
@@ -1165,21 +1168,67 @@
     const page = {home:'Home',service:'Service history',docs:'Documents',sage:'Chat'}[intent.section] || 'Settings';
     return `${page} is open. We can keep talking.`;
   }
+  function uiRequests(raw) {
+    // Split only an explicit next command. Ordinary "and" in notes or a
+    // document name is data, not permission to perform another action.
+    const text = directRequest(raw);
+    if (!/^(?:(?:hey )?sage[, ]+|bro\s+|please\s+|(?:can|could|would) you\s+)*(?:open|go|take|switch|show|hide|close|stop|end|hang|back|next|previous|clear|set|fill|enter|change|select|choose|minimi[sz]e|expand|restore|maximize|search|upload|attach)\b/i.test(text)) return [text];
+    const parts = [], separator = /\s*(;\s*|,?\s+(?:and then|then|and)\s+)(?=(?:please\s+)?(?:open|go to|take me to|switch to|show|hide|close|stop|end|hang up|back|next|previous|clear|set|fill|enter|change|select|choose|minimi[sz]e|expand|restore|maximize|search|upload|attach)\b)/gi;
+    let from = 0;
+    for (const match of text.matchAll(separator)) {
+      const before = text.slice(from,match.index), value = before.match(/^(?:please\s+)?(?:set|fill|enter|change)\s+.+?\s+(?:to|with|as)\s+(.+)$/i)?.[1];
+      // Plain "and" inside a free-text value belongs to that value. Use
+      // "then" or a semicolon for a subsequent command, or quote the value.
+      if (value && /^,?\s+and\s+$/i.test(match[1]) && !/^(?:[\d.,+-]+|"[^"]*"|'[^']*')$/.test(value.trim())) continue;
+      let quote = '';
+      for (let i=0;i<match.index;i++) {
+        const c = text[i];
+        if (c === '\\') { i++; continue; }
+        if (c === quote) { quote = ''; continue; }
+        if (!quote && (c === '"' || c === "'" && !/[\p{L}\p{N}]/u.test(text[i-1] || ''))) quote = c;
+      }
+      if (quote) continue;
+      parts.push(before.trim()); from = match.index + match[0].length;
+    }
+    parts.push(text.slice(from).trim());
+    return parts.length <= 6 ? parts.map(part => part.trim()).filter(Boolean) : [];
+  }
+  function uiPlan(raw) {
+    const requests = uiRequests(raw);
+    if (requests.length === 1 && !uiIntent(requests[0]) && !root.SagePageControls?.intent?.(requests[0])) return null;
+    if (!requests.length || !requests.every(text => uiIntent(text) || root.SagePageControls?.canHandle?.(text) || root.SagePageControls?.intent?.(text))) return null;
+    return requests;
+  }
   function uiAllowed(name, args, context) {
     if (['fill_page_fields','open_page_form','activate_page_control'].includes(name)) {
-      const text = context?.userText || '';
-      return /\b(?:fill|select|set|choose|change|type|enter|put|filter|use|update|open|close|show|hide|clear|next|previous|search)\b/iu.test(text)
-        && !/\b(?:don't|do not|never|not|how|why|what|earlier|said|say)\b/iu.test(text);
+      return uiRequests(context?.userText).some(request => {
+        const exact = uiIntent(request) || root.SagePageControls?.intent?.(request);
+        if (exact) {
+          if (exact.name !== name) return false;
+          return Object.entries(exact).every(([key,value]) => key === 'name' || JSON.stringify(args?.[key]) === JSON.stringify(value));
+        }
+        // Negation inside an explicitly requested field value is content:
+        // "set notes to don't forget the helmet" remains a valid draft.
+        const text = request.split(/\s+(?:to|with|as)\s+/i)[0];
+        if (!/^(?:(?:hey )?sage[, ]+)?(?:please\s+)?(?:(?:can|could|would) you\s+)?(?:please\s+)?(?:fill|select|set|choose|change|type|enter|put|filter|use|update|open|close|show|hide|clear|next|previous|search)\b/iu.test(text)
+          || /\b(?:don't|do not|never|not|how|why|what|earlier|said|say)\b/iu.test(text)) return false;
+        if (name === 'fill_page_fields') return /\b(?:fill|select|set|choose|change|type|enter|put|filter|use|update|search)\b/iu.test(text);
+        if (name === 'open_page_form') return /\b(?:form|entry|upload|add)\b/iu.test(request);
+        return /\b(?:filter|search|results)\b/iu.test(request) && args?.action !== 'close_form';
+      });
     }
-    if (name === 'prepare_file_upload') return /\b(?:upload|attach)\b|\b(?:choose|pick)\b.{0,48}\b(?:file|document|bill|photo|image|video|audio)\b|அப்லோட்|அப்லோடு|பதிவேற்று|கோப்பை தேர்வு/iu.test(context?.userText || '')
-      && !/\b(?:don't|do not|never|not|how|why|earlier|said)\b|வேண்டாம்|வேணாம்|பண்ணாத|செய்யாத|எப்படி|சொன்ன/iu.test(context?.userText || '');
+    if (name === 'prepare_file_upload') return uiRequests(context?.userText).some(request =>
+      /^(?:(?:hey )?sage[, ]+)?(?:please\s+)?(?:(?:can|could|would) you\s+)?(?:please\s+)?(?:upload\b|attach\b|(?:choose|pick)\b.{0,48}\b(?:file|document|bill|photo|image|video|audio)\b)|^(?:அப்லோட்|அப்லோடு|பதிவேற்று|கோப்பை தேர்வு)/iu.test(request)
+      && !/\b(?:don't|do not|never|not|how|why|earlier|said)\b|வேண்டாம்|வேணாம்|பண்ணாத|செய்யாத|எப்படி|சொன்ன/iu.test(request));
     if (!UI_CONTROLS.has(name)) return true;
-    const intent = uiIntent(context?.userText);
-    return !!intent && intent.name === name && Object.entries(intent).every(([key,value]) => key === 'name' || args?.[key] === value);
+    return uiRequests(context?.userText).some(request => {
+      const intent = uiIntent(request);
+      return !!intent && intent.name === name && Object.entries(intent).every(([key,value]) => key === 'name' || args?.[key] === value);
+    });
   }
   function declarations(context) {
-    const intent = uiIntent(context?.userText);
-    return TOOLS.filter(tool => tool.name === 'prepare_file_upload' ? uiAllowed(tool.name,null,context) : !UI_CONTROLS.has(tool.name) || tool.name === intent?.name);
+    const intents = uiRequests(context?.userText).map(uiIntent).filter(Boolean);
+    return TOOLS.filter(tool => tool.name === 'prepare_file_upload' ? uiAllowed(tool.name,null,context) : !UI_CONTROLS.has(tool.name) || intents.some(intent => tool.name === intent.name));
   }
 
   function isWrite(name) {
@@ -1350,7 +1399,7 @@
   }
 
   root.SageTools = {
-    declarations, run, isWrite, describe, iconFor, uiIntent, uiReply,
+    declarations, run, isWrite, describe, iconFor, uiIntent, uiReply, uiRequests, uiPlan,
     TOOLS, HANDLERS, WRITES, APP_FREE, DOING, ICONS,
   };
 })(typeof self !== 'undefined' ? self : this);
