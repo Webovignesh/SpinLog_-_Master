@@ -3818,6 +3818,7 @@ window._delHistoricUpload = async function(id, fileName, btn) {
   /** Guards against a second navigation landing mid-swap. */
   let sectionSwapToken = 0;
   let sectionSwapTimer = null;
+  let sectionSwapFinish = null;
 
   /**
    * TWO VIEWS, IN ORDER, RATHER THAN A CUT.
@@ -3850,14 +3851,15 @@ window._delHistoricUpload = async function(id, fileName, btn) {
    *     animate, and it must not steal focus.
    */
   function setActiveSection(section, mode) {
-    if (!isKnownSection(section)) return;
+    if (!isKnownSection(section)) return false;
+    sectionSwapFinish?.(false); sectionSwapFinish = null;
     const incoming = document.getElementById(section);
     const wasActive = incoming.classList.contains('active');
     const outgoing = document.querySelector('main section.active');
     const token = ++sectionSwapToken;
 
     const swap = () => {
-      if (token !== sectionSwapToken) return;
+      if (token !== sectionSwapToken) return false;
       sections.forEach(sec => {
         sec.classList.remove('active');
         sec.classList.remove('is-leaving');
@@ -3873,6 +3875,7 @@ window._delHistoricUpload = async function(id, fileName, btn) {
       if (!wasActive) focusSectionHeading(incoming);
       ensureSectionData(section);
       rememberSection(section, mode);
+      return true;
     };
 
     clearTimeout(sectionSwapTimer);
@@ -3882,12 +3885,20 @@ window._delHistoricUpload = async function(id, fileName, btn) {
     // who asked for no motion.
     if (!outgoing || outgoing === incoming || window.dkReduceMotion()) {
       if (outgoing) outgoing.classList.remove('is-leaving');
-      swap();
-      return;
+      return swap();
     }
 
     outgoing.classList.add('is-leaving');
-    sectionSwapTimer = setTimeout(swap, SECTION_OUT_MS);
+    // Tools await the actual page/history swap. Otherwise minimizing a modal
+    // spends its Back entry while the old section is still showing and can
+    // cancel this pending navigation through the hashchange router.
+    return new Promise(resolve => {
+      sectionSwapFinish = resolve;
+      sectionSwapTimer = setTimeout(() => {
+        sectionSwapTimer = null; sectionSwapFinish = null;
+        resolve(swap());
+      }, SECTION_OUT_MS);
+    });
   }
   // Exposed so the v1.7 command-center search can navigate between sections.
   window.dkNavigate = setActiveSection;
@@ -6194,7 +6205,8 @@ async function getBillFileUrl(fileName) {
     async goToSection({ section, highlight = null }) {
       const known = ['home', 'service', 'docs', 'sage'];
       if (!known.includes(section)) return { ok: false, error: 'unknown section' };
-      setActiveSection(section);
+      const opened = await setActiveSection(section);
+      if (opened === false) return { ok:false, error:'Navigation was cancelled. Try again.' };
       if (highlight) {
         const target = document.querySelector(highlight);
         if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });

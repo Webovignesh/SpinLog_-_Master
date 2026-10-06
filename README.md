@@ -881,7 +881,7 @@ gone rather than left as links that go nowhere. What was in them that still matt
   back to localStorage then to the `data-due` values in `index.html`; Sage's memory
   falls back to localStorage; the key ring stays on the device.
 
-## Sage voice — v1.9.34
+## Sage voice — v1.9.35
 
 Open **Talk to Sage** inside the chat card, or type **go to voice mode**, **open
 voice chat** or **let’s talk**. The translucent room centers the latest four
@@ -892,6 +892,17 @@ or interrupt speech; use the microphone to mute and **End**, Escape or app Back
 to leave. Explicit **close voice** commands also end the call locally. Greetings,
 questions about closing and negated commands do not close it. The activity pill
 appears only for actual site lookups.
+
+Tamil and Tanglish controls share one current-turn parser with chat and tools.
+For example, **வாய்ஸ் மோட் க்ளோஸ் பண்ணு** ends the call and **service பேஜ் ஓபன்
+பண்ணு** opens Service. Recognized interface requests execute locally before
+model/key/quota work, and their replies reflect the actual action result.
+Navigation and settings minimize the active conversation into a corner orb;
+the microphone, selected speaker and history stay in the same session. Drag the
+orb or grip to move it, or focus the grip and use arrow keys. The expand control
+restores the room. Docked controls leave the page, keyboard focus and other
+dialogs usable; Escape belongs to those dialogs. Use **End** or a close command
+to finish a docked call. Resize/keyboard viewport changes keep the controls in view.
 
 ### Listening and turn handoff
 
@@ -904,7 +915,8 @@ browser draft. Recognition instructions preserve whole Chennai/Theni phrases,
 names and numbers, without translating speech or inventing slang.
 
 The WebSocket starts alongside microphone permission. PCM is buffered until
-`setupComplete`, and the next connection is warmed while the reply plays.
+`setupComplete`, and the next connection is warmed while the answer is being
+prepared and played. The PCM worklet is preloaded with the page.
 MediaRecorder starts immediately when permission resolves and preserves the
 whole utterance as a fallback. An existing gesture-unlocked AudioContext and
 microphone stream are reused across turns. The status distinguishes opening the
@@ -912,8 +924,13 @@ microphone, starting audio and connecting captions. “I’m listening” appear
 the complete-recording fallback is available. The UI explains that first words
 are kept during connection and that fallback captions appear after a pause.
 A worklet that has not delivered PCM after 1.5 seconds switches the current turn
-to the complete recording. A slow worklet startup uses the full recording rather
-than submitting a potentially missing first word.
+to the complete recording. A slow worklet startup uses the full recording if
+speech preceded PCM, preserving the first word. A measured silent startup keeps
+the faster Live path. Transient module-load failures can retry on the same context.
+One sustained voiced PCM packet marks speech, including a short first “hello”.
+Caption network arrivals do not restart the local silence deadline. After a pause,
+the UI shows **Processing…**, then **Thinking…**, **Speaking** and **I’m listening**
+when capture is ready again. No microphone restart is needed for minimizing or expanding.
 
 Local audio-level sampling runs every 100 ms independently of animation frames.
 The default pause is **Quick · 0.65 seconds**; **Patient · 1.2 seconds** is available.
@@ -1040,6 +1057,7 @@ node tools/audit-boot.mjs
 node tools/audit-sage-voice-ui.mjs
 node tools/audit-sage-capture.mjs
 node tools/audit-sage-live-browser.mjs
+node tools/audit-sage-docked-voice.mjs
 node tools/audit-sage-audio-clock.mjs
 ```
 

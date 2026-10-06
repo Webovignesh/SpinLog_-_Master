@@ -179,3 +179,33 @@ test('a model repeating an old close command cannot end a new hello turn',async(
     assert.equal(h.requests[1].body.contents.at(-1).parts[0].functionResponse.response.ok,false);
   }finally{h.cleanup();}
 });
+
+test('Tamil interface commands execute locally even offline and never request model permission',async()=>{
+  const h=harness(async()=>{throw new Error('A UI command must never generate a model reply');});
+  try {
+    let section=null,closed=false,docked=false;
+    h.root.navigator.onLine=false;
+    h.root.dkApp={goToSection:async({section:next})=>{section=next;return {ok:true,opened:next};}};
+    h.root.SageVoice={close(){closed=true;},minimize(){docked=true;}};
+    vm.runInNewContext(await readFile(new URL('../src/js/sage-tools.js',import.meta.url),'utf8'),h.root);
+    const nav=await h.AI.askSage('service பேஜ் ஓபன் பண்ணு',{voice:true});
+    assert.equal(section,'service');assert.equal(docked,true);assert.equal(closed,false);
+    assert.equal(nav.calls[0].result.opened,'service');assert.match(nav.text,/திறந்திருக்கு/);
+    const end=await h.AI.askSage('வாய்ஸ் மோட் க்ளோஸ் பண்ணு',{voice:true});
+    assert.equal(closed,true);assert.equal(end.calls[0].result.ok,true);assert.match(end.text,/மூடிட்டேன்/);
+    assert.equal(h.requests.length,0);
+  }finally{h.cleanup();}
+});
+test('local actions report failures and respect cancellation before touching the page',async()=>{
+  const h=harness(async()=>{throw new Error('No generation');});
+  try {
+    let actions=0;
+    h.root.dkApp={goToSection:async()=>{actions++;return {ok:false,error:'Page failed to open.'};}};
+    vm.runInNewContext(await readFile(new URL('../src/js/sage-tools.js',import.meta.url),'utf8'),h.root);
+    const cancelled=await h.AI.askSage('open service',{isCancelled:()=>true});
+    assert.equal(cancelled.reason,'cancelled');assert.equal(actions,0);
+    const result=await h.AI.askSage('open service');
+    assert.equal(actions,1);assert.equal(result.calls[0].result.ok,false);
+    assert.equal(result.text,'Page failed to open.');assert.equal(h.requests.length,0);
+  }finally{h.cleanup();}
+});

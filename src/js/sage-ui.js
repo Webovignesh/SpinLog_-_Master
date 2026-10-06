@@ -3238,7 +3238,8 @@
     // works out what it is.
     if ((!asked && !pending.length) || chatBusy) return;
 
-    if (!pending.length && /^(?:(?:hey )?sage[, ]*)?(?:please )?(?:(?:go|switch|take me) (?:to|into) (?:the )?voice(?: mode| chat)?|(?:start|open|enable|activate) (?:the )?voice(?: mode| chat)?|let'?s (?:talk|speak)|voice mode)(?: please)?[.!?]*$/i.test(asked)) {
+    const control = window.SageTools?.uiIntent(asked);
+    if (!pending.length && control?.name === 'control_voice' && control.action === 'open') {
       if (window.SageVoice?.open()) {
         if (e.input) e.input.value='';
         setStatus(e.status,'');

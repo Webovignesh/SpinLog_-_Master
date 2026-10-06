@@ -5,12 +5,15 @@
   const MODEL = 'gemini-3.8-live'; // Live documents Tamil support; Transcribe 3.5 does not list it.
   const WS = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
   const workletURL = document.currentScript?.src
-    ? new URL('sage-pcm-worklet.js?v=1.9.34', document.currentScript.src).href
-    : 'src/js/sage-pcm-worklet.js?v=1.9.34';
+    ? new URL('sage-pcm-worklet.js?v=1.9.35', document.currentScript.src).href
+    : 'src/js/sage-pcm-worklet.js?v=1.9.35';
   const prepared = new WeakMap();
   function prepare(context) {
     if (!context?.audioWorklet || !root.AudioWorkletNode) return Promise.resolve(false);
-    if (!prepared.has(context)) prepared.set(context, context.audioWorklet.addModule(workletURL).then(() => true).catch(() => false));
+    if (!prepared.has(context)) prepared.set(context, context.audioWorklet.addModule(workletURL).then(() => true).catch(() => {
+      prepared.delete(context); // a transient cold-load failure must not poison every later turn
+      return false;
+    }));
     return prepared.get(context);
   }
   function connect({key, pauseMs = 650, onText = () => {}, onBoundary = () => {}}) {

@@ -525,12 +525,12 @@
     },
     {
       name: 'navigate_section',
-      description: 'Actually take him to home, service history, documents or Sage chat, ONLY when he explicitly asks to go/open/show that page. This ends an active voice call so the page is visible. Do not use for a factual question or a recommendation; use open_section to offer a button instead.',
+      description: 'Actually take him to home, service history, documents or Sage chat, ONLY when he explicitly asks to go/open/show that page. An active voice call minimizes into movable corner controls and continues. Do not use for a factual question or a recommendation; use open_section to offer a button instead.',
       parameters: { type: 'object', properties: { section: { ...STRING, enum: ['home', 'service', 'docs', 'sage'] } }, required: ['section'] },
     },
     {
       name: 'open_sage_settings',
-      description: 'Actually open the requested Sage settings panel. Only when asked to open settings; changing data uses the relevant tool instead. Ends an active voice call to reveal the settings.',
+      description: 'Actually open the requested Sage settings panel. Only when asked to open settings; changing data uses the relevant tool instead. Minimize an active voice call to reveal settings while keeping the conversation active.',
       parameters: { type: 'object', properties: { tab: { ...STRING, enum: ['memory', 'voice', 'timing', 'alerts'] } }, required: ['tab'] },
     },
     {
@@ -675,15 +675,15 @@
     navigate_section: async (app, a) => {
       if (!['home', 'service', 'docs', 'sage'].includes(a.section)) return { ok: false, error: 'Unknown section.' };
       const result = await app.goToSection({ section: a.section });
-      if (result.ok) root.SageVoice?.close();
+      if (result.ok) root.SageVoice?.minimize?.();
       return result;
     },
     open_sage_settings: (_app, a) => {
       if (!['memory', 'voice', 'timing', 'alerts'].includes(a.tab)) return { ok: false, error: 'Unknown settings panel.' };
       if (!root.SageUI) return { ok: false, error: 'Sage settings are not loaded.' };
-      root.SageVoice?.close();
       root.SageUI.open(a.tab);
       if (!root.SageUI.isOpen()) return { ok: false, error: 'Settings could not open.' };
+      root.SageVoice?.minimize?.();
       return { ok: true, opened: 'sage_settings', tab: a.tab };
     },
     open_section: (app, a) => app.openSection(a),
@@ -1077,21 +1077,33 @@
   // history or a model-supplied reason. A greeting cannot dismiss the call.
   const UI_CONTROLS = new Set(['control_voice', 'navigate_section', 'open_sage_settings']);
   function uiIntent(raw) {
-    const text = String(raw || '').toLowerCase().replace(/[.!?,;]+/g, ' ').replace(/\s+/g, ' ').trim()
-      .replace(/^(?:(?:hey )?sage|bro)\s+/, '').replace(/^please\s+/, '')
+    let text = String(raw || '').normalize('NFC').toLowerCase().replace(/[.!?,;]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (/(?:\b(?:don't|do not|never|not|how|why|said|say|earlier)\b|வேண்டாம்|வேணாம்|பண்ணாத|செய்யாத|மூடாத|நிறுத்தாத|திறக்காத|எப்படி|முன்னாடி|சொன்ன)/u.test(text)) return null;
+    text = text.replace(/^(?:(?:hey )?sage|bro|சேஜ்|ப்ரோ)\s+/, '').replace(/^(?:please|ப்ளீஸ்|தயவுசெய்து)\s+/, '')
       .replace(/^(?:can|could|would) you\s+/, '').replace(/^please\s+/, '')
-      .replace(/\s+(?:please|bro|sage)$/, '').trim();
-    if (/^(?:(?:close|exit|stop|leave|end) (?:the )?voice(?: (?:mode|chat))?|(?:end|close) (?:the |this )?call|hang up|voice(?: (?:mode|chat))? (?:close|stop) (?:pannu|pannunga)|வாய்ஸ் (?:மோட்|மோடை|மோடு|மோடைப்) (?:மூடு|மூடுங்க|க்ளோஸ் பண்ணு|க்ளோஸ் பண்ணுங்க)|காலை (?:கட் பண்ணு|முடி))$/u.test(text)) return { name:'control_voice', action:'close' };
-    if (/^(?:(?:open|start|activate|enable|go to|switch to) (?:the )?voice (?:mode|chat)|voice (?:mode|chat) (?:open|start) (?:pannu|pannunga))$/.test(text)) return { name:'control_voice', action:'open' };
+      .replace(/\s+(?:please|bro|sage|டா|டி|ப்ரோ|சேஜ்)$/, '').trim();
+    const doIt = '(?:pannu(?:nga|da|di)?|பண்ணு(?:ங்க|ங்கோ|டா|டி)?|செய்(?:யு|யுங்க)?)';
+    const voice = '(?:the )?(?:voice|வாய்ஸ்|வாய்ஸை|வாய்ச்|வாய்சை)(?:\\s*(?:mode|chat|mod[eai]*|மோட்|மோடு|மோட|மோடை|மோடைப்|மோட்டை|நோட்|நோடு|சாட்))?(?:\\s+(?:ah|a|ai|ஐ|அ))?';
+    const close = `(?:(?:close|stop|exit|leave|end|க்ளோஸ்|குளோஸ்|கிலோஸ்|ஸ்டாப்)(?:\\s*${doIt})?|மூடு(?:ங்க)?|முடி(?:ங்க)?|நிறுத்து(?:ங்க)?)`;
+    if (new RegExp(`^(?:${close}\\s+${voice}|${voice}\\s*${close}|(?:end|close) (?:the |this )?call|hang up|(?:call|கால்|காலை|கால)\\s*(?:cut\\s*${doIt}|கட்\\s*${doIt}|முடி|மூடு))$`, 'u').test(text)) return { name:'control_voice', action:'close' };
+    const open = `(?:(?:open|start|activate|enable|ஓபன்|ஓப்பன்|ஸ்டார்ட்)(?:\\s*${doIt})?|திற(?:ங்க)?|தொடங்கு)`;
+    if (new RegExp(`^(?:${open}\\s+${voice}|${voice}\\s*${open}|(?:go|switch|take me) (?:to|into) ${voice}|let'?s (?:talk|speak)|voice mode)$`, 'u').test(text)) return { name:'control_voice', action:'open' };
     const request = text.match(/^(?:open|show(?: me)?|go to|take me to|switch to) (?:the |my )?(.+?)(?: page| section)?$/)
-      || text.match(/^(.+?) (?:open pannu|open pannunga|காட்டு|திற|ஓபன் பண்ணு)$/u);
+      || text.match(new RegExp(`^(.+?)\\s+(?:${open}|காட்டு(?:ங்க)?|காண்பி(?:ங்க)?|திறந்து காட்டு|கொண்டு போ|போ|திறக்க முடியுமா)$`, 'u'));
     if (!request) return null;
-    const target = request[1];
-    const pages = {home:'home',dashboard:'home',service:'service','service history':'service',documents:'docs',docs:'docs',chat:'sage','sage chat':'sage',sage:'sage','சர்வீஸ்':'service','டாக்குமென்ட்ஸ்':'docs'};
+    const target = request[1].replace(/\s*(?:page|section|tab|பேஜ்|பேஜை|பேஜ|பக்கம்|பக்கத்தை|பக்கத்த|பேஜ்-ஐ)$/u, '').trim();
+    const pages = {home:'home',dashboard:'home',service:'service','service history':'service',documents:'docs',docs:'docs',chat:'sage','sage chat':'sage',sage:'sage','ஹோம்':'home','முகப்பு':'home','டாஷ்போர்டு':'home','சர்வீஸ்':'service','சர்விஸ்':'service','சேவை':'service','சர்வீஸ் ஹிஸ்டரி':'service','டாக்குமென்ட்ஸ்':'docs','டாக்குமெண்ட்ஸ்':'docs','ஆவணங்கள்':'docs','சாட்':'sage','சேஜ்':'sage','சேஜ் சாட்':'sage'};
     if (pages[target]) return { name:'navigate_section', section:pages[target] };
-    const panels = {'sage settings':'memory',settings:'memory','voice settings':'voice','memory settings':'memory','timing settings':'timing','notification settings':'alerts','alert settings':'alerts'};
+    const panels = {'sage settings':'memory',settings:'memory','voice settings':'voice','memory settings':'memory','timing settings':'timing','notification settings':'alerts','alert settings':'alerts','செட்டிங்ஸ்':'memory','சேஜ் செட்டிங்ஸ்':'memory','வாய்ஸ் செட்டிங்ஸ்':'voice','மெமரி செட்டிங்ஸ்':'memory','டைமிங் செட்டிங்ஸ்':'timing','நோட்டிஃபிகேஷன் செட்டிங்ஸ்':'alerts'};
     if (panels[target]) return { name:'open_sage_settings', tab:panels[target] };
     return null;
+  }
+  function uiReply(intent, result, raw) {
+    const tamil = /[\u0B80-\u0BFF]|\b(?:pannu|pannunga|pannuda|pannudi|moodu|niruthu)\b/i.test(String(raw));
+    if (!result?.ok) return tamil ? 'அதைச் செய்ய முடியல. ' + (result?.error || 'இன்னொரு தடவை முயற்சி பண்ணு.') : (result?.error || 'That action could not finish. Try again.');
+    if (intent.name === 'control_voice') return intent.action === 'close' ? (tamil ? 'வாய்ஸ் மோடை மூடிட்டேன்.' : 'Voice mode is closed.') : (tamil ? 'சொல்லு, கேக்கறேன்.' : 'I’m listening.');
+    const page = {home:'Home',service:'Service history',docs:'Documents',sage:'Chat'}[intent.section] || 'Settings';
+    return tamil ? `${{home:'முகப்பு',service:'சர்வீஸ்',docs:'டாக்குமென்ட்ஸ்',sage:'சாட்'}[intent.section] || 'செட்டிங்ஸ்'} பக்கம் திறந்திருக்கு. இங்கயே பேசலாம்.` : `${page} is open. We can keep talking.`;
   }
   function uiAllowed(name, args, context) {
     if (!UI_CONTROLS.has(name)) return true;
@@ -1265,7 +1277,7 @@
   }
 
   root.SageTools = {
-    declarations, run, isWrite, describe, iconFor, uiIntent,
+    declarations, run, isWrite, describe, iconFor, uiIntent, uiReply,
     TOOLS, HANDLERS, WRITES, APP_FREE, DOING, ICONS,
   };
 })(typeof self !== 'undefined' ? self : this);
