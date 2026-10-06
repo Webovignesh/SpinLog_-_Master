@@ -1121,6 +1121,8 @@
     'open_section does not open anything. It puts a button under your reply and he',
     'decides. For this offer, never say the page opened. For an explicit request',
     'to open a page use navigate_section; for settings use open_sage_settings.',
+    'Only claim a page opened or voice closed after its control succeeds.',
+    'Navigation keeps an active call in movable corner controls so he can use the page.',
     'Use control_voice to open or close voice mode when requested. Offer a page when the next',
     'step is genuinely his: attaching a bill, picking a file. Answering a question',
     'is not a reason to offer a page.',
@@ -3166,6 +3168,18 @@
     const opts = options || {};
     const asked = String(question || '').trim();
     if (!asked) return { ok: false, reason: 'empty' };
+
+    // Explicit interface commands are local actions, not model predictions.
+    // Run before key/quota/context work, and acknowledge only the real result.
+    const controls = opts.tools !== false && root.SageTools;
+    const intent = !opts.attachment && !opts.attachments?.length && controls?.uiIntent?.(asked);
+    if (intent) {
+      if (opts.isCancelled?.()) return { ok:false, reason:'cancelled' };
+      const { name, ...args } = intent;
+      opts.onTool?.(name, args);
+      const result = await controls.run(name, args, { userText:asked });
+      return { ok:true, text:controls.uiReply(intent, result, asked), calls:[{name,args,result}] };
+    }
 
     const state = ready(opts);
     if (!state.ok) return { ok: false, reason: state.reason, retryInMs: state.retryInMs };

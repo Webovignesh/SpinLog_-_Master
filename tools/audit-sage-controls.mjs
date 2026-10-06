@@ -10,20 +10,20 @@ function appMethod(name,next,context) {
   assert.ok(start>=0&&end>start);return vm.runInNewContext(`({${appSource.slice(start,end)}})`,context)[name];
 }
 function harness(overrides={}) {
-  let open=true,section=null,tab=null;
+  let open=true,section=null,tab=null,docked=false;
   const root={console:{log(){},warn(){}},
-    SageVoice:{open(){open=true;return true;},close(){open=false;}},
+    SageVoice:{open(){open=true;return true;},close(){open=false;},minimize(){docked=true;},},
     SageUI:{open(t){tab=t;},isOpen:()=>!!tab},...overrides};
   root.self=root;vm.runInNewContext(toolsSource,root);
   root.dkApp={goToSection:appMethod('goToSection','saveParkLocation',{setActiveSection:s=>{section=s;}}),
     openSection:appMethod('openSection','goToSection',{})};
-  return {root,run:root.SageTools.run,get open(){return open;},get section(){return section;},get tab(){return tab;}};
+  return {root,run:root.SageTools.run,get open(){return open;},get section(){return section;},get tab(){return tab;},get docked(){return docked;}};
 }
-test('explicit navigation opens the page and ends voice; an offer never navigates',async()=>{
+test('explicit navigation opens the page and docks the continuing call; an offer never navigates',async()=>{
   const h=harness();assert.equal((await h.run('open_section',{section:'service'})).offered,'service');
   assert.equal(h.section,null);assert.equal(h.open,true);
   assert.equal((await h.run('navigate_section',{section:'docs',highlight:'untrusted selector'},{userText:'open documents'})).opened,'docs');
-  assert.equal(h.section,'docs');assert.equal(h.open,false);
+  assert.equal(h.section,'docs');assert.equal(h.open,true);assert.equal(h.docked,true);
 });
 test('unknown destinations and failed navigation leave the call intact',async()=>{
   const h=harness();assert.equal((await h.run('navigate_section',{section:'javascript:alert(1)'})).ok,false);
@@ -31,12 +31,20 @@ test('unknown destinations and failed navigation leave the call intact',async()=
   h.root.dkApp.goToSection=async()=>({ok:false,error:'Unavailable'});
   assert.equal((await h.run('navigate_section',{section:'docs'},{userText:'open documents'})).ok,false);assert.equal(h.open,true);
 });
+test('navigation waits for the actual section swap and cancellation is not reported as opened',async()=>{
+  let finish;
+  const method=appMethod('goToSection','saveParkLocation',{setActiveSection:()=>new Promise(resolve=>{finish=resolve;})});
+  let finished=false;const action=method({section:'service'}).then(result=>{finished=true;return result;});
+  await Promise.resolve();assert.equal(finished,false);finish(false);
+  assert.equal((await action).ok,false);
+  const result=method({section:'docs'});finish(true);assert.equal((await result).opened,'docs');
+});
 test('voice and settings work before data loads, and only accept whitelisted controls',async()=>{
   const h=harness();delete h.root.dkApp;
   assert.equal((await h.run('control_voice',{action:'delete'})).ok,false);assert.equal(h.open,true);
   assert.equal((await h.run('control_voice',{action:'close'},{userText:'close voice mode'})).ok,true);assert.equal(h.open,false);
   assert.equal((await h.run('control_voice',{action:'open'},{userText:'open voice mode'})).ok,true);assert.equal(h.open,true);
-  assert.equal((await h.run('open_sage_settings',{tab:'voice'},{userText:'open voice settings'})).ok,true);assert.equal(h.tab,'voice');assert.equal(h.open,false);
+  assert.equal((await h.run('open_sage_settings',{tab:'voice'},{userText:'open voice settings'})).ok,true);assert.equal(h.tab,'voice');assert.equal(h.open,true);assert.equal(h.docked,true);
   assert.equal((await h.run('open_sage_settings',{tab:'anything'})).ok,false);
 });
 function services(rows) {
@@ -106,4 +114,31 @@ test('polite requests normalize whitespace without weakening negation protection
   const h=harness();
   assert.equal((await h.run('navigate_section',{section:'docs'},{userText:'Sage, could you please open   the documents page?'})).ok,true);
   assert.equal((await h.run('control_voice',{action:'close'},{userText:'Please do not close voice mode'})).ok,false);
+});
+
+test('the screenshot Tamil and mixed-script requests execute actual controls',async()=>{
+  for(const text of ['service பேஜ் ஓபன் பண்ணு','சர்வீஸ் பேஜ் ஓபன் பண்ணுங்க','சர்வீஸ் பக்கத்தை திற','service page open pannu']) {
+    const h=harness(),intent=h.root.SageTools.uiIntent(text);
+    assert.equal(intent?.section,'service',text);
+    const result=await h.run(intent.name,{section:intent.section},{userText:text});
+    assert.equal(result.ok,true);assert.equal(h.section,'service');assert.equal(h.open,true);assert.equal(h.docked,true);
+  }
+  for(const text of ['வாய்ஸ் மோட் க்ளோஸ் பண்ணு','வாய்ஸ் மோடை குளோஸ் பண்ணுங்க','வாய்ஸ் மோடு மூடு','voice mode close pannu','கால் கட் பண்ணு']) {
+    const h=harness(),intent=h.root.SageTools.uiIntent(text);
+    assert.equal(intent?.action,'close',text);
+    assert.equal((await h.run(intent.name,{action:intent.action},{userText:text})).ok,true);assert.equal(h.open,false);
+  }
+});
+test('Tamil negations, questions, greetings and unknown pages cannot perform controls',async()=>{
+  const h=harness();
+  for(const text of ['வாய்ஸ் மோட் க்ளோஸ் பண்ணாத','வாய்ஸ் மோடை மூடாத','சர்வீஸ் பேஜ் ஓபன் பண்ண வேண்டாம்','வாய்ஸ் மோடை எப்படி மூடுவது','முன்னாடி வாய்ஸ் மோட் க்ளோஸ் பண்ணு சொன்னேன்','அண்ணே','open nonexistent page']) {
+    assert.equal(h.root.SageTools.uiIntent(text),null,text);
+  }
+  assert.equal(h.open,true);assert.equal(h.section,null);
+});
+test('a failed action never gets a success acknowledgement or minimizes the call',async()=>{
+  const h=harness();h.root.dkApp.goToSection=async()=>({ok:false,error:'Page is unavailable.'});
+  const raw='service பேஜ் ஓபன் பண்ணு',intent=h.root.SageTools.uiIntent(raw);
+  const result=await h.run(intent.name,{section:intent.section},{userText:raw});
+  assert.equal(h.docked,false);assert.doesNotMatch(h.root.SageTools.uiReply(intent,result,raw),/திறந்திருக்கு|opened/);
 });

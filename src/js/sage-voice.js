@@ -38,6 +38,7 @@
   // ── State ─────────────────────────────────────────────────────────────
   const S = {
     open: false,
+    docked: false,     // presentation only; microphone and speaker keep their session
     mode: 'idle',      // idle | starting | listening | transcribing | thinking | speaking
     session: 0,        // bumped on close; stale async work aborts on mismatch
     muted: false,
@@ -71,6 +72,8 @@
       lines: $('sageVoiceLines'),
       mic: $('sageVoiceMic'),
       end: $('sageVoiceEnd'),
+      window: $('sageVoiceWindow'),
+      drag: $('sageVoiceDrag'),
       hint: $('sageVoiceHint'),
     };
   }
@@ -521,6 +524,7 @@
         // Read fresh audio even when the worklet owns speech detection. The
         // old animation reused meterLevel, which stayed at zero in this path.
         level = sampleMeter(false);
+        if (capture && !capture.pcmAt && level > 0.003) capture.prefixSpeech = true;
       } else if (!S.backgrounded && playbackSources.size && outputAnalyser) {
         outputAnalyser.getByteTimeDomainData(outputData);
         for (const sample of outputData) level += ((sample - 128) / 128) ** 2;
@@ -557,10 +561,8 @@
     })]).finally(() => clearTimeout(timer));
   }
   function isCloseCommand(text) {
-    const command = String(text).toLowerCase().replace(/[.!?,;]+/g, ' ').replace(/\s+/g, ' ').trim()
-      .replace(/^(?:(?:hey )?sage|bro)\s+/, '').replace(/^please\s+/, '')
-      .replace(/^(?:can|could|would) you\s+/, '').replace(/^please\s+/, '').replace(/\s+(?:please|bro|sage)$/, '').trim();
-    return /^(?:(?:close|exit|stop|leave|end) (?:the )?voice(?: (?:mode|chat))?|(?:end|close) (?:the |this )?call|hang up|voice(?: (?:mode|chat))? (?:close|stop) (?:pannu|pannunga)|வாய்ஸ் (?:மோட்|மோடை|மோடு|மோடைப்) (?:மூடு|மூடுங்க|க்ளோஸ் பண்ணு|க்ளோஸ் பண்ணுங்க)|காலை (?:கட் பண்ணு|முடி))$/u.test(command);
+    const intent = root.SageTools?.uiIntent(text);
+    return intent?.name === 'control_voice' && intent.action === 'close';
   }
   function cleanRepeatedPhrases(raw) {
     let text = String(raw || '').trim();
@@ -613,12 +615,10 @@
       take.live.bind({
         onText:(text, final) => {
           if (!current(owner) || capture !== take || take.cancelled || take.stopping) return;
-          const changed = take.previewText !== text;
           take.heard = true; take.previewText = text;
           paintCaption(text, !final);
           paintCaptureReadiness(take);
-          // Late committed words are not renewed microphone activity.
-          if (!final && changed) take.quietAt = 0;
+          // Caption arrival is networking, not renewed microphone activity.
         },
         onBoundary:() => {
           if (current(owner) && capture === take && !take.stopping && take.previewText) finishGeminiListen(true);
@@ -667,12 +667,22 @@
         take.live?.push(frame.pcm);
         take.pcmLevel = frame.rms;
         take.pcmAt = Date.now();
+        let speechStarted = false;
+        // One sustained 80–100ms voiced packet is enough for a short hello.
+        // Waiting for two polling ticks used to miss the entire first word.
+        if (frame.rms > Math.max(0.005, noiseFloor * 1.6) && frame.pcm.byteLength >= 2560) {
+          speechStarted = !take.heard;
+          take.heard = true; take.quietAt = 0;
+        }
         clearTimeout(take.readyTimer);
         paintCaptureReadiness(take);
+        if (speechStarted && !take.previewText) setHint('I can hear you. No need to repeat — your words are on the way.');
       }).then(handle => {
         if (!current(owner) || capture !== take || take.cancelled || take.stopping) { handle?.stop(); return; }
         take.pcm = handle;
-        take.liveGap ||= Date.now() - pcmStarted > 120;
+        // Only use the full recording if speech could have preceded PCM.
+        // A cold module load during silence need not disable live captions.
+        take.liveGap ||= Date.now() - pcmStarted > 120 && (take.prefixSpeech || !meterAnalyser);
         if (take.liveGap) { take.live?.close(); take.live = null; }
         if (!handle) {
           take.pcmUnavailable = true;
@@ -695,12 +705,14 @@
         // A crashed/stalled worklet must not freeze its last loud frame and
         // hold recording for the entire 45-second limit.
         const level = take.pcmAt && now - take.pcmAt < 250 ? take.pcmLevel : sampleMeter();
+        if (!take.pcmAt && level > 0.003) take.prefixSpeech = true;
         take.peakLevel = Math.max((take.peakLevel || 0) * 0.995, level);
         // A voice falling back to a fan's steady floor is a pause even when
         // the absolute level remains above the old 0.0045 threshold.
         const threshold = Math.max(take.heard ? 0.003 : 0.005, noiseFloor * 1.6,
           take.heard ? take.peakLevel * 0.22 : 0);
         const loud = level > threshold;
+        els().orb?.setAttribute('data-speech-active', String(loud));
         if (loud) {
           take.quietAt = 0;
           if (!take.loudAt) take.loudAt = now;
@@ -1079,12 +1091,13 @@
     const label = custom || {
       idle: 'Tap the mic to talk',
       starting: 'Getting ready…',
-      transcribing: 'Hearing you…',
+      transcribing: 'Processing…',
       listening: 'I’m listening',
       thinking: 'Thinking…',
       speaking: 'Speaking',
     }[mode] || 'Voice';
     if (e.state) e.state.textContent = label;
+    if (!S.recording) e.orb?.setAttribute('data-speech-active', 'false');
     const instruction = $('sageVoiceInstruction');
     if (instruction) instruction.textContent = { listening: 'Speak naturally. Pause when you’re done.', thinking: 'You’ll hear the reply as soon as it’s ready.', transcribing: 'Catching every word.', speaking: 'Tap the orb to interrupt.', idle: 'Take your time. I’m here.' }[mode] || '';
     if (e.orb) e.orb.setAttribute('aria-label', mode === 'speaking' ? 'Interrupt reply' : S.recording ? 'Finish speaking and send' : S.lastSaid ? 'Restore audio' : 'Conversation controls');
@@ -1269,17 +1282,19 @@
 
   async function sendVoiceText(raw) {
     const said = cleanRepeatedPhrases(raw);
-    if (!said || S.busy || !S.open) return;
+    if (!said || !S.open) return;
     if (isCloseCommand(said)) {
       pushTurn({ role: 'user', text: said, at: Date.now(), via: 'voice' });
       close();
       return;
     }
+    if (S.busy) return;
     const owner = S.session;
     S.busy = true;
     S.finalText = '';
     S.speechSeen = false;
     stopListening();
+    warmRecognition(); // overlap next-turn setup with the current answer
     setMode('thinking');
     paintCaption('', false);
     addLine('you', said);
@@ -1344,12 +1359,111 @@
   // ════════════════════════════════════════════════════════════════════
   // Open / close — straight to listening, no greeting
   // ════════════════════════════════════════════════════════════════════
+  let dockPosition = null, drag = null, windowMotion = null, suppressOrbClickUntil = 0;
+  function cancelWindowMotion() { windowMotion?.cancel(); windowMotion = null; }
+  function cancelDrag() {
+    if (!drag) return;
+    try { drag.target.releasePointerCapture(drag.id); } catch { /* already released */ }
+    drag = null;
+  }
+  function placeDock(x, y) {
+    const overlay = els().overlay;
+    if (!overlay || !S.docked) return;
+    const viewport = root.visualViewport;
+    const left = viewport?.offsetLeft || 0, top = viewport?.offsetTop || 0;
+    const width = viewport?.width || root.innerWidth, height = viewport?.height || root.innerHeight;
+    const box = overlay.getBoundingClientRect(), margin = 12;
+    dockPosition = {
+      x:Math.max(left+margin, Math.min(x ?? left+width-box.width-margin, left+width-box.width-margin)),
+      y:Math.max(top+margin, Math.min(y ?? top+height-box.height-(width <= 540 ? 96 : 24), top+height-box.height-margin)),
+    };
+    overlay.style.left = `${dockPosition.x}px`; overlay.style.top = `${dockPosition.y}px`;
+  }
+  function animateWindow(before) {
+    const orb = els().orb;
+    if (!before?.width || !orb?.animate || root.dkReduceMotion?.()) return;
+    const after = orb.getBoundingClientRect();
+    windowMotion = orb.animate([
+      {transform:`translate(${before.x-after.x}px,${before.y-after.y}px) scale(${before.width/after.width})`},
+      {transform:'translate(0,0) scale(1)'},
+    ], {duration:380,easing:'cubic-bezier(.22,1,.36,1)'});
+  }
+  function minimize() {
+    if (!S.open || S.docked) return false;
+    const e = els(), before = e.orb?.getBoundingClientRect();
+    cancelWindowMotion();
+    S.docked = true;
+    e.overlay.classList.remove('sl-modal--open');
+    e.overlay.classList.add('is-docked');
+    e.overlay.setAttribute('role', 'region'); e.overlay.setAttribute('aria-modal', 'false');
+    e.window?.setAttribute('aria-label', 'Expand conversation');
+    e.window?.setAttribute('title', 'Expand conversation');
+    placeDock(dockPosition?.x, dockPosition?.y);
+    animateWindow(before);
+    return true;
+  }
+  function expand() {
+    if (!S.open || !S.docked) return false;
+    const e = els(), before = e.orb?.getBoundingClientRect();
+    cancelWindowMotion(); cancelDrag();
+    S.docked = false;
+    e.overlay.classList.remove('is-docked'); e.overlay.classList.add('sl-modal--open');
+    e.overlay.style.removeProperty('left'); e.overlay.style.removeProperty('top');
+    e.overlay.setAttribute('role', 'dialog'); e.overlay.setAttribute('aria-modal', 'true');
+    e.window?.setAttribute('aria-label', 'Minimize conversation');
+    e.window?.setAttribute('title', 'Minimize conversation');
+    animateWindow(before); e.window?.focus({preventScroll:true});
+    return true;
+  }
+  function wireDock(e) {
+    e.window?.addEventListener('click', () => S.docked ? expand() : minimize());
+    const begin = ev => {
+      if (!S.open || !S.docked || ev.button !== 0 || drag) return;
+      drag = {id:ev.pointerId,target:ev.currentTarget,startX:ev.clientX,startY:ev.clientY,
+        x:dockPosition.x,y:dockPosition.y,moved:false};
+      ev.currentTarget.setPointerCapture(ev.pointerId);
+    };
+    const move = ev => {
+      if (!drag || drag.id !== ev.pointerId) return;
+      const dx = ev.clientX-drag.startX, dy = ev.clientY-drag.startY;
+      if (!drag.moved && Math.hypot(dx,dy) < 8) return;
+      drag.moved = true; cancelWindowMotion();
+      ev.preventDefault(); placeDock(drag.x+dx,drag.y+dy);
+    };
+    const end = ev => {
+      if (!drag || drag.id !== ev.pointerId) return;
+      if (drag.moved) suppressOrbClickUntil = Date.now()+400;
+      cancelDrag();
+    };
+    [e.orb,e.drag].forEach(el => {
+      if (!el) return;
+      el.addEventListener('pointerdown',begin); el.addEventListener('pointermove',move);
+      el.addEventListener('pointerup',end); el.addEventListener('pointercancel',end);
+      el.addEventListener('lostpointercapture',end);
+    });
+    e.drag?.addEventListener('keydown', ev => {
+      if (!S.docked || !['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(ev.key)) return;
+      ev.preventDefault(); const step = ev.shiftKey ? 40 : 12;
+      placeDock(dockPosition.x+({ArrowLeft:-step,ArrowRight:step}[ev.key] || 0),
+        dockPosition.y+({ArrowUp:-step,ArrowDown:step}[ev.key] || 0));
+    });
+    const resize = () => { if (S.docked) { cancelDrag(); placeDock(dockPosition?.x,dockPosition?.y); } };
+    root.addEventListener?.('resize',resize);
+    root.visualViewport?.addEventListener('resize',resize);
+    root.visualViewport?.addEventListener('scroll',resize);
+    if (root.ResizeObserver) new root.ResizeObserver(() => {
+      if (S.docked) placeDock(dockPosition?.x,dockPosition?.y);
+    }).observe(e.overlay); // captions/errors must not grow End below the viewport
+  }
   function open() {
     const e = els();
     if (!e.overlay) return false;
-    if (S.open) return true;
+    if (S.open) { expand(); return true; }
     S.lastFocus = document.activeElement || null;
     S.open = true;
+    S.docked = false;
+    e.window?.setAttribute('aria-label', 'Minimize conversation');
+    e.window?.setAttribute('title', 'Minimize conversation');
     S.backgrounded = false;
     S.voiceName = settings.gemVoice;
     S.voiceRate = settings.rate;
@@ -1370,7 +1484,7 @@
     S.finalText = '';
     S.speechSeen = false;
     e.overlay.hidden = false;
-    requestAnimationFrame(() => { if (S.open) { e.overlay.classList.add('sl-modal--open'); e.end?.focus(); } });
+    requestAnimationFrame(() => { if (S.open && !S.docked) { e.overlay.classList.add('sl-modal--open'); e.end?.focus(); } });
     e.overlay.setAttribute('aria-hidden', 'false');
     paintMic();
     paintCaption('', false);
@@ -1391,7 +1505,11 @@
 
   function close() {
     const e = els();
+    const wasDocked = S.docked;
     S.open = false;
+    S.docked = false;
+    cancelWindowMotion();
+    cancelDrag();
     failedRecording = null;
     releaseWarmRecognition();
     $('sageVoiceSTTError').hidden = true;
@@ -1407,13 +1525,17 @@
     S.speechSeen = false;
     if (e.overlay) {
       e.overlay.classList.remove('sl-modal--open');
+      e.overlay.classList.remove('is-docked');
+      e.overlay.style.removeProperty('left'); e.overlay.style.removeProperty('top');
+      e.overlay.setAttribute('role', 'dialog'); e.overlay.setAttribute('aria-modal', 'true');
+      e.orb?.setAttribute('data-speech-active', 'false');
       e.overlay.setAttribute('aria-hidden', 'true');
       const hide = () => { try { if (!S.open) e.overlay.hidden = true; } catch { /* ignore */ } };
       if (root.dkReduceMotion && root.dkReduceMotion()) hide();
       else setTimeout(hide, 180);
     }
     setMode('idle');
-    try { if (S.lastFocus && S.lastFocus.focus) S.lastFocus.focus({ preventScroll: true }); }
+    try { if (!wasDocked && S.lastFocus && S.lastFocus.focus) S.lastFocus.focus({ preventScroll: true }); }
     catch { /* ignore */ }
     S.lastFocus = null;
   }
@@ -1437,8 +1559,9 @@
     }
     if (e.overlay && !e.overlay._wired) {
       e.overlay._wired = true;
+      wireDock(e);
       document.addEventListener('keydown', ev => {
-        if (!S.open || document.querySelector('.sl-slide-overlay:not(.is-leaving)')) return;
+        if (!S.open || S.docked || document.querySelector('.sl-slide-overlay:not(.is-leaving)')) return;
         if (ev.key === 'Escape') { ev.preventDefault(); ev.stopImmediatePropagation(); close(); }
         if (ev.key === 'Tab') {
           const buttons = [...e.overlay.querySelectorAll('button, textarea')].filter(el => el.getClientRects().length && !el.disabled);
@@ -1456,6 +1579,7 @@
       // the turn tail resuming the mic afterwards.
       e.orb.addEventListener('click', () => {
         if (!S.open) return;
+        if (Date.now() < suppressOrbClickUntil) return;
         unlockAudio();
         if (S.recording) { finishGeminiListen(true); return; }
         if (S.speaking || S.mode === 'speaking') {
@@ -1527,7 +1651,7 @@
   }
 
   root.SageVoice = {
-    open, close, toggle, isOpen,
+    open, close, toggle, isOpen, minimize, expand, isMinimized: () => S.open && S.docked,
     sttSupported,
     speak, interrupt, startListening, stopListening, sendVoiceText,
     settings,
