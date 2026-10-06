@@ -285,7 +285,13 @@
         if (failure.name === 'AbortError') failure.code = 'timeout';
         failure.audioStarted = started;
         throw failure;
-      } finally {clearTimeout(timer);ttsRequests.delete(controller);try {await reader?.cancel();}catch{/* closed */}}
+      } finally {
+        clearTimeout(timer); ttsRequests.delete(controller);
+        // Playback, not transport cleanup, owns the speech-to-mic handoff.
+        // Some streams never settle cancel() after their final STOP event.
+        try { Promise.resolve(reader?.cancel()).catch(() => {}); } catch { /* closed */ }
+        controller.abort();
+      }
     }
     throw new Error('no-audio');
   }
@@ -403,7 +409,8 @@
   let captureEpoch = 0;
   let openingMic = false;
   let sttController = null;
-  let failedRecording = null; // memory only; cleared on success, new capture or close
+  let recognitionNotice = '';
+  const sttCooldowns = new Map(); // key-specific; no background retry of old audio
   let sttRoute = null; // remember a working model/configuration for this session
   let meterCtx = null;
   let meterAnalyser = null;
@@ -595,7 +602,6 @@
     const take = { recorder:null, chunks:[], frames:[], owner, epoch, heard:false, loudAt:0,
       quietAt:0, previewText:'', started:Date.now(), timer:null, stopping:false, cancelled:false,
       micStarted:false, liveReady:false, pcmUnavailable:!root.SageTranscription };
-    failedRecording = null;
     capture = take;
     paintCaption('', false);
     warmRecognition();
@@ -767,7 +773,7 @@
     setMode(label === 'I’m listening' ? 'listening' : 'starting', label);
     const el = $('sageVoiceInstruction');
     if (el) el.textContent = instruction;
-    setHint(label === 'I’m listening' ? 'Pause to send, or tap the orb when you’re done.' : '');
+    setHint(label === 'I’m listening' ? recognitionNotice || 'Pause to send, or tap the orb when you’re done.' : '');
   }
   function cancelGeminiListen() {
     const take = capture;
@@ -831,7 +837,7 @@
     if (liveFailed) { liveDisabled = true; releaseWarmRecognition(); }
     const recording = {blob:new Blob(take.chunks, {type:take.recorder.mimeType || 'audio/webm'}),
       pcm:!take.liveGap && !take.pcmBroken && take.frames.length ? take.frames : null,
-      b64:null, retryAt:0, previewText:take.previewText};
+      b64:null, previewText:take.previewText};
     take.chunks = [];
     take.frames = [];
     await transcribeRecording(recording, take.owner, take.epoch);
@@ -851,7 +857,7 @@
       if (!current(owner) || epoch !== captureEpoch) return;
       const result = await transcribeWithGemini(recording.b64, owner);
       if (!current(owner) || epoch !== captureEpoch) return;
-      failedRecording = null;
+      recognitionNotice = '';
       S.transcribing = false;
       // A command inferred from audio must not dismiss a call when the live
       // words disagree (for example a greeting hallucinated as an exit).
@@ -859,45 +865,33 @@
       acceptTranscript(closeDisagrees ? { ...result, unclear:true } : result);
     } catch (err) {
       if (!current(owner) || epoch !== captureEpoch) return;
-      // A failed upload is not a new listening turn. Keep this utterance and
-      // stop the capture/reconnect loop; only the user can discard or retry it.
+      // Discard uncertain audio, ask once aloud, then start a fresh turn. Never
+      // execute a preview or keep submitting the failed recording in a loop.
       stopListening();
-      stopMeter();
-      failedRecording = recording;
-      recording.retryAt = err.retryAt || 0;
-      S.recognitionFailed = true;
-      $('sageVoiceSTTError').hidden = false;
-      setMode('idle', 'Couldn’t transcribe');
-      setHint(recognitionProblem(err));
+      S.recognitionFailed = false;
+      recognitionNotice = recognitionProblem(err);
+      S.busy = true;
+      paintCaption('', false);
+      const tamil = /[\u0B80-\u0BFF]/.test(recording.previewText || S.finalText || '');
+      const blocked = /^(?:quota|no-key|stt-auth|stt-access|stt-model)$/.test(err.message);
+      const clarification = blocked
+        ? (tamil ? 'இப்போ பேச்சைக் கேட்குற சேவையில ஒரு பிரச்சனை. கொஞ்சம் நேரம் கழிச்சு சொல்லு.' : 'The speech service is unavailable right now. Try again shortly.')
+        : (tamil ? 'சரியா கேக்கல. இன்னொரு தடவை சொல்லு.' : 'I missed that. Could you say it again?');
+      addLine('her', clarification);
       paintMic();
+      await deliverReply(clarification, owner);
+      if (current(owner)) setHint(recognitionProblem(err));
     }
   }
   function recognitionProblem(err) {
     const code = err.message;
-    if (code === 'quota') return 'Recognition quota is busy. Your recording is kept. Wait a minute and retry, or retry the saved recording.';
-    if (code === 'no-key' || code === 'stt-auth') return 'Recognition key was rejected. Check your Gemini key in settings, then retry this recording.';
-    if (code === 'stt-access') return 'Recognition access was denied. Check API/key restrictions, or retry the saved recording.';
-    if (code === 'stt-model') return 'No supported recognition model was available. Check model access, then retry the saved recording.';
-    if (code === 'stt-400') return 'The recognition service rejected the audio request (400). Your recording is kept for retry.';
-    if (code === 'invalid-transcript') return 'Recognition returned an unreadable transcript. Retry the saved recording.';
-    if (code === 'stt-blocked') return 'The recognition service did not return a transcript. Retry the saved recording.';
-    if (code === 'timeout' || err.name === 'AbortError') return 'Recognition timed out. Your recording is kept—tap Retry recording.';
-    if (code === 'network' || /^stt-5/.test(code)) return 'Recognition could not reach the service. Check your connection and retry the saved recording.';
-    return 'This browser could not read the recording. Retry the saved recording.';
-  }
-  async function retryRecording() {
-    if (!S.open || !failedRecording || S.transcribing || S.backgrounded) return;
-    const recording = failedRecording;
-    if (recording.retryAt > Date.now()) {
-      setHint(`Recognition quota is busy. Retry the saved recording in ${Math.ceil((recording.retryAt-Date.now())/1000)} seconds.`);
-      return;
-    }
-    stopListening();
-    S.recognitionFailed = false;
-    S.transcribing = true;
-    $('sageVoiceSTTError').hidden = true;
-    setMode('transcribing'); setHint('Retrying your saved recording…');
-    await transcribeRecording(recording, S.session, captureEpoch);
+    if (code === 'quota') return `Recognition quota is busy. Try again in ${Math.max(1,Math.ceil(((err.retryAt || Date.now()+60000)-Date.now())/1000))} seconds. Your microphone stays ready.`;
+    if (code === 'no-key' || code === 'stt-auth') return 'Recognition key was rejected. Check your Gemini key in settings.';
+    if (code === 'stt-access') return 'Recognition access was denied. Check API/key restrictions in settings.';
+    if (code === 'stt-model') return 'No supported recognition model was available. Check model access in settings.';
+    if (code === 'timeout' || err.name === 'AbortError') return 'Recognition timed out. I’m listening again — please repeat.';
+    if (code === 'network' || /^stt-5/.test(code)) return 'Recognition could not reach the service. Check your connection; I’m listening again.';
+    return 'I couldn’t read that clearly. I’m listening again — please repeat.';
   }
   async function recordingToWav(blob) {
     const AC = root.AudioContext || root.webkitAudioContext;
@@ -951,8 +945,10 @@
     });
   }
   async function transcribeWithGemini(b64, owner) {
-    const keys = gemKeys().slice(0, 2);
-    if (!keys.length) throw new Error('no-key');
+    const configured = gemKeys().slice(0, 2);
+    if (!configured.length) throw new Error('no-key');
+    const keys = configured.filter(key => !sttCooldowns.has(key) || sttCooldowns.get(key).retryAt <= Date.now());
+    if (!keys.length) throw Object.assign(new Error(sttCooldowns.get(configured[0]).code), {retryAt:Math.min(...configured.map(key=>sttCooldowns.get(key).retryAt))});
     const preferred = settings.speed === 'fast' ? GEM_STT_FAST_MODEL : GEM_STT_MODEL;
     const models = [...new Set([preferred, 'gemini-3.5-flash', 'gemini-2.5-flash'])];
     let model = sttRoute?.preferred === preferred ? sttRoute.model : preferred;
@@ -989,6 +985,11 @@
             const auth = res.status === 401 || /API.?key.*(?:invalid|expired|not valid)|API_KEY_INVALID/i.test(message);
             const restriction = res.status === 403 && /referer|referrer|API_KEY|blocked|disabled/i.test(message);
             const quota = res.status === 429;
+            if (auth || quota || restriction) {
+              const retry = Number(res.headers?.get('retry-after'));
+              const retryAt = Date.now() + Math.max(quota ? 60000 : 300000, Number.isFinite(retry) ? retry*1000 : 0);
+              sttCooldowns.set(keys[keyIndex], {code:auth ? 'stt-auth' : restriction ? 'stt-access' : 'quota',retryAt});
+            }
             if ((auth || quota || restriction) && keyIndex+1<keys.length && attempt<2) {keyIndex++; continue;}
             if (auth) throw new Error('stt-auth');
             if (restriction) throw new Error('stt-access');
@@ -1016,6 +1017,7 @@
           try {parsed=JSON.parse(raw);} catch {throw new Error('invalid-transcript');}
           if (typeof parsed.transcript!=='string' || typeof parsed.unclear!=='boolean') throw new Error('invalid-transcript');
           sttRoute={preferred,model,simple};
+          sttCooldowns.delete(keys[keyIndex]);
           return parsed;
         }
         throw new Error('stt-model');
@@ -1459,6 +1461,7 @@
     const e = els();
     if (!e.overlay) return false;
     if (S.open) { expand(); return true; }
+    fileTarget = null; $('sageVoiceChooseFile').hidden = true;
     S.lastFocus = document.activeElement || null;
     S.open = true;
     S.docked = false;
@@ -1470,8 +1473,7 @@
     const storedModel = load(LS_TTS_MODEL, '');
     S.ttsPinned = TTS_MODELS.includes(storedModel);
     S.ttsModel = TTS_MODELS.includes(storedModel) ? storedModel : TTS_MODELS[0];
-    sttRoute = null; failedRecording = null;
-    $('sageVoiceSTTError').hidden = true;
+    sttRoute = null; recognitionNotice = '';
     S.session++;
     S.muted = false;
     S.resumeAfterReply = false;
@@ -1506,13 +1508,12 @@
   function close() {
     const e = els();
     const wasDocked = S.docked;
+    fileTarget = null; $('sageVoiceChooseFile').hidden = true;
     S.open = false;
     S.docked = false;
     cancelWindowMotion();
     cancelDrag();
-    failedRecording = null;
     releaseWarmRecognition();
-    $('sageVoiceSTTError').hidden = true;
     S.session++;
     S.busy = false;
     S.speaking = false;
@@ -1524,6 +1525,9 @@
     S.finalText = '';
     S.speechSeen = false;
     if (e.overlay) {
+      // Hide before removing compact geometry: otherwise the closing orb
+      // briefly regains the full-screen modal layout during the fade-out.
+      if (wasDocked) e.overlay.hidden = true;
       e.overlay.classList.remove('sl-modal--open');
       e.overlay.classList.remove('is-docked');
       e.overlay.style.removeProperty('left'); e.overlay.style.removeProperty('top');
@@ -1542,6 +1546,13 @@
 
   function toggle() { return S.open ? (close(), false) : open(); }
   function isOpen() { return S.open; }
+  let fileTarget = null;
+  function requestFile(input) {
+    if (!S.open || !input || input.type !== 'file') return false;
+    fileTarget = input;
+    $('sageVoiceChooseFile').hidden = false;
+    return true;
+  }
 
   // ════════════════════════════════════════════════════════════════════
   // Wiring — the voice launcher inside chat
@@ -1614,7 +1625,16 @@
         paintMic();
       });
     }
-    $('sageVoiceSTTRetry')?.addEventListener('click', retryRecording);
+    $('sageVoiceChooseFile')?.addEventListener('click', () => {
+      const input = fileTarget;
+      if (!S.open || !input?.isConnected) return;
+      // File pickers require this real user gesture. Existing app handlers own
+      // validation, metadata and saving; choosing never implies upload success.
+      try {
+        input.click();
+        fileTarget = null; $('sageVoiceChooseFile').hidden = true;
+      } catch { setHint('Use the upload button on the page to choose your file.'); }
+    });
     const preferences = [
       ['sageVoicePause', 'sage_voice_pause', load('sage_voice_pause', 'quick')],
       ['sageVoiceSpeed', 'sage_voice_speed', settings.speed],
@@ -1651,7 +1671,7 @@
   }
 
   root.SageVoice = {
-    open, close, toggle, isOpen, minimize, expand, isMinimized: () => S.open && S.docked,
+    open, close, toggle, isOpen, minimize, expand, requestFile, isMinimized: () => S.open && S.docked,
     sttSupported,
     speak, interrupt, startListening, stopListening, sendVoiceText,
     settings,

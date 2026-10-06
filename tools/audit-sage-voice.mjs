@@ -268,14 +268,13 @@ test('closing while permission is pending stops the late stream', async () => {
   } finally { h.cleanup(); }
 });
 
-test('quota errors back off without immediately retrying the recording', async () => {
-  const h = harness({transcribe: async () => ({ok:false,status:429})});
-  try {
-    await h.open(); await h.finish(); await delay(20);
+test('quota errors keep a fresh mic without resubmitting the failed audio', async () => {
+  const h=harness({transcribe:async()=>({ok:false,status:429})});
+  try {await h.open();await h.finish();await until(()=>h.recordings.length===2);
     assert.match(h.nodes.get('sageVoiceHint').textContent,/quota/);
-    assert.equal(h.recordings.length,1);
-    assert.equal(h.requests.length,1);
-  } finally { h.cleanup(); }
+    assert.equal(h.requests.filter(r=>!r.body.generationConfig.responseModalities).length,1);
+    assert.equal(h.asks.length,0);assert.equal(h.streams.length,1);
+  } finally {h.cleanup();}
 });
 
 test('closing during an AI answer prevents old reply/history writes in a new session', async () => {
@@ -551,43 +550,46 @@ test('unsupported thinking option retries once without it, preserving schema saf
     assert.ok(h.requests[1].body.generationConfig.responseSchema.required.includes('unclear'));
   }finally{h.cleanup();}
 });
-test('failed recognition never cycles capture; retry reuses saved recording without decoding again',async()=>{
-  let failing=true;const h=harness({fastRestarts:true,transcribe:async()=>failing?sttError(503):transcriptResponse()});
-  try {await h.open();await h.finish();await until(()=>!h.nodes.get('sageVoiceSTTError').hidden);
-    assert.equal(h.requests.length,2);assert.equal(h.recordings.length,1);
-    h.tick(10000);await delay(30);assert.equal(h.recordings.length,1);assert.equal(h.asks.length,0);
-    assert.equal(h.nodes.get('sageVoiceState').textContent,'Couldn’t transcribe');
-    const audio=h.requests[0].body.contents[0].parts[0].inlineData.data;
-    failing=false;h.nodes.get('sageVoiceSTTRetry').emit('click');await until(()=>h.recordings.length===2);
-    assert.equal(h.decoded.length,1);assert.equal(h.requests[2].body.contents[0].parts[0].inlineData.data,audio);
-    assert.equal(h.asks.length,1);assert.equal(h.nodes.get('sageVoiceSTTError').hidden,true);
+test('recognition outage asks aloud and listens afresh without an old-audio retry or brain turn',async()=>{
+  let failing=true;const h=harness({transcribe:async()=>failing?sttError(503):transcriptResponse()});
+  try {await h.open();await h.finish();await until(()=>h.recordings.length===2);
+    assert.equal(h.requests.filter(r=>!r.body.generationConfig.responseModalities).length,2);
+    assert.equal(h.asks.length,0);assert.equal(h.playback.length,1);
+    assert.match(h.nodes.get('sageVoiceLines').children.at(-1).innerHTML,/say it again/);
+    assert.equal(h.nodes.has('sageVoiceSTTRetry'),false);assert.equal(h.streams.length,1);
+    await delay(30);assert.equal(h.requests.length,3,'no background retry');
+    failing=false;h.nodes.get('sageVoiceOrb').emit('click');await until(()=>h.recordings.length===3);
+    assert.equal(h.decoded.length,2,'fresh audio is decoded, never a saved recording');assert.equal(h.asks.length,1);
   }finally{h.cleanup();}
 });
-test('invalid key shows actionable failure and does not retry unchanged requests',async()=>{
+test('invalid key has an honest hint, stays listening and skips unchanged rejected keys',async()=>{
   const h=harness({transcribe:async()=>sttError(400,'API key not valid')});
-  try {await h.open();await h.finish();await until(()=>!h.nodes.get('sageVoiceSTTError').hidden);
-    assert.equal(h.requests.length,1);assert.match(h.nodes.get('sageVoiceHint').textContent,/key was rejected/);
+  try {await h.open();await h.finish();await until(()=>h.recordings.length===2);
+    assert.match(h.nodes.get('sageVoiceHint').textContent,/key was rejected/);
+    h.nodes.get('sageVoiceOrb').emit('click');await until(()=>h.recordings.length===3);
+    assert.equal(h.requests.filter(r=>!r.body.generationConfig.responseModalities).length,1);
     assert.equal(h.nodes.has('sageVoiceSTTBrowser'),false);assert.equal(h.recognition.length,0);
-    assert.equal(h.requests.length,1);
   }finally{h.cleanup();}
 });
-test('quota recovery honors cooldown and does not record or upload repeatedly',async()=>{
+test('quota cooldown allows fresh listening but bounds requests until the key is ready',async()=>{
   const h=harness({transcribe:async()=>sttError(429)});
-  try {await h.open();await h.finish();await until(()=>!h.nodes.get('sageVoiceSTTError').hidden);
-    h.nodes.get('sageVoiceSTTRetry').emit('click');await delay(10);assert.equal(h.requests.length,1);
+  try {await h.open();await h.finish();await until(()=>h.recordings.length===2);
+    h.nodes.get('sageVoiceOrb').emit('click');await until(()=>h.recordings.length===3);
+    assert.equal(h.requests.filter(r=>!r.body.generationConfig.responseModalities).length,1);
     assert.match(h.nodes.get('sageVoiceHint').textContent,/60 seconds/);
-    h.tick(60001);h.nodes.get('sageVoiceSTTRetry').emit('click');await until(()=>h.requests.length===2);
-    assert.equal(h.recordings.length,1);
+    h.tick(60001);await until(()=>h.recordings.length===4);
+    h.nodes.get('sageVoiceOrb').emit('click');await until(()=>h.recordings.length===5);
+    assert.equal(h.requests.filter(r=>!r.body.generationConfig.responseModalities).length,2);
   }finally{h.cleanup();}
 });
-test('closing failed recognition clears saved audio and retry cannot upload into new session',async()=>{
-  const h=harness({transcribe:async()=>sttError(403,'API_KEY_HTTP_REFERRER_BLOCKED')});
-  try {await h.open();await h.finish();await until(()=>!h.nodes.get('sageVoiceSTTError').hidden);
-    h.root.SageVoice.close();await h.open();h.nodes.get('sageVoiceSTTRetry').emit('click');await delay(15);
-    assert.equal(h.requests.length,1);assert.equal(h.nodes.get('sageVoiceSTTError').hidden,true);
+test('closing recovery cancels its speech and cannot restart a closed call',async()=>{
+  const h=harness({transcribe:async()=>sttError(503),holdPlayback:true});
+  try {await h.open();await h.finish();await until(()=>h.playback.length===1);
+    h.root.SageVoice.close();await delay(20);
+    assert.equal(h.recordings.length,1);assert.equal(h.streams[0].getTracks()[0].readyState,'ended');
+    assert.equal(h.root.SageVoice.isOpen(),false);
   }finally{h.cleanup();}
 });
-
 
 test('provider reply errors stay out of speech/history and hands-free capture resumes',async()=>{
   const h=harness({askSage:async()=>({ok:false,reason:'backoff',retryInMs:42000})});
@@ -670,11 +672,11 @@ test('Tamil and English use a short constant style and cannot switch models afte
 });
 
 
-test('final audio STOP releases the mic after playback without waiting for HTTP EOF',async()=>{
+test('final audio STOP releases the mic after playback even when stream cancellation never settles',async()=>{
   const h=harness();let cancelled=false;
   try{
     await h.open();h.root.fetch=async()=>({ok:true,headers:new Headers({'content-type':'text/event-stream'}),body:new ReadableStream({
-      start(c){c.enqueue(pcmEvent(speechPCM,true));},cancel(){cancelled=true;}
+      start(c){c.enqueue(pcmEvent(speechPCM,true));},cancel(){cancelled=true;return new Promise(()=>{});}
     })});
     await h.root.SageVoice.sendVoiceText('reply');
     await until(()=>h.recordings.length===2);
@@ -880,15 +882,15 @@ test('committed input after stream end submits without waiting for generated ack
 test('stalled audio decoding cannot leave the room at Hearing you forever',async()=>{
   const h=harness({hangDecode:true,fastTimeouts:true});
   try{await h.open();h.nodes.get('sageVoiceOrb').emit('click');
-    await until(()=>h.nodes.get('sageVoiceState').textContent==='Couldn’t transcribe');
-    assert.match(h.nodes.get('sageVoiceHint').textContent,/timed out|recording/i);
+    await until(()=>h.recordings.length===2);
+    assert.match(h.nodes.get('sageVoiceHint').textContent,/timed out|repeat/i);
     assert.equal(h.asks.length,0);assert.equal(h.root.SageVoice.isOpen(),true);
   }finally{h.cleanup();}
 });
 test('a stalled response body is bounded even when fetch headers arrived successfully',async()=>{
   const h=harness({fastTimeouts:true,transcribe:async()=>({ok:true,json:()=>new Promise(()=>{})})});
   try{await h.open();h.nodes.get('sageVoiceOrb').emit('click');
-    await until(()=>h.nodes.get('sageVoiceState').textContent==='Couldn’t transcribe');
+    await until(()=>h.recordings.length===2);
     assert.match(h.nodes.get('sageVoiceHint').textContent,/timed out/);
     assert.equal(h.asks.length,0);assert.equal(h.root.SageVoice.isOpen(),true);
   }finally{h.cleanup();}
@@ -1003,5 +1005,23 @@ test('Tamil close cancels an in-flight answer without waiting for it or playing 
     assert.equal(h.root.SageVoice.isOpen(),false);assert.equal(h.streams[0].getTracks()[0].readyState,'ended');
     finish({ok:true,text:'Too late'});await pending;
     assert.equal(h.playback.length,0);assert.equal(h.history.filter(t=>t.role==='sage').length,0);
+  }finally{h.cleanup();}
+});
+
+test('automatic recovery respects a manual mute and never unmutes it after asking again',async()=>{
+  const h=harness({transcribe:async()=>sttError(503),holdPlayback:true});
+  try {await h.open();await h.finish();await until(()=>h.playback.length===1);
+    h.nodes.get('sageVoiceMic').emit('click');h.playback[0].end();await delay(25);
+    assert.equal(h.recordings.length,1);assert.equal(h.nodes.get('sageVoiceMic').getAttribute('aria-pressed'),'true');
+    h.nodes.get('sageVoiceMic').emit('click');await until(()=>h.recordings.length===2);
+  }finally{h.cleanup();}
+});
+
+test('a replacement recognition key works immediately during a rejected-key cooldown',async()=>{
+  let failing=true;const h=harness({transcribe:async()=>failing?sttError(401):transcriptResponse()});
+  try {await h.open();await h.finish();await until(()=>h.recordings.length===2);
+    failing=false;h.root.SageAI.availableKeys=()=>[{key:'new-test-key'}];
+    h.nodes.get('sageVoiceOrb').emit('click');await until(()=>h.recordings.length===3);
+    assert.equal(h.asks.length,1);assert.equal(h.requests.filter(r=>!r.body.generationConfig.responseModalities).length,2);
   }finally{h.cleanup();}
 });

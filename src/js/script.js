@@ -3750,6 +3750,10 @@ window._delHistoricUpload = async function(id, fileName, btn) {
 
   // ── Which page you were on, remembered across refreshes ──────────────
   const SECTION_KEY = 'spinlogActiveSection';
+  // Spoken Back/Next stays within pages actually visited in this session.
+  // Never traverse an unknown browser entry that could leave the website.
+  const sectionTrail = [document.querySelector('main section.active')?.id || 'home'];
+  let sectionTrailIndex = 0;
 
   /** Only accept a name that is actually a section in this document. */
   function isKnownSection(name) {
@@ -3774,6 +3778,16 @@ window._delHistoricUpload = async function(id, fileName, btn) {
    * sections rather than leaving the page. That is now true.
    */
   function rememberSection(section, mode) {
+    if (mode !== 'trail' && sectionTrail[sectionTrailIndex] !== section) {
+      if (mode === 'replace') {
+        if (sectionTrail[sectionTrailIndex-1] === section) sectionTrailIndex--;
+        else if (sectionTrail[sectionTrailIndex+1] === section) sectionTrailIndex++;
+        else sectionTrail[sectionTrailIndex] = section;
+      } else {
+        sectionTrail.splice(sectionTrailIndex+1);
+        sectionTrail.push(section); sectionTrailIndex++;
+      }
+    }
     try { localStorage.setItem(SECTION_KEY, section); } catch { /* private mode */ }
     // Best effort only. On a file:// origin some browsers refuse both calls, and
     // localStorage above is the part that actually has to work.
@@ -3781,7 +3795,7 @@ window._delHistoricUpload = async function(id, fileName, btn) {
       // Re-selecting the section you are already on must not stack up entries you
       // then have to press back through.
       const same = location.hash === `#${section}`;
-      if (mode === 'replace' || same) history.replaceState(null, '', `#${section}`);
+      if (mode === 'replace' || mode === 'trail' || same) history.replaceState(null, '', `#${section}`);
       else history.pushState(null, '', `#${section}`);
     } catch { /* ignore */ }
   }
@@ -6212,6 +6226,40 @@ async function getBillFileUrl(fileName) {
         if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
       return { ok: true, opened: section };
+    },
+
+    async navigateHistory({ direction }) {
+      if (!['back','forward'].includes(direction)) return {ok:false,error:'Unknown navigation direction.'};
+      const index = sectionTrailIndex + (direction === 'back' ? -1 : 1);
+      const section = sectionTrail[index];
+      if (!section) return {ok:false,error:direction === 'back' ? 'No previous page in this app session.' : 'No next page in this app session.'};
+      const opened = await setActiveSection(section, 'trail');
+      if (opened === false) return {ok:false,error:'Navigation was cancelled. Try again.'};
+      sectionTrailIndex = index;
+      return {ok:true,opened:section};
+    },
+
+    async prepareFileUpload({ kind }) {
+      if (!['document','bill','image','audio','video'].includes(kind)) return {ok:false,error:'Unknown upload kind.'};
+      const section = kind === 'bill' ? 'service' : 'docs';
+      const result = await this.goToSection({section});
+      if (!result.ok) return result;
+      window.SageVoice?.minimize?.();
+      let input, target;
+      if (kind === 'bill') {
+        input = document.getElementById('fileInput'); target = document.getElementById('customFileButton');
+      } else if (kind === 'document') {
+        target = document.getElementById('docAddTile'); target?.click();
+        input = document.getElementById('docAddFile');
+      } else {
+        target = document.querySelector(`.drop-zone[data-type="${kind}"]`);
+        input = target?.querySelector('input[type="file"]');
+      }
+      if (!input || !target) return {ok:false,error:'That upload control is unavailable.'};
+      target.scrollIntoView({behavior:'smooth',block:'center'});
+      target.focus({preventScroll:true});
+      window.SageVoice?.requestFile?.(input);
+      return {ok:true,opened:section,ready:kind,uploaded:false,note:'Choose the local file, then complete the existing upload form. No file has been selected or uploaded yet.'};
     },
 
     async saveParkLocation() {

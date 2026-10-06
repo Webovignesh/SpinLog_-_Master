@@ -1,4 +1,4 @@
-/* Sage voice room v1.9.35. Loaded after the app styles with its own version URL. */
+/* Sage voice room v1.9.36. Loaded after the app styles with its own version URL. */
 .sage-voice-entry { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 18px; font-family:var(--sl-read); }
 .sage-voice-entry > span { color:#989ba4; font:400 12px/1.5 var(--sl-read); }
 .sage-chat-mic { display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; width:auto; min-width:128px; height:40px; padding:0 14px; gap:8px; border:1px solid #ffd2ae40; border-radius:12px; background:#2c251f; color:#ffd6b5; font:600 12px/1 var(--sl-read); white-space:nowrap; box-shadow:none; animation:none; cursor:pointer; }
@@ -7,6 +7,10 @@
 .sage-chat-mic svg { flex:none; }
 .sage-voice-overlay { z-index:1200; padding:0; background:rgba(16,17,21,.78); background-image:radial-gradient(ellipse at 50% 25%,#39271850 0,transparent 55%); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px); }
 .sage-voice-overlay::before { display:none; }
+.sage-voice-overlay[hidden] { display:none!important; }
+.sage-voice-file { min-height:40px; align-self:center; margin:8px 0; padding:8px 14px; border:1px solid #ffd2ae40; border-radius:12px; background:#2c251f; color:#ffd6b5; font:500 12px/1.4 var(--sl-read); cursor:pointer; }
+.sage-voice-file[hidden] { display:none; }
+.sage-voice-file:focus-visible { outline:2px solid #ffbc86; outline-offset:3px; }
 .sage-voice-card { --sage-accent:#ffb776; position:relative; display:flex; flex-direction:column; width:100%; max-width:1000px; height:100dvh; max-height:100dvh; padding:28px 40px max(20px,env(safe-area-inset-bottom)); border:0; border-radius:0; background:none; box-shadow:none; overflow:visible; font-family:var(--sl-read); gap:0; }
 .sage-voice-window-controls { position:absolute; right:20px; top:max(16px,env(safe-area-inset-top)); display:flex; gap:4px; z-index:1; }
 .sage-voice-window,.sage-voice-drag { display:grid; place-items:center; width:40px; height:40px; padding:0; border:0; border-radius:50%; background:#ffffff08; color:#b9bbc5; cursor:pointer; }
@@ -96,10 +100,6 @@
 .sage-listening-settings select { width: 100%; min-height: 42px; padding: 9px 12px; border: 1px solid #ffffff24; border-radius: 10px; background: #202125; color: #f4f3f6; font-size: 0.82rem; }
 .sage-listening-settings > small { color: #aaaab4; line-height: 1.6; font-size: 0.72rem; }
 
-.sage-voice-stt-error { display:flex; flex-wrap:wrap; justify-content:center; gap:8px; flex-shrink:0; margin:8px auto 0; }
-.sage-voice-stt-error[hidden] { display:none; }
-.sage-voice-stt-error button { min-height:40px; padding:8px 12px; border:1px solid #ffffff30; border-radius:12px; background:#292724; color:#f4e8dc; font:500 12px/1.4 var(--sl-read); cursor:pointer; }
-.sage-voice-stt-error button:focus-visible { outline:2px solid #ffbc86; outline-offset:3px; }
 
 /* The corner controls own only their bounds. The page and other dialogs stay
    interactive; presentation changes never replace the audio session. */
@@ -125,4 +125,3 @@
 .is-docked .sage-voice-btn.is-end { min-width:86px; padding:0 14px; gap:7px; }
 .is-docked .sage-voice-hint { margin:6px 0 0; min-height:0; font-size:10px; line-height:1.45; }
 .is-docked .sage-voice-hint:empty { display:none; }
-.is-docked .sage-voice-stt-error { margin:6px 0 0; }

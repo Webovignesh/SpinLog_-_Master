@@ -209,3 +209,27 @@ test('local actions report failures and respect cancellation before touching the
     assert.equal(result.text,'Page failed to open.');assert.equal(h.requests.length,0);
   }finally{h.cleanup();}
 });
+
+test('minimized voice retains the real tool catalog for search, changes and attached-file uploads',async()=>{
+  const queue=[{name:'search',args:{query:'chain'}},{name:'update_service',args:{id:7,description:'Chain adjusted'}},{name:'upload_document',args:{document:'Insurance Policy'}}];
+  let next=null;
+  const h=harness(async()=>next?{ok:true,status:200,json:async()=>({candidates:[{content:{parts:[{functionCall:next}]},finishReason:'STOP'}]})}:answer('Completed the requested action.'));
+  try {
+    const calls=[];h.root.SageVoice={isOpen:()=>true,isMinimized:()=>true};
+    h.root.dkApp={
+      search:async args=>{calls.push(['search',args]);next=null;return {ok:true,services:[{id:7,description:'Chain'}]};},
+      updateService:async args=>{calls.push(['change',args]);next=null;return {ok:true,id:args.id};},
+      uploadDocument:async args=>{calls.push(['upload',args]);next=null;return {ok:true,document:args.document};},
+    };
+    vm.runInNewContext(await readFile(new URL('../src/js/sage-tools.js',import.meta.url),'utf8'),h.root);
+    for(const [i,text] of ['find the chain record','change record 7 description to Chain adjusted','upload my attached insurance'].entries()) {
+      next=queue[i];const reply=await h.AI.askSage(text,{voice:true});
+      assert.equal(reply.ok,true);assert.equal(reply.calls[0].result.ok,true);
+      const tools=h.requests[i*2].body.tools[0].functionDeclarations;
+      assert.ok(tools.some(t=>t.name===queue[i].name),'the requested real control is offered while docked');
+      assert.equal(h.requests[i*2+1].body.contents.at(-1).parts[0].functionResponse.response.ok,true,'actual handler success precedes the answer');
+    }
+    assert.deepEqual(calls.map(c=>c[0]),['search','change','upload']);
+    assert.equal(h.root.SageVoice.isMinimized(),true);
+  }finally{h.cleanup();}
+});

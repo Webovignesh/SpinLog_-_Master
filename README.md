@@ -881,7 +881,7 @@ gone rather than left as links that go nowhere. What was in them that still matt
   back to localStorage then to the `data-due` values in `index.html`; Sage's memory
   falls back to localStorage; the key ring stays on the device.
 
-## Sage voice — v1.9.35
+## Sage voice — v1.9.36
 
 Open **Talk to Sage** inside the chat card, or type **go to voice mode**, **open
 voice chat** or **let’s talk**. The translucent room centers the latest four
@@ -902,7 +902,16 @@ the microphone, selected speaker and history stay in the same session. Drag the
 orb or grip to move it, or focus the grip and use arrow keys. The expand control
 restores the room. Docked controls leave the page, keyboard focus and other
 dialogs usable; Escape belongs to those dialogs. Use **End** or a close command
-to finish a docked call. Resize/keyboard viewport changes keep the controls in view.
+to finish a docked call. Closing hides the compact window before resetting its
+layout, so it cannot flash the expanded room. Resize/keyboard viewport changes
+keep the controls in view. Say **minimize yourself**, **மினிமைஸ் பண்ணு** or
+**ஓரமா போ** to dock it, and **expand voice mode** to restore it. **Go back** and
+**next page** traverse pages visited in this app session without leaving SpinLog.
+All searches, reads, changes and attached-file upload tools remain available
+while docked. If a local file has not been selected, `prepare_file_upload` reveals
+the existing upload form and a temporary **Choose file** action. Choosing requires
+a real tap; validation, notes and saving stay with the existing app form. The tool
+reports `uploaded:false` and never claims that opening a picker saved a file.
 
 ### Listening and turn handoff
 
@@ -953,9 +962,13 @@ Flash; **Careful** starts with Gemini 3.8 Flash. Requests have a shared ten-seco
 deadline and at most three attempts. There is no browser speech fallback.
 Unclear speech gets a short spoken clarification and listening resumes without
 executing a guessed command. Persistent authentication, access, quota or network
-failures retain the audio for **Retry recording** with a specific explanation.
-Closing drops saved audio and invalidates late results. Hidden tabs release
-capture; returning resumes unless manually muted. Provider calls use the
+failures discard the failed audio, ask once aloud and resume a fresh recording.
+There is no **Retry recording** button or automatic resubmission of old audio.
+Quota and rejected-key failures retain an honest hint and a per-key cooldown,
+so subsequent speech does not hammer the unavailable recognizer. A changed key
+can be used immediately. Recovery never executes an uncertain preview, silently
+unmutes the microphone, or restarts a closed call. Closing invalidates late results.
+Hidden tabs release capture; returning resumes unless manually muted. Provider calls use the
 configured Gemini key and count toward its quota.
 
 Google’s [Live capabilities](https://ai.google.dev/gemini-api/docs/live-api/capabilities)
@@ -987,7 +1000,9 @@ it cannot guarantee identical generated timbre on every reply.
 Streaming 24 kHz PCM packets are coalesced into at least 120 ms of audio and
 scheduled contiguously on the Web Audio clock. Odd-byte transport splits retain
 the unfinished sample, interruption cancels scheduled sources, and a final STOP
-ends network waiting. A 20-second inactivity watchdog bounds stalls. Silent or
+ends network waiting. Reader cancellation and transport cleanup never delay
+the microphone after the last scheduled sample finishes. A 20-second inactivity
+watchdog bounds stalls. Silent or
 incomplete replies retry once before playback; already-started speech is not
 repeated. Transient failures resume listening with a status rather than offering
 a replay button. These checks remove avoidable gaps but cannot repair distortion

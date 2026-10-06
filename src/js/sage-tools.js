@@ -520,8 +520,18 @@
     /* ── Doing things in the app ──────────────────────────────────── */
     {
       name: 'control_voice',
-      description: 'Actually open or close voice mode when he asks. Close ends the microphone and reply immediately. Never use for a question about how voice works or a negated request.',
-      parameters: { type: 'object', properties: { action: { ...STRING, enum: ['open', 'close'] } }, required: ['action'] },
+      description: 'Open, close, minimize or expand the active voice conversation when requested. Minimize keeps the same microphone, speaker and all app tools working. Close ends the microphone and reply immediately. Never use for a question about how voice works or a negated request.',
+      parameters: { type: 'object', properties: { action: { ...STRING, enum: ['open', 'close', 'minimize', 'expand'] } }, required: ['action'] },
+    },
+    {
+      name: 'navigate_history',
+      description: 'Go back or forward through pages visited in this app session, only when explicitly requested. Never leaves SpinLog. Keep an active voice call minimized and listening.',
+      parameters: { type:'object', properties:{direction:{...STRING,enum:['back','forward']}}, required:['direction'] },
+    },
+    {
+      name: 'prepare_file_upload',
+      description: 'When he asks to upload a local file but has not attached it, reveal the existing upload area and a Choose file action. kind is document, bill, image, audio or video. This does NOT upload anything: the user must choose the file and complete the existing form. For already attached files use attach_bill, upload_document or upload_media instead.',
+      parameters: { type:'object', properties:{kind:{...STRING,enum:['document','bill','image','audio','video']}}, required:['kind'] },
     },
     {
       name: 'navigate_section',
@@ -636,7 +646,7 @@
       const nextOffset = Math.min(stored.length,offset+limit);
       return {ok:true,total:stored.length,documents,nextOffset,complete:nextOffset>=stored.length,_attachFiles:files};
     },
-    get_app_capabilities: () => ({ok:true,voiceOpen:!!root.SageVoice?.isOpen?.(),
+    get_app_capabilities: () => ({ok:true,voiceOpen:!!root.SageVoice?.isOpen?.(),voiceMinimized:!!root.SageVoice?.isMinimized?.(),
       controls:TOOLS.map(tool=>({name:tool.name,description:tool.description})),
       pages:['home','service','docs','sage'],
       rules:'UI actions require an explicit current request. Deletions require the app confirmation. File contents must be opened with read tools, never inferred from names.'}),
@@ -666,12 +676,19 @@
 
     // ── Getting around ──
     control_voice: (_app, a) => {
-      if (!['open', 'close'].includes(a.action)) return { ok: false, error: 'Unknown voice action.' };
+      if (!['open', 'close', 'minimize', 'expand'].includes(a.action)) return { ok: false, error: 'Unknown voice action.' };
       if (!root.SageVoice) return { ok: false, error: 'Voice mode is not loaded.' };
       if (a.action === 'open' && !root.SageVoice.open()) return { ok: false, error: 'Voice mode could not open.' };
       if (a.action === 'close') root.SageVoice.close();
-      return { ok: true, voice: a.action === 'open' ? 'open' : 'closed' };
+      if (['minimize','expand'].includes(a.action) && !root.SageVoice[a.action]?.()) return {ok:false,error:'There is no active voice conversation.'};
+      return { ok: true, voice: a.action === 'close' ? 'closed' : a.action };
     },
+    navigate_history: async (app,a) => {
+      const result = await app.navigateHistory(a);
+      if (result.ok) root.SageVoice?.minimize?.();
+      return result;
+    },
+    prepare_file_upload: (app,a) => app.prepareFileUpload(a),
     navigate_section: async (app, a) => {
       if (!['home', 'service', 'docs', 'sage'].includes(a.section)) return { ok: false, error: 'Unknown section.' };
       const result = await app.goToSection({ section: a.section });
@@ -1075,10 +1092,10 @@
 
   // UI-changing tools require intent from THIS user turn, never conversation
   // history or a model-supplied reason. A greeting cannot dismiss the call.
-  const UI_CONTROLS = new Set(['control_voice', 'navigate_section', 'open_sage_settings']);
+  const UI_CONTROLS = new Set(['control_voice', 'navigate_section', 'navigate_history', 'open_sage_settings']);
   function uiIntent(raw) {
     let text = String(raw || '').normalize('NFC').toLowerCase().replace(/[.!?,;]+/g, ' ').replace(/\s+/g, ' ').trim();
-    if (/(?:\b(?:don't|do not|never|not|how|why|said|say|earlier)\b|வேண்டாம்|வேணாம்|பண்ணாத|செய்யாத|மூடாத|நிறுத்தாத|திறக்காத|எப்படி|முன்னாடி|சொன்ன)/u.test(text)) return null;
+    if (/(?:\b(?:don't|do not|never|not|how|why|said|say|earlier)\b|வேண்டாம்|வேணாம்|பண்ணாத|செய்யாத|மூடாத|நிறுத்தாத|திறக்காத|எப்படி|சொன்ன)/u.test(text)) return null;
     text = text.replace(/^(?:(?:hey )?sage|bro|சேஜ்|ப்ரோ)\s+/, '').replace(/^(?:please|ப்ளீஸ்|தயவுசெய்து)\s+/, '')
       .replace(/^(?:can|could|would) you\s+/, '').replace(/^please\s+/, '')
       .replace(/\s+(?:please|bro|sage|டா|டி|ப்ரோ|சேஜ்)$/, '').trim();
@@ -1088,6 +1105,11 @@
     if (new RegExp(`^(?:${close}\\s+${voice}|${voice}\\s*${close}|(?:end|close) (?:the |this )?call|hang up|(?:call|கால்|காலை|கால)\\s*(?:cut\\s*${doIt}|கட்\\s*${doIt}|முடி|மூடு))$`, 'u').test(text)) return { name:'control_voice', action:'close' };
     const open = `(?:(?:open|start|activate|enable|ஓபன்|ஓப்பன்|ஸ்டார்ட்)(?:\\s*${doIt})?|திற(?:ங்க)?|தொடங்கு)`;
     if (new RegExp(`^(?:${open}\\s+${voice}|${voice}\\s*${open}|(?:go|switch|take me) (?:to|into) ${voice}|let'?s (?:talk|speak)|voice mode)$`, 'u').test(text)) return { name:'control_voice', action:'open' };
+    const shrink = `(?:minimi[sz]e|மினிமைஸ்|மினிமைஸ)(?:\\s*${doIt}|\\s*பண்ணிக்கோ)?`;
+    if (new RegExp(`^(?:${shrink}(?:\\s+(?:yourself|the (?:orb|window)|${voice}))?|${voice}\\s+${shrink}|make yourself small|shrink (?:the )?orb|go to (?:the )?corner|ஓரமா போ|ஓரத்துக்கு போ|சின்னதா இரு|corner ku po)$`, 'u').test(text)) return {name:'control_voice',action:'minimize'};
+    if (new RegExp(`^(?:(?:expand|restore|maximize|எக்ஸ்பாண்ட்|மேக்ஸிமைஸ்)(?:\\s*${doIt})?(?:\\s+(?:the (?:orb|window)|${voice}))?|${voice}\\s+(?:expand|restore|maximize)(?:\\s*${doIt})?|go full screen|பெரிசா காட்டு)$`, 'u').test(text)) return {name:'control_voice',action:'expand'};
+    if (/^(?:go |take me )?back(?: a page| to (?:the )?previous page)?$|^(?:previous|last) page$|^(?:பின்னாடி|பின்னால்|முந்தைய பக்கத்துக்கு) போ$|^back (?:p[oou]+|போ)$/u.test(text)) return {name:'navigate_history',direction:'back'};
+    if (/^(?:go |take me )?(?:forward|next)(?: page)?$|^(?:அடுத்த பக்கத்துக்கு|முன்னாடி) போ$|^next (?:p[oou]+|போ)$/u.test(text)) return {name:'navigate_history',direction:'forward'};
     const request = text.match(/^(?:open|show(?: me)?|go to|take me to|switch to) (?:the |my )?(.+?)(?: page| section)?$/)
       || text.match(new RegExp(`^(.+?)\\s+(?:${open}|காட்டு(?:ங்க)?|காண்பி(?:ங்க)?|திறந்து காட்டு|கொண்டு போ|போ|திறக்க முடியுமா)$`, 'u'));
     if (!request) return null;
@@ -1101,18 +1123,26 @@
   function uiReply(intent, result, raw) {
     const tamil = /[\u0B80-\u0BFF]|\b(?:pannu|pannunga|pannuda|pannudi|moodu|niruthu)\b/i.test(String(raw));
     if (!result?.ok) return tamil ? 'அதைச் செய்ய முடியல. ' + (result?.error || 'இன்னொரு தடவை முயற்சி பண்ணு.') : (result?.error || 'That action could not finish. Try again.');
-    if (intent.name === 'control_voice') return intent.action === 'close' ? (tamil ? 'வாய்ஸ் மோடை மூடிட்டேன்.' : 'Voice mode is closed.') : (tamil ? 'சொல்லு, கேக்கறேன்.' : 'I’m listening.');
+    if (intent.name === 'control_voice') {
+      if (intent.action === 'close') return tamil ? 'வாய்ஸ் மோடை மூடிட்டேன்.' : 'Voice mode is closed.';
+      if (intent.action === 'minimize') return tamil ? 'ஓரமா இருக்கேன். சொல்லு, கேக்கறேன்.' : 'I’m in the corner. Keep talking.';
+      if (intent.action === 'expand') return tamil ? 'பெரிசா திறந்துட்டேன். சொல்லு.' : 'The conversation is expanded. Keep talking.';
+      return tamil ? 'சொல்லு, கேக்கறேன்.' : 'I’m listening.';
+    }
+    if (intent.name === 'navigate_history') intent = {...intent,section:result.opened};
     const page = {home:'Home',service:'Service history',docs:'Documents',sage:'Chat'}[intent.section] || 'Settings';
     return tamil ? `${{home:'முகப்பு',service:'சர்வீஸ்',docs:'டாக்குமென்ட்ஸ்',sage:'சாட்'}[intent.section] || 'செட்டிங்ஸ்'} பக்கம் திறந்திருக்கு. இங்கயே பேசலாம்.` : `${page} is open. We can keep talking.`;
   }
   function uiAllowed(name, args, context) {
+    if (name === 'prepare_file_upload') return /\b(?:upload|attach)\b|\b(?:choose|pick)\b.{0,48}\b(?:file|document|bill|photo|image|video|audio)\b|அப்லோட்|அப்லோடு|பதிவேற்று|கோப்பை தேர்வு/iu.test(context?.userText || '')
+      && !/\b(?:don't|do not|never|not|how|why|earlier|said)\b|வேண்டாம்|வேணாம்|பண்ணாத|செய்யாத|எப்படி|சொன்ன/iu.test(context?.userText || '');
     if (!UI_CONTROLS.has(name)) return true;
     const intent = uiIntent(context?.userText);
     return !!intent && intent.name === name && Object.entries(intent).every(([key,value]) => key === 'name' || args?.[key] === value);
   }
   function declarations(context) {
     const intent = uiIntent(context?.userText);
-    return TOOLS.filter(tool => !UI_CONTROLS.has(tool.name) || tool.name === intent?.name);
+    return TOOLS.filter(tool => tool.name === 'prepare_file_upload' ? uiAllowed(tool.name,null,context) : !UI_CONTROLS.has(tool.name) || tool.name === intent?.name);
   }
 
   function isWrite(name) {
@@ -1149,6 +1179,8 @@
     delete_document: 'deleting a document',
     delete_park_entry: 'removing a parking spot',
     control_voice: 'changing voice mode',
+    navigate_history: 'moving between visited pages',
+    prepare_file_upload: 'preparing the file picker',
     navigate_section: 'opening your page',
     open_sage_settings: 'opening your settings',
     open_section: 'offering you a page',

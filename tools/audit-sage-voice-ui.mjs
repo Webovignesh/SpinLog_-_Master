@@ -30,7 +30,7 @@ const server = http.createServer(async (req,res) => {
   try {
     let content = await readFile(filename);
     if (rel === 'index.html') content = content.toString().replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'')
-      .replace('</body>','<script src="src/js/sage-voice.js?v=1.9.35"></script></body>');
+      .replace('</body>','<script src="src/js/sage-voice.js?v=1.9.36"></script></body>');
     res.setHeader('Content-Type', ({'.html':'text/html','.js':'text/javascript','.css':'text/css','.woff2':'font/woff2','.webp':'image/webp'})[path.extname(filename)] || 'application/octet-stream');
     res.end(content);
   } catch {res.writeHead(404).end();}
@@ -73,7 +73,7 @@ try {
     await page.locator('#sageChatMic').click();
     assert.equal(await page.locator('.sage-voice-core').evaluate(el=>getComputedStyle(el).display),'block','new orb CSS bypasses stale unversioned cache');
     for (const asset of ['src/css/styles.css','src/css/home.css','src/css/sage-voice.css','src/js/sage-voice.js']) {
-      assert.ok(await page.evaluate(asset=>[...document.querySelectorAll('link[href],script[src]')].some(el=>(el.href||el.src).endsWith(asset+'?v=1.9.35')),asset),'voice assets use versioned URLs');
+      assert.ok(await page.evaluate(asset=>[...document.querySelectorAll('link[href],script[src]')].some(el=>(el.href||el.src).endsWith(asset+'?v=1.9.36')),asset),'voice assets use versioned URLs');
     }
     await page.evaluate(async()=>{
       await SageVoice.sendVoiceText('Bro, நேத்து petrol போட்டேன்.');

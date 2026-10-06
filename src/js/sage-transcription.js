@@ -5,8 +5,8 @@
   const MODEL = 'gemini-3.8-live'; // Live documents Tamil support; Transcribe 3.5 does not list it.
   const WS = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
   const workletURL = document.currentScript?.src
-    ? new URL('sage-pcm-worklet.js?v=1.9.35', document.currentScript.src).href
-    : 'src/js/sage-pcm-worklet.js?v=1.9.35';
+    ? new URL('sage-pcm-worklet.js?v=1.9.36', document.currentScript.src).href
+    : 'src/js/sage-pcm-worklet.js?v=1.9.36';
   const prepared = new WeakMap();
   function prepare(context) {
     if (!context?.audioWorklet || !root.AudioWorkletNode) return Promise.resolve(false);
