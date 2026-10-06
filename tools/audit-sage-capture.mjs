@@ -57,12 +57,12 @@ try {
   await page.waitForTimeout(800);await page.evaluate(()=>{testMicGain.gain.value=0;});await page.locator('#sageVoiceOrb').click();
   await page.waitForFunction(()=>document.getElementById('sageVoiceLines').textContent.includes('say it again') && document.getElementById('sageVoiceState').textContent==='I’m listening');
   const requests=await page.evaluate(()=>recordedRequests);
-  assert.equal(requests.length,2,'one bounded server retry');
+  assert.equal(requests.length,3,'one bounded server retry plus an alternative model');
   const wav=Buffer.from(requests[0].body.contents[0].parts[0].inlineData.data,'base64');
   assert.equal(wav.toString('ascii',0,4),'RIFF');assert.equal(wav.readUInt32LE(24),16000);assert.ok(wav.length>16000,'real recording decoded to PCM');
   let peak=0;for(let i=44;i<wav.length;i+=2)peak=Math.max(peak,Math.abs(wav.readInt16LE(i)));assert.ok(peak>100,'recording contains real fake-device audio');
   await page.waitForTimeout(2200);
-  assert.equal(await page.evaluate(()=>recordedRequests.length),2,'no reconnect/upload loop');
+  assert.equal(await page.evaluate(()=>recordedRequests.length),3,'no reconnect/upload loop');
   assert.equal(await page.locator('#sageVoiceState').textContent(),'I’m listening');
   assert.equal(await page.locator('#sageVoiceSTTRetry').count(),0);
   for(const [width,height] of [[390,844],[320,568]]){
@@ -75,7 +75,7 @@ try {
   await page.evaluate(()=>{failRecognition=false;testMicGain.gain.value=1;});
   await page.waitForTimeout(600);await page.evaluate(()=>{testMicGain.gain.value=0;});await page.locator('#sageVoiceOrb').click();
   await page.waitForFunction(()=>replies.length===1 && document.getElementById('sageVoiceState').textContent==='I’m listening');
-  const retry=await page.evaluate(()=>recordedRequests[2]);assert.notEqual(retry.body.contents[0].parts[0].inlineData.data,requests[0].body.contents[0].parts[0].inlineData.data,'a new utterance uses fresh captured audio');
+  const retry=await page.evaluate(()=>recordedRequests[3]);assert.notEqual(retry.body.contents[0].parts[0].inlineData.data,requests[0].body.contents[0].parts[0].inlineData.data,'a new utterance uses fresh captured audio');
   for(let i=0;i<4;i++){
     await page.evaluate(()=>{testMicGain.gain.value=1;});
     await page.waitForTimeout(600);

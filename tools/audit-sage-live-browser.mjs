@@ -1,7 +1,7 @@
 // Real Chromium mic + production AudioWorklet + Live wire protocol.
 // Provider messages are simulated; no API keys, external calls or database.
 import http from 'node:http';
-import {readFile} from 'node:fs/promises';
+import {readFile,writeFile} from 'node:fs/promises';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import path from 'node:path';
 import assert from 'node:assert/strict';
@@ -9,12 +9,19 @@ let chromium;
 try{({chromium}=await import('playwright'));}
 catch{({chromium}=await import(pathToFileURL(path.join(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES,'playwright/index.mjs'))));}
 const root=path.resolve(fileURLToPath(new URL('..',import.meta.url)));
+const fixture=JSON.parse(await readFile(path.join(root,'tools/fixtures/sage-english-speech.json'),'utf8'));
+const raw=Buffer.from(fixture.pcm,'base64'),wavHeader=Buffer.alloc(44);
+wavHeader.write('RIFF');wavHeader.writeUInt32LE(raw.length+36,4);wavHeader.write('WAVEfmt ',8);
+wavHeader.writeUInt32LE(16,16);wavHeader.writeUInt16LE(1,20);wavHeader.writeUInt16LE(1,22);
+wavHeader.writeUInt32LE(16000,24);wavHeader.writeUInt32LE(32000,28);wavHeader.writeUInt16LE(2,32);wavHeader.writeUInt16LE(16,34);
+wavHeader.write('data',36);wavHeader.writeUInt32LE(raw.length,40);
+await writeFile('/tmp/sage-live-mic.wav',Buffer.concat([wavHeader,raw]));
 const server=http.createServer(async(req,res)=>{
   const rel=req.url.split('?')[0].replace(/^\/+/, '')||'index.html',file=path.resolve(root,rel);
   if(!file.startsWith(root+path.sep)){res.writeHead(403).end();return;}
   try{let data=await readFile(file);
     if(rel==='index.html')data=data.toString().replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace('</body>',
-      '<script src="src/js/sage-transcription.js?v=1.9.38"></script><script src="src/js/sage-voice.js?v=1.9.38"></script></body>');
+      '<script src="src/js/sage-transcription.js?v=1.9.39"></script><script src="src/js/sage-voice.js?v=1.9.39"></script></body>');
     res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.css':'text/css'})[path.extname(file)]||'application/octet-stream');res.end(data);
   }catch{res.writeHead(404).end();}
 });
@@ -22,30 +29,41 @@ await new Promise(r=>server.listen(0,'127.0.0.1',r));
 const base=`http://127.0.0.1:${server.address().port}`;let browser;
 try{
   browser=await chromium.launch({executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE||undefined,headless:true,
-    args:['--no-sandbox','--disable-dev-shm-usage','--use-fake-ui-for-media-stream','--use-fake-device-for-media-stream']});
+    args:['--no-sandbox','--disable-dev-shm-usage','--use-fake-ui-for-media-stream','--use-fake-device-for-media-stream','--use-file-for-fake-audio-capture=/tmp/sage-live-mic.wav']});
   const page=await browser.newPage({viewport:{width:390,height:844}}),errors=[];
   page.on('pageerror',e=>errors.push(e.message));
   await page.route('**/*',r=>r.request().url().startsWith(base)?r.continue():r.abort());
   await page.addInitScript(()=>{
     window.ears=[];window.asks=[];window.requests=[];window.browserStarts=0;
+    const getMic=navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+    window.micOpens=0;
+    navigator.mediaDevices.getUserMedia=async constraints=>{
+      micOpens++;
+      const stream=await getMic(constraints),ctx=new AudioContext();
+      const source=ctx.createMediaStreamSource(stream),gain=ctx.createGain(),out=ctx.createMediaStreamDestination();
+      gain.gain.value=0;source.connect(gain);gain.connect(out);window.testMicGain=gain;
+      out.stream.getTracks()[0].onended=()=>{stream.getTracks().forEach(t=>t.stop());ctx.close();};
+      return out.stream;
+    };
     window.SpeechRecognition=class{start(){browserStarts++;}abort(){}};
     window.WebSocket=class{
-      readyState=0;sent=[];packets=[];
+      readyState=0;sent=[];packets=[];turn=0;turnPackets=0;byTurn=[];
       constructor(){this.id=ears.length;ears.push(this);setTimeout(()=>{this.readyState=1;this.onopen?.();},0);}
       message(value){this.onmessage?.({data:JSON.stringify(value)});}
       send(raw){const value=JSON.parse(raw);this.sent.push(value);
         if(value.setup)setTimeout(()=>this.message({setupComplete:{}}),this.id===0?700:0);
         if(value.realtimeInput?.audio){this.packets.push(value.realtimeInput.audio);
-          if(this.packets.length===6 && this.id<6){
-            this.message({serverContent:{interimInputTranscription:{text:this.id%2?'tell me more':'hello there'}}});
-            if(this.id<5)setTimeout(()=>this.message({serverContent:{inputTranscription:{text:this.id%2?'tell me more':'hello there'},generationComplete:true}}),50);
+          (this.byTurn[this.turn] ||= []).push(value.realtimeInput.audio);this.turnPackets++;
+          if(this.turnPackets===6 && this.turn<6){
+            this.message({serverContent:{interimInputTranscription:{text:this.turn%2?'tell me more':'hello there'}}});
+            if(this.turn<5)setTimeout(()=>this.message({serverContent:{inputTranscription:{text:this.turn%2?'tell me more':'hello there'},generationComplete:true}}),50);
           }
         }
         if(value.realtimeInput?.audioStreamEnd){
-          if(this.id<5)this.message({serverContent:{turnComplete:true}});
-          if(this.id===5)this.message({serverContent:{inputTranscription:{text:'tell me more'}}});
-          // The seventh connection acknowledges setup and receives audio, but
-          // never returns any transcript or model output.
+          if(this.turn<5)this.message({serverContent:{turnComplete:true}});
+          if(this.turn===5)this.message({serverContent:{inputTranscription:{text:'tell me more'}}});
+          // Seventh utterance: connected provider returns no usable words.
+          this.turn++;this.turnPackets=0;
         }
       }
       close(){this.readyState=3;}
@@ -70,14 +88,19 @@ try{
       transform:getComputedStyle(orb.querySelector('.sage-voice-core')).transform})).observe(orb,{attributes:true,attributeFilter:['style']});
   });
   await page.locator('#sageChatMic').click();
+  await page.waitForFunction(()=>document.getElementById('sageVoiceState').textContent==='I’m listening');
+  await page.waitForTimeout(1000);
+  assert.deepEqual(await page.evaluate(()=>({asks:asks.length,requests:requests.length,packets:ears[0].packets.length})),
+    {asks:0,requests:0,packets:0},'cold boot silence never starts recognition processing or replies');
+  await page.evaluate(()=>{testMicGain.gain.value=1;});
   await page.waitForFunction(()=>asks.length>=5&&document.getElementById('sageVoiceState').textContent==='I’m listening',{},{timeout:15000});
-  await page.waitForFunction(()=>ears[5]?.packets.length>=6);
+  await page.waitForFunction(()=>ears[0]?.byTurn[5]?.length>=6);
   await page.locator('#sageVoiceOrb').click();
   await page.waitForFunction(()=>asks.length===6&&document.getElementById('sageVoiceState').textContent==='I’m listening');
-  await page.waitForFunction(()=>ears[6]?.packets.length>=6);
+  await page.waitForFunction(()=>ears[0]?.byTurn[6]?.length>=6);
   await page.locator('#sageVoiceOrb').click();
   await page.waitForFunction(()=>asks.length===7&&document.getElementById('sageVoiceState').textContent==='I’m listening');
-  const result=await page.evaluate(()=>({asks,requests,ears:ears.map(e=>({sent:e.sent,packets:e.packets,readyState:e.readyState})),browserStarts,readiness,visuals}));
+  const result=await page.evaluate(()=>({asks,requests,ears:ears.map(e=>({sent:e.sent,packets:e.packets,byTurn:e.byTurn,readyState:e.readyState})),browserStarts,readiness,visuals}));
   assert.ok(result.readiness.includes('Starting audio…'),'cold startup is visible before real PCM arrives');
   assert.ok(result.readiness.includes('Connecting…'),'live setup wait is visible while the first audio is buffered');
   assert.ok(result.visuals.some(v=>v.mode==='listening'&&v.level>.02),'real microphone samples animate the orb');
@@ -90,7 +113,8 @@ try{
   assert.equal(replies.length,7);
   const voice=result.requests[0].body.generationConfig.speechConfig.voiceConfig.voice;
   assert.ok(replies.every(r=>r.body.generationConfig.speechConfig.voiceConfig.voice===voice));
-  assert.equal(result.ears.length,7,'the silent route is not reconnected on the next turn');
+  assert.equal(result.ears.length,1,'six successful turns reuse one connection; a silent route is cooled down');
+  assert.equal(await page.evaluate(()=>micOpens),1,'all turns keep the same microphone');
   const fallback=result.requests.find(r=>!r.body.generationConfig.responseModalities);
   const wav=Buffer.from(fallback.body.contents[0].parts[0].inlineData.data,'base64');
   assert.equal(wav.toString('ascii',0,4),'RIFF');assert.equal(wav.readUInt32LE(24),16000);
@@ -101,7 +125,9 @@ try{
     const audio=Buffer.concat(ear.packets.map(p=>Buffer.from(p.data,'base64')));
     let peak=0;for(let i=0;i<audio.length;i+=2)peak=Math.max(peak,Math.abs(audio.readInt16LE(i)));
     assert.ok(peak>100,'real worklet captures microphone audio');
-    if(ear===result.ears[6])assert.equal(wav.subarray(44).equals(audio),true,'fallback uses exactly the streamed microphone PCM');
+    const finalAudio=Buffer.concat(ear.byTurn[6].map(p=>Buffer.from(p.data,'base64')));
+    // The full PCM includes at most the local pre-roll before the speech gate.
+    assert.ok(wav.subarray(44).includes(finalAudio),'fallback preserves exactly the streamed speech and first-word prefix');
   }
   await page.locator('#sageVoiceEnd').click();
   assert.equal(await page.evaluate(()=>ears.every(e=>e.readyState===3)),true,'end call releases every socket');

@@ -152,6 +152,7 @@ const JS_FILES = [
   'src/js/sage-autofill.js',
   'src/js/sage-ui.js',
   'src/js/sage-transcription.js',
+  'src/js/sage-pcm-worklet.js',
   'src/js/sage-voice.js',
   'src/js/home3d.js',
   'src/js/docs3d.js',
@@ -229,7 +230,7 @@ const referenced = new Set(refs.filter((r) => r.ok).map((r) => r.resolved));
 // file attached is the wrong trade. Nothing in the markup points at it, so the
 // orphan check cannot see it.
 const EXEMPT =
-  /^(?:index\.html|service-worker\.js|manifest\.json|README\.md|\.gitignore|docs\/|tools\/|supabase\/|assets\/source\/|vendor\/three\.core\.js|vendor\/pdf-lib\.min\.js)/;
+  /^(?:index\.html|service-worker\.js|manifest\.json|README\.md|\.gitignore|docs\/|tools\/|supabase\/|assets\/source\/|vendor\/three\.core\.js|vendor\/pdf-lib\.min\.js|vendor\/libfvad-(?:LICENSE|PATENTS)\.txt)/;
 const orphans = walk(ROOT).filter((f) => !referenced.has(f) && !EXEMPT.test(f));
 
 // vendor/three.core.js is imported from inside the minified bundle, and

@@ -881,7 +881,7 @@ gone rather than left as links that go nowhere. What was in them that still matt
   back to localStorage then to the `data-due` values in `index.html`; Sage's memory
   falls back to localStorage; the key ring stays on the device.
 
-## Sage voice — v1.9.38
+## Sage voice — v1.9.39
 
 Sage replies only in natural English, including chat, spoken answers, tool
 acknowledgements and recovery prompts. The Tamil/Tanglish reply persona and
@@ -928,23 +928,32 @@ captions are drafts and cannot execute tools. See Google’s
 [Live Transcribe guide](https://ai.google.dev/gemini-api/docs/live-api/live-transcribe).
 
 The WebSocket starts alongside microphone permission. First PCM packets wait
-for `setupComplete`; the next connection warms during answer preparation and
-playback. The worklet is preloaded. MediaRecorder preserves the complete
+for `setupComplete`; a successful connection stays open across utterances.
+It is parked during replies and reset for the next turn, so late captions cannot
+become a new command. The worklet and its tiny locally bundled WebRTC/libfvad
+speech detector are preloaded; no VAD model download or CDN is required. MediaRecorder preserves the complete
 utterance as fallback, and the gesture-unlocked AudioContext and microphone
 stream are reused across turns. Opening microphone, starting audio and
 connecting captions have distinct statuses. A delayed worklet or socket keeps
 the full recording instead of dropping the first word.
 
-Local audio sampling runs every 100 ms independently of animation frames. The
+The worklet classifies speech in 20 ms windows using WebRTC VAD. A 120 ms
+voiced onset confirms speech; a 500 ms audio prefix preserves the first syllable.
+Idle noise is not sent to Live, unsolicited provider captions are ignored, and
+tapping the orb during classified silence does not trigger processing. Volume
+alone is used only if the speech detector is unavailable. Local audio sampling
+runs every 100 ms independently of animation frames. The
 normal pause is **Quick · 0.65 seconds**; **Relaxed · 1.2 seconds** is available
 in settings. Server speech-end detection also handles background noise. Cutoff
 flushes PCM and ends its audio stream; late final segments settle before one
 complete utterance is submitted. `waitingForInput` alone never ends a turn.
-Silent sockets are disabled for the call. Turns stop at 45 seconds and empty
+Failed Live keys have bounded cooldowns, so another configured key or a later
+utterance can recover without a reconnect loop. Turns stop at 45 seconds and empty
 recordings are discarded locally every 15 seconds while the room stays open.
 
 If Live is unavailable, the captured PCM is reused as WAV with **Gemini 3.5
-Flash**, then Flash-Lite if the model is inaccessible. A failed worklet uses
+Flash**, then Flash-Lite if that model is inaccessible or at quota. Each model
+has its own quota cooldown; a working alternative is retained for the call. A failed worklet uses
 MediaRecorder decoding instead. This English transcription route has a shared
 ten-second deadline, at most three attempts and minimal thinking. The request
 has no rider-name context and explicitly forbids adding a greeting addressee. Names,
@@ -959,10 +968,12 @@ to recorded audio. Startup and final-result waits are bounded; cancelled or old
 callbacks cannot enter the next call. Browser recognition availability and its
 provider/network behavior depend on the browser.
 
-A service outage produces **one** spoken recovery announcement until a real
-turn succeeds. Repeated failures retain an honest status and fresh capture,
+Transient recognition failures produce **one** spoken clarification until a
+real turn succeeds. Quota, access and key errors appear in the hint and switch
+to available English input without a spoken “switching” announcement. A browser
+`no-speech` event resumes recognition instead of imposing a one-minute outage. Repeated failures retain an honest status and fresh capture,
 without filling the transcript with the same apology or retrying old audio.
-Rejected keys and quota failures retain per-key cooldowns; a changed key can be
+Rejected keys retain key-wide cooldowns; model quota limits are independent; a changed key can be
 used immediately. Recovery never unmutes a manually muted microphone or
 reopens a closed call. Hidden tabs release capture; returning resumes unless
 manually muted. Provider calls use the configured key and count toward quota.
@@ -1084,3 +1095,10 @@ correction commands and the larger orb/status pill on desktop and two phone size
 The audio-clock audit renders scheduled PCM offline to check sample continuity. Provider replies
 remain mocked: none of these tests verifies live API access, real speech accuracy
 or subjective accent/timbre.
+
+The bundled detector is the unmodified libfvad WASM from
+`@ozymandiasthegreat/vad` 2.0.6; provenance and BSD-3-Clause licensing are in
+`vendor/sage-vad.js`, `vendor/libfvad-LICENSE.txt` and
+`vendor/libfvad-PATENTS.txt`. Synthetic test speech is generated locally with
+FFmpeg/flite; no user microphone audio is committed. Browser tests mock provider
+responses and cannot measure actual Google latency, quota or live accuracy.

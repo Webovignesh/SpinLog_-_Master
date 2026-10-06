@@ -5,8 +5,8 @@
   const MODEL = 'gemini-3.5-transcribe-live'; // Dedicated speech recognition, never a reply voice.
   const WS = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
   const workletURL = document.currentScript?.src
-    ? new URL('sage-pcm-worklet.js?v=1.9.38', document.currentScript.src).href
-    : 'src/js/sage-pcm-worklet.js?v=1.9.38';
+    ? new URL('sage-pcm-worklet.js?v=1.9.39', document.currentScript.src).href
+    : 'src/js/sage-pcm-worklet.js?v=1.9.39';
   const prepared = new WeakMap();
   function prepare(context) {
     if (!context?.audioWorklet || !root.AudioWorkletNode) return Promise.resolve(false);
@@ -18,7 +18,7 @@
   }
   function connect({key, pauseMs = 650, onText = () => {}, onBoundary = () => {}}) {
     let socket, ready = false, closed = false, failure = null, queue = [], queuedBytes = 0;
-    let text = '', interim = '', ending = false, boundarySeen = false, finalAfterEnd = false, finalWait = null;
+    let text = '', interim = '', ending = false, parked = false, receiving = false, boundarySeen = false, finalAfterEnd = false, finalWait = null;
     let settleTimer, deadline, connectTimer, boundaryTimer;
     let resolveReady;
     const connected = new Promise(resolve => { resolveReady = resolve; });
@@ -35,8 +35,13 @@
       const resolve = finalWait; finalWait = null;
       resolve?.(value || null);
     }
-    function fail() {
-      failure = new Error('live-unavailable'); ready = false;
+    function fail(problem) {
+      const message = String(problem?.message || '');
+      const status = Number(problem?.code || problem?.status || 0);
+      const code = status === 429 || /quota|resource.exhausted/i.test(message) ? 'quota'
+        : status === 401 || /API.?key.*(?:invalid|expired|not valid)/i.test(message) ? 'stt-auth'
+        : status === 403 ? 'stt-access' : status === 404 ? 'stt-model' : 'live-unavailable';
+      failure = new Error(code); ready = false;
       clearTimeout(boundaryTimer); boundaryTimer = null;
       clearTimeout(connectTimer); resolveReady(false); finish(null);
       queue = []; queuedBytes = 0;
@@ -79,14 +84,14 @@
           const raw = typeof event.data === 'string' ? event.data : await event.data.text();
           if (closed || failure) return;
           const message = JSON.parse(raw);
-          if (message.error) { fail(); return; }
+          if (message.error) { fail(message.error); return; }
           if (message.setupComplete) {
             ready = true; clearTimeout(connectTimer); resolveReady(true);
             const pending = queue; queue = []; queuedBytes = 0;
             for (const pcm of pending) if (!sendPCM(pcm)) break;
           }
           const content = message.serverContent;
-          if (!content) return;
+          if (!content || parked || !receiving) return;
           if (content.interimInputTranscription?.text) {
             interim = content.interimInputTranscription.text;
             if (!ending) boundarySeen = false;
@@ -120,11 +125,19 @@
     } catch { fail(); }
     return {
       connected,
-      bind(handlers) { onText = handlers.onText; onBoundary = handlers.onBoundary; },
+      bind(handlers) {
+        // Each utterance gets new text/handlers, while the working transport
+        // remains connected. Late frames while Sage speaks are ignored.
+        clearTimeout(boundaryTimer); clearTimeout(settleTimer);
+        text = interim = ''; ending = parked = receiving = boundarySeen = finalAfterEnd = false;
+        onText = handlers.onText; onBoundary = handlers.onBoundary;
+      },
       get available() { return !closed && !failure; },
+      get failure() { return failure; },
       get text() { return (text + interim).trim(); },
       push(buffer) {
         if (closed || failure || ending) return false;
+        receiving = true;
         if (ready) return sendPCM(buffer);
         // Preserve first words during connection setup; never quietly discard
         // an overflowing prefix. The complete recording is the fallback.
@@ -151,6 +164,11 @@
           // partial must await a new final event or use the recorded fallback.
           settle();
         });
+      },
+      park() {
+        parked = true; receiving = false;
+        clearTimeout(boundaryTimer); clearTimeout(settleTimer);
+        onText = onBoundary = () => {};
       },
       close() {
         closed = true; ready = false;
@@ -181,7 +199,7 @@
           flushed = () => { clearTimeout(timer); resolve(); };
           node.port.postMessage('flush');
         });
-        active = false; node.port.onmessage = null; node.onprocessorerror = null;
+        active = false; node.port.postMessage('close'); node.port.onmessage = null; node.onprocessorerror = null;
         try { source.disconnect(); } catch { /* already released */ }
         try { node.disconnect(); } catch { /* already released */ }
       },
