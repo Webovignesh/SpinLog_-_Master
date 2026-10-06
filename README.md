@@ -881,7 +881,7 @@ gone rather than left as links that go nowhere. What was in them that still matt
   back to localStorage then to the `data-due` values in `index.html`; Sage's memory
   falls back to localStorage; the key ring stays on the device.
 
-## Sage voice — v1.9.37
+## Sage voice — v1.9.38
 
 Sage replies only in natural English, including chat, spoken answers, tool
 acknowledgements and recovery prompts. The Tamil/Tanglish reply persona and
@@ -901,7 +901,7 @@ the call locally. Greetings, questions about closing and negated commands do
 not close it. The activity pill appears only for actual site lookups.
 
 Navigation, settings and **minimize yourself** reduce the room to **one floating
-orb**, with no card, captions, labels or extra buttons. Drag that orb to move it,
+larger orb** (136 px), with a compact mode pill and no extra buttons. Drag that orb to move it,
 or focus it and use arrow keys (Shift increases the step). Clicking or pressing
 Enter on it restores the full menu without submitting the recording or
 interrupting a reply. To end the minimized call, say **close voice mode**, or
@@ -921,9 +921,9 @@ never counts as a completed upload.
 
 The primary input path streams mono 16 kHz PCM from an AudioWorklet to
 **Gemini 3.5 Transcribe Live**. Setup uses TEXT output, VERBATIM transcription,
-`en-IN` and vocabulary hints for SpinLog, Sage, Viky, KTM Duke, odometer, PUC
+`en-IN` and domain vocabulary hints for SpinLog, KTM Duke, odometer, PUC
 and mileage. It uses dedicated input transcription rather than a conversational
-model’s acknowledgement. Final input is the speech-end boundary; interim
+model’s acknowledgement. Committed fragments are not speech-end events; a local pause or explicit provider endpoint finalizes the turn. Interim
 captions are drafts and cannot execute tools. See Google’s
 [Live Transcribe guide](https://ai.google.dev/gemini-api/docs/live-api/live-transcribe).
 
@@ -943,10 +943,11 @@ complete utterance is submitted. `waitingForInput` alone never ends a turn.
 Silent sockets are disabled for the call. Turns stop at 45 seconds and empty
 recordings are discarded locally every 15 seconds while the room stays open.
 
-If Live is unavailable, the captured PCM is reused as WAV with **Gemini 2.5
+If Live is unavailable, the captured PCM is reused as WAV with **Gemini 3.5
 Flash**, then Flash-Lite if the model is inaccessible. A failed worklet uses
 MediaRecorder decoding instead. This English transcription route has a shared
-ten-second deadline, at most three attempts and no reasoning budget. Names,
+ten-second deadline, at most three attempts and minimal thinking. The request
+has no rider-name context and explicitly forbids adding a greeting addressee. Names,
 numbers and corrections are preserved; uncertain output asks for clarification
 instead of executing a guessed command.
 
@@ -999,11 +1000,24 @@ explicit **think carefully** requests use Gemini 3.5 Flash with medium thinking,
 up to 1,200 output tokens and an 18-second timeout. The former universal
 30-word voice limit is removed. Complex answers can explain useful conclusions
 without narrating private reasoning; simple commands keep the fast path.
+Unambiguous form commands such as **select Showroom**, **set odometer to 6500**,
+**show filters** and **open service form** also use the live controls locally,
+without waiting for a model prediction. Ambiguous choices use the normal brain.
 Existing per-model spacing, quota rests and deletion confirmations remain.
 
 Sage’s prompt includes current voice state and the website’s real controls.
 `get_app_capabilities` reports English replies, open/minimized state, recognition
-route, actual tools and pages. Actions require successful results before claims
+route, actual tools, pages and live page controls. `inspect_page_controls` reads
+visible field labels/values and native/custom dropdown choices. `fill_page_fields`
+validates those values and triggers existing input/change/option handlers,
+including the custom calendar’s value holders. Filled details are drafts, never
+reported as saved. `open_page_form` reveals service/document forms;
+`activate_page_control` operates filters, result paging, search and closing the
+current form. Only the active modal’s fields are exposed when a modal is open;
+collapsed filters, credentials and file picker inputs stay outside the field bridge.
+“Main screen” and “main page” resolve locally to Home, including a correction
+after rejecting the current screen. Navigation also checks the actual active
+section before returning success. Actions require successful results before claims
 of completion. `read_documents` opens stored files in batches of up to three,
 forwarding actual bytes with pagination and per-file failures. Attachments are
 capped at 10 MB per batch; larger files are read individually. Names alone do
@@ -1064,7 +1078,9 @@ fresh audio after an outage, and completes five turns. The Live browser audit us
 real synthetic microphone and production AudioWorklet with a delayed mock
 WebSocket, five automatic English turns, a transcript without model
 acknowledgement, exact-PCM fallback from a silent provider and resource cleanup.
-The audio-clock
-audit renders scheduled PCM offline to check sample continuity. Provider replies
+The docked audit also checks real custom/native dropdown selection, date/number
+drafting, failed/hidden field writes, document form opening/closing, Home
+correction commands and the larger orb/status pill on desktop and two phone sizes.
+The audio-clock audit renders scheduled PCM offline to check sample continuity. Provider replies
 remain mocked: none of these tests verifies live API access, real speech accuracy
 or subjective accent/timbre.

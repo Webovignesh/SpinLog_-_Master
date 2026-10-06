@@ -5,8 +5,8 @@
   const MODEL = 'gemini-3.5-transcribe-live'; // Dedicated speech recognition, never a reply voice.
   const WS = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
   const workletURL = document.currentScript?.src
-    ? new URL('sage-pcm-worklet.js?v=1.9.37', document.currentScript.src).href
-    : 'src/js/sage-pcm-worklet.js?v=1.9.37';
+    ? new URL('sage-pcm-worklet.js?v=1.9.38', document.currentScript.src).href
+    : 'src/js/sage-pcm-worklet.js?v=1.9.38';
   const prepared = new WeakMap();
   function prepare(context) {
     if (!context?.audioWorklet || !root.AudioWorkletNode) return Promise.resolve(false);
@@ -62,7 +62,9 @@
           model:`models/${MODEL}`,
           generationConfig:{responseModalities:['TEXT']},
           inputAudioTranscription:{languageCodes:['en-IN'],mode:'VERBATIM',
-            customVocabulary:['SpinLog','Sage','Viky','KTM Duke','odometer','PUC','mileage']},
+            // Domain terms only. Personal names biased a plain hello into
+            // “Hello Viky”; recognition must never supply the addressee.
+            customVocabulary:['SpinLog','KTM Duke','odometer','PUC','mileage']},
           realtimeInputConfig:{automaticActivityDetection:{disabled:false,
             startOfSpeechSensitivity:'START_SENSITIVITY_HIGH',endOfSpeechSensitivity:'END_SENSITIVITY_HIGH',
             prefixPaddingMs:300,silenceDurationMs:Math.max(550,pauseMs)}},
@@ -103,9 +105,9 @@
             clearTimeout(boundaryTimer); boundaryTimer = null;
             onText(text.trim(), true); settle();
           }
-          // A finalized transcription is the dedicated recognizer’s speech boundary.
-          // This is the noise-resistant fallback when a fan defeats local RMS.
-          if (text && (content.inputTranscription?.text || content.inputTranscription?.finished || content.generationComplete || content.turnComplete)) {
+          // Committed words can arrive WHILE he is speaking. Only a provider
+          // endpoint, or the caller's local pause + audioStreamEnd, ends a turn.
+          if (text && (content.inputTranscription?.finished || content.generationComplete || content.turnComplete)) {
             boundarySeen = true;
             if (ending) { if (!settleTimer) settle(); }
             else if (!boundaryTimer) boundaryTimer = setTimeout(() => { boundaryTimer = null; if (!closed && !ending) onBoundary(); }, 180);
@@ -135,6 +137,10 @@
         await connected;
         if (!ready || closed || failure) return null;
         ending = true;
+        // The caller has detected a real pause. Already committed words are
+        // usable without an extra model acknowledgement, but late finals still
+        // get a short settling window and replace an interim hypothesis.
+        if (text && !interim) boundarySeen = true;
         return new Promise(resolve => {
           finalWait = resolve;
           // A connected provider can remain silent. Close that unusable route

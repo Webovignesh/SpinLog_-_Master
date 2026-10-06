@@ -4196,7 +4196,9 @@ window._delHistoricUpload = async function(id, fileName, btn) {
     const isMods = this.value === 'Mods/Updates';
     form?.classList.toggle('is-mods-entry', isMods);
     if (isMods) {
-      lbl.style.display = 'none';
+      // The form's layout rules use !important; a normal inline display was
+      // overridden, leaving Next Due visible even though Mods clears it.
+      lbl.style.setProperty('display', 'none', 'important');
       const dueInput = lbl.querySelector('input');
       if (dueInput) {
         dueInput.value = '';
@@ -6221,6 +6223,7 @@ async function getBillFileUrl(fileName) {
       if (!known.includes(section)) return { ok: false, error: 'unknown section' };
       const opened = await setActiveSection(section);
       if (opened === false) return { ok:false, error:'Navigation was cancelled. Try again.' };
+      if (document.querySelector('main section.active')?.id !== section) return {ok:false,error:'The requested page did not become active. Try again.'};
       if (highlight) {
         const target = document.querySelector(highlight);
         if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -6235,6 +6238,7 @@ async function getBillFileUrl(fileName) {
       if (!section) return {ok:false,error:direction === 'back' ? 'No previous page in this app session.' : 'No next page in this app session.'};
       const opened = await setActiveSection(section, 'trail');
       if (opened === false) return {ok:false,error:'Navigation was cancelled. Try again.'};
+      if (document.querySelector('main section.active')?.id !== section) return {ok:false,error:'The requested page did not become active. Try again.'};
       sectionTrailIndex = index;
       return {ok:true,opened:section};
     },

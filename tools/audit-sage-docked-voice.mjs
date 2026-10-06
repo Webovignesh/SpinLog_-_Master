@@ -16,8 +16,18 @@ const methodStart=appSource.indexOf('    async goToSection('),methodEnd=appSourc
 const backStart=appSource.indexOf('(function dkBackGuard()'),backEnd=appSource.indexOf('\n})();',backStart)+7;
 const hashStart=appSource.indexOf("  window.addEventListener('hashchange', () => {"),hashEnd=appSource.indexOf('\n  });',hashStart)+6;
 assert.ok(routerStart>=0 && methodStart>=0 && backStart>=0 && hashStart>=0,'production router/Back extracts exist');
+const dateStart=appSource.indexOf('  function formatDateUIValue('),dateEnd=appSource.indexOf('  function getServiceEntryTypeControls()',dateStart);
+const dropdownStart=dateEnd,dropdownEnd=appSource.indexOf('  // ── Cover badge helper',dropdownStart);
+const modsStart=appSource.indexOf("  document.getElementById('serviceType')?.addEventListener('change'"),modsEnd=appSource.indexOf('  // Service entries store',modsStart);
+assert.ok(dateStart>=0 && dropdownEnd>dropdownStart && modsEnd>modsStart);
+const docStart=appSource.indexOf('function setupDocAddFlow()'),docEnd=appSource.indexOf('function describeExistingDocCard(',docStart);
+const typesStart=appSource.indexOf('const VEHICLE_TYPES = ['),typesEnd=appSource.indexOf('];',typesStart)+2;
+assert.ok(docStart>=0 && docEnd>docStart && typesStart>=0);
 const routerSource=`(function(){function ensureSectionData(){}; ${appSource.slice(routerStart,routerEnd)}
   window.dkApp=({${appSource.slice(methodStart,methodEnd)}}); ${appSource.slice(hashStart,hashEnd)}
+${appSource.slice(dateStart,dateEnd)} ${appSource.slice(dropdownStart,dropdownEnd)} ${appSource.slice(modsStart,modsEnd)}
+  ${appSource.slice(typesStart,typesEnd)} ${appSource.slice(docStart,docEnd)}
+  setupDateUI(); setupServiceEntryTypeDropdown(); setupDocAddFlow();
 })(); ${appSource.slice(backStart,backEnd)}`;
 await mkdir(output,{recursive:true});
 const server=http.createServer(async(req,res)=>{
@@ -27,7 +37,7 @@ const server=http.createServer(async(req,res)=>{
   try {
     let data=await readFile(file);
     if(rel==='index.html')data=data.toString().replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace('</body>',
-      ['sage-tools','sage-ai','sage-transcription','sage-voice'].map(n=>`<script src="src/js/${n}.js?v=1.9.37"></script>`).join('')+'<script src="/audit-router.js"></script></body>');
+      ['date-picker','sage-page-controls','sage-tools','sage-ai','sage-transcription','sage-voice'].map(n=>`<script src="src/js/${n}.js?v=1.9.38"></script>`).join('')+'<script src="/audit-router.js"></script></body>');
     res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.css':'text/css'})[path.extname(file)]||'application/octet-stream');res.end(data);
   }catch {res.writeHead(404).end();}
 });
@@ -61,7 +71,7 @@ try {
     await page.evaluate(()=>{
       const localAsk=SageAI.askSage;
       SageAI.availableKeys=()=>[{key:'test-only'}];
-      SageAI.askSage=(text,opts)=>SageTools.uiIntent(text)?localAsk(text,opts):Promise.resolve({ok:true,text:'I’m here. Keep talking.'});
+      SageAI.askSage=(text,opts)=>(SageTools.uiIntent(text)||SagePageControls.intent(text))?localAsk(text,opts):Promise.resolve({ok:true,text:'I’m here. Keep talking.'});
       window.SageUI={open(){document.getElementById('testSettings').hidden=false;},isOpen(){return !document.getElementById('testSettings').hidden;}};
       const button=document.createElement('button');button.id='testPageButton';button.textContent='Page action';
       button.style.cssText='position:fixed;left:20px;top:120px;z-index:1100';button.onclick=()=>{window.pageClicked=true;};document.body.append(button);
@@ -100,9 +110,13 @@ try {
     assert.deepEqual(await page.evaluate(()=>({audio:audioRequests,turns:historyRows.length,captures:captureRequests})),counts,'drag never submits speech or restarts audio');
     await page.locator('#sageVoiceOrb').focus();await page.keyboard.press('ArrowRight');
     assert.ok((await page.locator('#sageVoiceOverlay').boundingBox()).x>moved.x,'keyboard movement works');
-    assert.ok(Math.abs(moved.width-88)<1 && Math.abs(moved.height-88)<1,'minimized view is only the orb');
+    assert.ok(Math.abs(moved.width-144)<1 && Math.abs(moved.height-172)<1,'larger minimized orb and mode pill stay within the viewport');
     assert.equal(await page.locator('#sageVoiceOverlay button:visible').count(),1,'there is no minimized panel or extra control');
-    for(const id of ['sageVoiceState','sageVoiceLines','sageVoiceEnd','sageVoiceCaption']) assert.equal(await page.locator('#'+id).isVisible(),false,id);
+    assert.equal(await page.locator('#sageVoiceState').isVisible(),true,'mode pill is visible');
+    assert.equal(await page.locator('#sageVoiceState').textContent(),'I’m listening');
+    assert.equal(await page.locator('#sageVoiceOverlay').evaluate(el=>getComputedStyle(el).backdropFilter),'none','the dock does not blur the page');
+    assert.equal(Math.round((await page.locator('#sageVoiceOrb').boundingBox()).width),136);
+    for(const id of ['sageVoiceLines','sageVoiceEnd','sageVoiceCaption']) assert.equal(await page.locator('#'+id).isVisible(),false,id);
     await page.screenshot({path:path.join(output,`${name}-docked.png`)});
     await page.waitForTimeout(410);
     await page.locator('#sageVoiceOrb').click();assert.equal(await page.evaluate(()=>SageVoice.isMinimized()),false);
@@ -113,9 +127,40 @@ try {
     assert.equal(await page.evaluate(()=>SageVoice.isMinimized()),false);
     await page.evaluate(()=>SageVoice.sendVoiceText('மினிமைஸ் பண்ணு'));
     await page.waitForFunction(()=>SageVoice.isMinimized() && document.getElementById('sageVoiceState').textContent==='I’m listening');
+    await page.evaluate(()=>SageVoice.sendVoiceText('open service form'));
+    assert.equal(await page.evaluate(()=>document.querySelector('main section.active').id),'service');
+    const formState=await page.evaluate(()=>SageTools.run('inspect_page_controls',{}));
+    assert.ok(formState.fields.find(f=>f.field==='serviceType').options.some(o=>o.value==='Showroom'));
+    assert.equal(formState.fields.some(f=>/sageKey|sageVault|sageChat|fileInput/.test(f.field)),false,'credentials and attachment selection are never exposed');
+    await page.evaluate(()=>SageVoice.sendVoiceText('select Showroom'));
+    assert.equal(await page.locator('#serviceType').inputValue(),'Showroom');
+    assert.equal(await page.locator('#serviceTypeValue').textContent(),'Showroom','real custom dropdown display follows its selection');
+    assert.equal(await page.locator('#serviceTypeMenu [data-value="Showroom"]').getAttribute('aria-selected'),'true');
+    await page.evaluate(()=>SageVoice.sendVoiceText('set odometer to 6500'));
+    assert.equal(await page.locator('#serviceEntryForm [name="odo"]').inputValue(),'6500');
+    const drafted=await page.evaluate(()=>SageTools.run('fill_page_fields',{fields:[{field:'serviceEntryForm.date',value:'2026-10-06'},{field:'serviceEntryForm.cost',value:'500'}]},{userText:'fill the date and cost'}));
+    assert.equal(drafted.ok,true);assert.equal(drafted.saved,false);
+    assert.equal(await page.locator('#serviceEntryForm [name="date"]').inputValue(),'2026-10-06');
+    assert.match(await page.locator('#serviceEntryForm [name="date"]').evaluate(el=>el.closest('.date-shell').querySelector('.date-display').textContent),/06 Oct 2026/);
+    const invalid=await page.evaluate(()=>SageTools.run('fill_page_fields',{fields:[{field:'serviceEntryForm.cost',value:'700'},{field:'serviceType',value:'Invented option'}]},{userText:'fill the form'}));
+    assert.equal(invalid.ok,false);assert.equal(await page.locator('#serviceEntryForm [name="cost"]').inputValue(),'500','invalid batches are prevalidated before any edit');
+    const secret=await page.evaluate(()=>SageTools.run('fill_page_fields',{fields:[{field:'sageKeyInput',value:'secret'}]},{userText:'fill the field'}));
+    assert.equal(secret.ok,false);
+    await page.evaluate(()=>{const pager=document.getElementById('serviceHistoryPager');pager.hidden=false;document.getElementById('serviceHistoryPerPage').addEventListener('change',()=>{window.perPageChanged=true;});});
+    const nativeSelect=await page.evaluate(()=>SageTools.run('fill_page_fields',{fields:[{field:'serviceHistoryPerPage',value:'25'}]},{userText:'select 25 rows per page'}));
+    assert.equal(nativeSelect.ok,true);assert.equal(await page.locator('#serviceHistoryPerPage').inputValue(),'25');
+    assert.equal(await page.evaluate(()=>window.perPageChanged),true,'native selections emit the change event');
+    await page.evaluate(()=>SageVoice.sendVoiceText('select Mods/Updates'));
+    assert.equal(await page.locator('#nextDueLabel').isVisible(),false,'selection runs the production dependent-field handler');
+    const hidden=await page.evaluate(()=>SageTools.run('fill_page_fields',{fields:[{field:'serviceEntryForm.nextDue',value:'2026-11-06'}]},{userText:'fill next due date'}));
+    assert.equal(hidden.ok,false,'Sage cannot fill a field hidden by the chosen service type');
+    await page.evaluate(()=>SageVoice.sendVoiceText("It's not a main screen, go to main page."));
+    assert.equal(await page.evaluate(()=>document.querySelector('main section.active').id),'home');
+    assert.equal(await page.evaluate(()=>SageVoice.isMinimized()),true);
+    assert.equal(await page.evaluate(()=>captureRequests),initial.captures,'form commands preserve the same microphone');
     await page.evaluate(()=>SageVoice.sendVoiceText('open documents'));
     await page.evaluate(()=>SageVoice.sendVoiceText('go back'));
-    assert.equal(await page.evaluate(()=>document.querySelector('main section.active').id),'service');
+    assert.equal(await page.evaluate(()=>document.querySelector('main section.active').id),'home');
     await page.evaluate(()=>SageVoice.sendVoiceText('next page'));
     assert.equal(await page.evaluate(()=>document.querySelector('main section.active').id),'docs');
     const prep=await page.evaluate(()=>SageTools.run('prepare_file_upload',{kind:'image'},{userText:'upload a photo'}));
@@ -127,6 +172,16 @@ try {
     assert.equal(await page.evaluate(()=>SageVoice.isMinimized()),true);
     assert.equal(await page.locator('#sageVoiceChooseFile').isVisible(),false);
     assert.equal(await page.evaluate(()=>captureRequests),initial.captures,'file preparation keeps the microphone');
+    await page.evaluate(()=>SageVoice.sendVoiceText('open document form'));
+    assert.equal(await page.locator('#docAddModal').getAttribute('aria-hidden'),'false','production document flow is open');
+    const docFields=await page.evaluate(()=>SageTools.run('inspect_page_controls',{}));
+    assert.deepEqual(docFields.fields.map(f=>f.field),['docAddName','docAddNotes'],'only the active modal fields are exposed');
+    const docDraft=await page.evaluate(()=>SageTools.run('fill_page_fields',{fields:[{field:'docAddName',value:'Trip permit'},{field:'docAddNotes',value:'Ready for the ride'}]},{userText:'fill the document details'}));
+    assert.equal(docDraft.ok,true);assert.equal(docDraft.saved,false);
+    assert.equal(await page.locator('#docAddName').inputValue(),'Trip permit');
+    await page.evaluate(()=>SageVoice.sendVoiceText('close form'));
+    assert.equal(await page.locator('#docAddModal').getAttribute('aria-hidden'),'true');
+    assert.equal(await page.evaluate(()=>SageVoice.isOpen()),true,'closing a draft is independent of closing the call');
     await page.evaluate(()=>SageVoice.sendVoiceText('open voice settings'));
     await page.locator('#testSettingsInput').fill('Website remains interactive');
     await page.keyboard.press('Escape');assert.equal(await page.evaluate(()=>SageVoice.isOpen()),true,'Escape belongs to settings while docked');
@@ -147,7 +202,7 @@ try {
     assert.equal(await page.evaluate(()=>SageVoice.isOpen()),false);
     assert.equal(await page.evaluate(()=>ears.every(ws=>ws.readyState===3)),true,'close releases all Live sockets');
     await page.waitForFunction(()=>document.getElementById('sageVoiceOverlay').hidden);
-    console.log(`✓ ${name}: real router/Back, Tamil route/close, continuing call, drag/tap separation, keyboard, page/settings access, orb-only click/drag, spoken minimize/expand, Back/Next, upload picker, six replies, flash-free close and resize bounds`);
+    console.log(`✓ ${name}: real router/Back, Tamil route/close, continuing call, drag/tap separation, keyboard, page/settings access, larger orb/status pill, real custom/native dropdowns and calendar fields, document draft/close, local Home correction, spoken minimize/expand, Back/Next, upload picker and repeated replies, flash-free close and resize bounds`);
   }
   assert.deepEqual(errors,[]);console.log('✓ No page errors; provider speech quality is outside this simulated transport audit');
 }finally {await browser?.close();await new Promise(r=>server.close(r));}

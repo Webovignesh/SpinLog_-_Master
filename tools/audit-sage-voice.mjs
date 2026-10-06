@@ -381,10 +381,10 @@ test('audio recognition and a 650ms pause are defaults; careful preferences rema
   try {
     assert.equal(h.root.SageVoice.settings.pauseMs,650);
     await h.open(); await h.finish();
-    assert.match(h.requests[0].url,/gemini-2.5-flash:generateContent/);
+    assert.match(h.requests[0].url,/gemini-3.5-flash:generateContent/);
     assert.equal(careful.root.SageVoice.settings.pauseMs,1200);
     await careful.open(); await careful.finish();
-    assert.match(careful.requests[0].url,/gemini-2.5-flash:generateContent/);
+    assert.match(careful.requests[0].url,/gemini-3.5-flash:generateContent/);
   } finally {h.cleanup();careful.cleanup();}
 });
 
@@ -536,11 +536,11 @@ test('unavailable recognition model falls back on the same audio and remembers t
   let calls=0;const h=harness({transcribe:async()=>++calls===1?sttError(404):transcriptResponse()});
   try {await h.open();await h.finish();await until(()=>h.recordings.length===2);
     const first=h.requests.filter(r=>!r.body.generationConfig.responseModalities);
-    assert.equal(first.length,2);assert.match(first[1].url,/gemini-2.5-flash-lite/);
+    assert.equal(first.length,2);assert.match(first[1].url,/gemini-3.5-flash-lite/);
     assert.equal(first[0].body.contents[0].parts[0].inlineData.data,first[1].body.contents[0].parts[0].inlineData.data);
-    assert.equal(first[0].body.generationConfig.thinkingConfig.thinkingBudget,0);
+    assert.equal(first[0].body.generationConfig.thinkingConfig.thinkingLevel,'minimal');
     await h.finish();await until(()=>h.recordings.length===3);
-    assert.match(h.requests.filter(r=>!r.body.generationConfig.responseModalities).at(-1).url,/gemini-2.5-flash-lite/);
+    assert.match(h.requests.filter(r=>!r.body.generationConfig.responseModalities).at(-1).url,/gemini-3.5-flash-lite/);
   }finally{h.cleanup();}
 });
 test('unsupported thinking option retries once without it, preserving schema safeguards',async()=>{
@@ -1040,7 +1040,7 @@ test('dedicated English streaming setup requests text, language hint and domain 
   const h=harness({live:true});
   try {await h.open();const setup=h.sockets[0].sent[0].setup;
     assert.equal(setup.model,'models/gemini-3.5-transcribe-live');assert.deepEqual(Array.from(setup.generationConfig.responseModalities),['TEXT']);
-    assert.deepEqual(Array.from(setup.inputAudioTranscription.languageCodes),['en-IN']);assert.ok(setup.inputAudioTranscription.customVocabulary.includes('Viky'));
+    assert.deepEqual(Array.from(setup.inputAudioTranscription.languageCodes),['en-IN']);assert.equal(setup.inputAudioTranscription.customVocabulary.includes('Viky'),false);
     assert.equal(setup.systemInstruction,undefined);assert.equal(setup.generationConfig.maxOutputTokens,undefined);
   }finally{h.cleanup();}
 });
@@ -1074,5 +1074,27 @@ test('a never-started English recognizer has bounded readiness and cannot remain
   try {await h.open();await h.finish();await until(()=>h.recordings.length===2);
     await until(()=>h.nodes.get('sageVoiceState').textContent==='Recognition unavailable');
     assert.equal(h.root.SageVoice.isOpen(),true);assert.equal(h.requests.filter(r=>!r.body.generationConfig.responseModalities).length,1);
+  }finally{h.cleanup();}
+});
+
+test('committed fragments during speech stay captions until a real endpoint or local pause',async()=>{
+  const h=harness({live:true,loud:true,liveEnd:ws=>ws.message({serverContent:{turnComplete:true}})});
+  try {await h.open();await until(()=>h.worklets.length===1);h.worklets[0].frame(.03);
+    const ws=h.sockets[0];ws.message({serverContent:{inputTranscription:{text:'Set the cost'}}});
+    await delay(260);assert.equal(h.recordings.length,1);assert.equal(h.recordings[0].state,'recording');assert.equal(h.asks.length,0);
+    ws.message({serverContent:{inputTranscription:{text:'to five hundred rupees'}}});
+    await delay(260);assert.equal(h.asks.length,0);assert.match(h.nodes.get('sageVoiceCaption').innerHTML,/Set the cost to five hundred/);
+    h.nodes.get('sageVoiceOrb').emit('click');await until(()=>h.recordings.length===2);
+    assert.deepEqual(h.asks,['Set the cost to five hundred rupees']);assert.equal(h.decoded.length,0);
+  }finally{h.cleanup();}
+});
+test('a plain hello is preserved without rider-name context, and reply rows are labelled Sage',async()=>{
+  const h=harness({transcribe:async()=>transcriptResponse('Hello')});
+  try {await h.open();await h.finish();await until(()=>h.recordings.length===2);
+    assert.deepEqual(h.asks,['Hello']);
+    const stt=h.requests.find(r=>!r.body.generationConfig.responseModalities);
+    assert.equal(/Viky|rider.s name/i.test(stt.body.systemInstruction.parts[0].text),false);
+    assert.match(stt.body.systemInstruction.parts[0].text,/do not converse/i);
+    assert.match(h.nodes.get('sageVoiceLines').children.at(-1).innerHTML,/<strong>Sage<\/strong>/);
   }finally{h.cleanup();}
 });

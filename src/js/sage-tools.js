@@ -519,6 +519,26 @@
 
     /* ── Doing things in the app ──────────────────────────────────── */
     {
+      name:'inspect_page_controls',
+      description:'Read the actual current page and visible form fields, dropdown labels/options and values. Use before filling details or selecting a dropdown. Credentials and file inputs are excluded. Never invent a field identifier, option or saved result.',
+      parameters:{type:'object',properties:{}},
+    },
+    {
+      name:'fill_page_fields',
+      description:'Fill the live form fields or select native/custom dropdown choices requested by the user. First inspect_page_controls; use its exact field identifiers and legal option values. Dispatches the real app input/change handlers, including filtering and date display. Opens no hidden form, submits nothing and saves no record. Use existing data update tools when asked to save; describe these as filled drafts.',
+      parameters:{type:'object',properties:{fields:{type:'array',items:{type:'object',properties:{field:STRING,value:{...STRING,description:'Exact dropdown option value or text/date/number as a string.'}},required:['field','value']}}},required:['fields']},
+    },
+    {
+      name:'open_page_form',
+      description:'Open the service entry form or Add document form when explicitly requested, and return the actual visible fields/choices. Minimize the continuing voice call. Does not pick/upload a file or save any record.',
+      parameters:{type:'object',properties:{form:{...STRING,enum:['service_entry','document_upload']}},required:['form']},
+    },
+    {
+      name:'activate_page_control',
+      description:'Operate actual page controls when requested: show/hide/clear filters, next/previous results, open/close the site search, close the current form/settings panel. Closing a form discards its unsubmitted draft. Result paging is distinct from navigating Back/Next between app sections. No arbitrary clicks or data deletion.',
+      parameters:{type:'object',properties:{action:{...STRING,enum:['show_filters','hide_filters','clear_filters','next_results','previous_results','open_search','close_search','close_form']}},required:['action']},
+    },
+    {
       name: 'control_voice',
       description: 'Open, close, minimize or expand the active voice conversation when requested. Minimize keeps the same microphone, speaker and all app tools working. Close ends the microphone and reply immediately. Never use for a question about how voice works or a negated request.',
       parameters: { type: 'object', properties: { action: { ...STRING, enum: ['open', 'close', 'minimize', 'expand'] } }, required: ['action'] },
@@ -648,6 +668,7 @@
     },
     get_app_capabilities: () => ({ok:true,replyLanguage:'English',voiceOpen:!!root.SageVoice?.isOpen?.(),voiceMinimized:!!root.SageVoice?.isMinimized?.(),
       recognition:root.SageVoice?.recognitionMode?.() || 'closed',
+      pageControls:root.SagePageControls?.inspect() || {ok:false,error:'Page controls are loading.'},
       controls:TOOLS.map(tool=>({name:tool.name,description:tool.description})),
       pages:['home','service','docs','sage'],
       rules:'UI actions require an explicit current request. Deletions require the app confirmation. File contents must be opened with read tools, never inferred from names.'}),
@@ -676,6 +697,10 @@
     delete_park_entry: (app, a) => app.deleteParkEntry(a),
 
     // ── Getting around ──
+    inspect_page_controls: () => root.SagePageControls?.inspect() || {ok:false,error:'Page controls are still loading.'},
+    fill_page_fields: (_app,a) => root.SagePageControls?.fill(a) || {ok:false,error:'Page controls are still loading.'},
+    open_page_form: (_app,a) => root.SagePageControls?.openForm(a) || {ok:false,error:'Page controls are still loading.'},
+    activate_page_control: (_app,a) => root.SagePageControls?.action(a) || {ok:false,error:'Page controls are still loading.'},
     control_voice: (_app, a) => {
       if (!['open', 'close', 'minimize', 'expand'].includes(a.action)) return { ok: false, error: 'Unknown voice action.' };
       if (!root.SageVoice) return { ok: false, error: 'Voice mode is not loaded.' };
@@ -1096,6 +1121,10 @@
   const UI_CONTROLS = new Set(['control_voice', 'navigate_section', 'navigate_history', 'open_sage_settings']);
   function uiIntent(raw) {
     let text = String(raw || '').normalize('NFC').toLowerCase().replace(/[.!?,;]+/g, ' ').replace(/\s+/g, ' ').trim();
+    // A correction can reject the current screen and request a new one in
+    // the same turn: “It's not the main screen, go to the main page.”
+    const correction = String(raw || '').toLowerCase().match(/^(?:it's|it is|that's|that is|this is)\b[^,;.!?]*[,;.!?]\s*((?:please )?(?:go to|take me to|open|show(?: me)?|switch to)\s+.+)$/);
+    if (correction) text = correction[1].replace(/[.!?,;]+/g, ' ').replace(/\s+/g, ' ').trim();
     if (/(?:\b(?:don't|do not|never|not|how|why|said|say|earlier)\b|வேண்டாம்|வேணாம்|பண்ணாத|செய்யாத|மூடாத|நிறுத்தாத|திறக்காத|எப்படி|சொன்ன)/u.test(text)) return null;
     text = text.replace(/^(?:(?:hey )?sage|bro|சேஜ்|ப்ரோ)\s+/, '').replace(/^(?:please|ப்ளீஸ்|தயவுசெய்து)\s+/, '')
       .replace(/^(?:can|could|would) you\s+/, '').replace(/^please\s+/, '')
@@ -1114,8 +1143,8 @@
     const request = text.match(/^(?:open|show(?: me)?|go to|take me to|switch to) (?:the |my )?(.+?)(?: page| section)?$/)
       || text.match(new RegExp(`^(.+?)\\s+(?:${open}|காட்டு(?:ங்க)?|காண்பி(?:ங்க)?|திறந்து காட்டு|கொண்டு போ|போ|திறக்க முடியுமா)$`, 'u'));
     if (!request) return null;
-    const target = request[1].replace(/\s*(?:page|section|tab|பேஜ்|பேஜை|பேஜ|பக்கம்|பக்கத்தை|பக்கத்த|பேஜ்-ஐ)$/u, '').trim();
-    const pages = {home:'home',dashboard:'home',service:'service','service history':'service',documents:'docs',docs:'docs',chat:'sage','sage chat':'sage',sage:'sage','ஹோம்':'home','முகப்பு':'home','டாஷ்போர்டு':'home','சர்வீஸ்':'service','சர்விஸ்':'service','சேவை':'service','சர்வீஸ் ஹிஸ்டரி':'service','டாக்குமென்ட்ஸ்':'docs','டாக்குமெண்ட்ஸ்':'docs','ஆவணங்கள்':'docs','சாட்':'sage','சேஜ்':'sage','சேஜ் சாட்':'sage'};
+    const target = request[1].replace(/\s*(?:page|screen|section|tab|பேஜ்|பேஜை|பேஜ|பக்கம்|பக்கத்தை|பக்கத்த|பேஜ்-ஐ)$/u, '').trim();
+    const pages = {main:'home','main menu':'home',homepage:'home','home page':'home',home:'home',dashboard:'home',service:'service','service history':'service',documents:'docs',docs:'docs',chat:'sage','sage chat':'sage',sage:'sage','ஹோம்':'home','முகப்பு':'home','டாஷ்போர்டு':'home','சர்வீஸ்':'service','சர்விஸ்':'service','சேவை':'service','சர்வீஸ் ஹிஸ்டரி':'service','டாக்குமென்ட்ஸ்':'docs','டாக்குமெண்ட்ஸ்':'docs','ஆவணங்கள்':'docs','சாட்':'sage','சேஜ்':'sage','சேஜ் சாட்':'sage'};
     if (pages[target]) return { name:'navigate_section', section:pages[target] };
     const panels = {'sage settings':'memory',settings:'memory','voice settings':'voice','memory settings':'memory','timing settings':'timing','notification settings':'alerts','alert settings':'alerts','செட்டிங்ஸ்':'memory','சேஜ் செட்டிங்ஸ்':'memory','வாய்ஸ் செட்டிங்ஸ்':'voice','மெமரி செட்டிங்ஸ்':'memory','டைமிங் செட்டிங்ஸ்':'timing','நோட்டிஃபிகேஷன் செட்டிங்ஸ்':'alerts'};
     if (panels[target]) return { name:'open_sage_settings', tab:panels[target] };
@@ -1123,6 +1152,9 @@
   }
   function uiReply(intent, result) {
     if (!result?.ok) return result?.error || 'That action could not finish. Try again.';
+    if (intent.name === 'fill_page_fields') return `${result.changed.map(field => `${field.label}: ${field.value}`).join(', ')}. Filled in for review.`;
+    if (intent.name === 'open_page_form') return `${intent.form === 'service_entry' ? 'Service' : 'Document'} form is open. Tell me the details to fill in.`;
+    if (intent.name === 'activate_page_control') return {show_filters:'Filters are open.',hide_filters:'Filters are hidden.',clear_filters:'Filters are cleared.',next_results:'The next results page is open.',previous_results:'The previous results page is open.',open_search:'Search is ready. What should I find?',close_search:'Search results are closed.',close_form:'The form is closed.'}[intent.action];
     if (intent.name === 'control_voice') {
       if (intent.action === 'close') return 'Voice mode is closed.';
       if (intent.action === 'minimize') return 'I’m in the corner. Keep talking.';
@@ -1134,6 +1166,11 @@
     return `${page} is open. We can keep talking.`;
   }
   function uiAllowed(name, args, context) {
+    if (['fill_page_fields','open_page_form','activate_page_control'].includes(name)) {
+      const text = context?.userText || '';
+      return /\b(?:fill|select|set|choose|change|type|enter|put|filter|use|update|open|close|show|hide|clear|next|previous|search)\b/iu.test(text)
+        && !/\b(?:don't|do not|never|not|how|why|what|earlier|said|say)\b/iu.test(text);
+    }
     if (name === 'prepare_file_upload') return /\b(?:upload|attach)\b|\b(?:choose|pick)\b.{0,48}\b(?:file|document|bill|photo|image|video|audio)\b|அப்லோட்|அப்லோடு|பதிவேற்று|கோப்பை தேர்வு/iu.test(context?.userText || '')
       && !/\b(?:don't|do not|never|not|how|why|earlier|said)\b|வேண்டாம்|வேணாம்|பண்ணாத|செய்யாத|எப்படி|சொன்ன/iu.test(context?.userText || '');
     if (!UI_CONTROLS.has(name)) return true;
@@ -1151,6 +1188,10 @@
 
   /** Human phrase for the status line under the chat, so actions are visible. */
   const DOING = {
+    inspect_page_controls:'checking the visible fields and dropdowns',
+    fill_page_fields:'filling the requested fields',
+    open_page_form:'opening your form',
+    activate_page_control:'using the page controls',
     read_documents: 'reading your stored documents',
     get_app_capabilities: 'checking my available controls',
     list_services: 'reading your service history',
