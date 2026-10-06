@@ -37,7 +37,7 @@ const server=http.createServer(async(req,res)=>{
   try {
     let data=await readFile(file);
     if(rel==='index.html')data=data.toString().replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace('</body>',
-      ['date-picker','sage-page-controls','sage-tools','sage-ai','sage-transcription','sage-voice'].map(n=>`<script src="src/js/${n}.js?v=1.9.39"></script>`).join('')+'<script src="/audit-router.js"></script></body>');
+      ['date-picker','sage-page-controls','sage-tools','sage-ai','sage-transcription','sage-voice'].map(n=>`<script src="src/js/${n}.js?v=1.9.40"></script>`).join('')+'<script src="/audit-router.js"></script></body>');
     res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.css':'text/css'})[path.extname(file)]||'application/octet-stream');res.end(data);
   }catch {res.writeHead(404).end();}
 });
@@ -71,7 +71,8 @@ try {
     await page.evaluate(()=>{
       const localAsk=SageAI.askSage;
       SageAI.availableKeys=()=>[{key:'test-only'}];
-      SageAI.askSage=(text,opts)=>(SageTools.uiIntent(text)||SagePageControls.intent(text))?localAsk(text,opts):Promise.resolve({ok:true,text:'I’m here. Keep talking.'});
+      SageAI.getKeys=SageAI.availableKeys;
+      SageAI.askSage=(text,opts)=>(SageTools.uiPlan(text)||SageTools.uiIntent(text)||SagePageControls.intent(text))?localAsk(text,opts):Promise.resolve({ok:true,text:'I’m here. Keep talking.'});
       window.SageUI={open(){document.getElementById('testSettings').hidden=false;},isOpen(){return !document.getElementById('testSettings').hidden;}};
       const button=document.createElement('button');button.id='testPageButton';button.textContent='Page action';
       button.style.cssText='position:fixed;left:20px;top:120px;z-index:1100';button.onclick=()=>{window.pageClicked=true;};document.body.append(button);
@@ -129,6 +130,13 @@ try {
     await page.waitForFunction(()=>SageVoice.isMinimized() && document.getElementById('sageVoiceState').textContent==='I’m listening');
     await page.evaluate(()=>SageVoice.sendVoiceText('open service form'));
     assert.equal(await page.evaluate(()=>document.querySelector('main section.active').id),'service');
+    const compound=await page.evaluate(()=>SageAI.askSage('open service form and select Showroom and set cost to 450 then set notes to "do not forget service_bill_2.pdf"',{voice:true}));
+    assert.equal(compound.calls.length,4);assert.ok(compound.calls.every(call=>call.result.ok));
+    assert.equal(await page.locator('#serviceType').inputValue(),'Showroom');
+    assert.equal(await page.locator('#serviceEntryForm [name="cost"]').inputValue(),'450');
+    assert.equal(await page.locator('#serviceEntryForm [name="notes"]').inputValue(),'do not forget service_bill_2.pdf');
+    assert.equal(await page.evaluate(()=>SageTools.uiPlan('open service form and choose a name for my bike')),null,'an unknown generative request stays with the model');
+    assert.equal(await page.evaluate(()=>captureRequests),initial.captures,'compound draft retains the active mic');
     const formState=await page.evaluate(()=>SageTools.run('inspect_page_controls',{}));
     assert.ok(formState.fields.find(f=>f.field==='serviceType').options.some(o=>o.value==='Showroom'));
     assert.equal(formState.fields.some(f=>/sageKey|sageVault|sageChat|fileInput/.test(f.field)),false,'credentials and attachment selection are never exposed');
@@ -179,9 +187,25 @@ try {
     const docDraft=await page.evaluate(()=>SageTools.run('fill_page_fields',{fields:[{field:'docAddName',value:'Trip permit'},{field:'docAddNotes',value:'Ready for the ride'}]},{userText:'fill the document details'}));
     assert.equal(docDraft.ok,true);assert.equal(docDraft.saved,false);
     assert.equal(await page.locator('#docAddName').inputValue(),'Trip permit');
+    const blocked=await page.evaluate(()=>SageTools.run('activate_page_control',{action:'open_search'},{userText:'open search'}));
+    assert.equal(blocked.ok,false,'search cannot navigate behind an open document dialog');
+    assert.equal(await page.locator('#docAddModal').getAttribute('aria-hidden'),'false');
     await page.evaluate(()=>SageVoice.sendVoiceText('close form'));
     assert.equal(await page.locator('#docAddModal').getAttribute('aria-hidden'),'true');
     assert.equal(await page.evaluate(()=>SageVoice.isOpen()),true,'closing a draft is independent of closing the call');
+    await page.evaluate(()=>SageVoice.sendVoiceText('open search'));
+    assert.equal(await page.evaluate(()=>document.querySelector('main section.active').id),'sage','search opens its actual owning section');
+    assert.equal(await page.locator('#dkSearchInput').isVisible(),true);
+    const hiddenField=await page.evaluate(()=>{
+      const input=document.getElementById('dkSearchInput');input.style.visibility='hidden';
+      const result=SagePageControls.fill({fields:[{field:'dkSearchInput',value:'hidden edit'}]});input.style.visibility='';return result;
+    });
+    assert.equal(hiddenField.ok,false,'CSS-hidden fields are unavailable');
+    const confirmation=await page.evaluate(()=>{
+      const modal=document.createElement('div');modal.className='sl-slide-overlay';modal.style.cssText='position:fixed;inset:0;z-index:9999';document.body.append(modal);
+      const state=SagePageControls.inspect(),result=SagePageControls.fill({fields:[{field:'dkSearchInput',value:'behind confirmation'}]});modal.remove();return {state,result};
+    });
+    assert.equal(confirmation.state.fields.length,0);assert.equal(confirmation.result.ok,false,'confirmation dialogs block underlying fields');
     await page.evaluate(()=>SageVoice.sendVoiceText('open voice settings'));
     await page.locator('#testSettingsInput').fill('Website remains interactive');
     await page.keyboard.press('Escape');assert.equal(await page.evaluate(()=>SageVoice.isOpen()),true,'Escape belongs to settings while docked');

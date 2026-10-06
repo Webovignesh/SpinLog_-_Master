@@ -1102,3 +1102,15 @@ The bundled detector is the unmodified libfvad WASM from
 `vendor/libfvad-PATENTS.txt`. Synthetic test speech is generated locally with
 FFmpeg/flite; no user microphone audio is committed. Browser tests mock provider
 responses and cannot measure actual Google latency, quota or live accuracy.
+
+## Sage voice pipeline audit — v1.9.40
+
+The [audit report](docs/sage-pipeline-audit.md) records reproduced recognition,
+caption and website-control defects, their fixes, capability boundaries and
+validation. This release protects full recordings when PCM stalls or fails to
+flush, preserves late browser finals, reduces the extra server speech-start
+gate, rejects queued captions from older turns and distinguishes a resting key
+from a missing key. Explicit commands can now open a form, select its dropdown
+and fill fields in one turn, using the real controls. English compounds and
+filenames are preserved in replies, and full captions are retained. The selected
+English speaker and existing centered/docked conversation UI remain in place.

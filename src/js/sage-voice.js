@@ -85,12 +85,19 @@
   function sttSupported() { return audioCaptureSupported(); }
 
   // ── Text for the mouth ────────────────────────────────────────────────
-  function speakable(text) {
+  function plainVoiceText(text) {
     let out = String(text || '');
     out = out.replace(/```[\s\S]*?```/g, ' ');
-    out = out.replace(/[*_~`#>|]/g, '');
     out = out.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+    out = out.replace(/(^|\n)\s*(?:#{1,6}\s+|>\s*|[-*+]\s+)/g, '$1');
+    out = out.replace(/\*\*([^*]+)\*\*|~~([^~]+)~~|`([^`]+)`/g, (_, ...groups) => groups.slice(0,3).find(value => value !== undefined));
+    out = out.replace(/(^|[\s(])__([^_]+)__(?=$|[\s.,!?;)])/g, '$1$2');
+    out = out.replace(/(^|[\s(])([*_])([^\n*_]+)\2(?=$|[\s.,!?;)])/g, '$1$3');
     out = out.replace(/\p{Extended_Pictographic}/gu, '');
+    return out.replace(/[ \t]{2,}/g, ' ').trim();
+  }
+  function speakable(text) {
+    let out = plainVoiceText(text);
     out = out.replace(/₹/g, ' rupees ');
     out = out.replace(/\s*\n+\s*/g, '. ');
     out = out.replace(/[ \t]{2,}/g, ' ').trim();
@@ -132,7 +139,19 @@
       return [...new Set(keys.map(item => item.key).filter(Boolean))];
     } catch { return []; }
   }
-  function gemKey() { return gemKeys()[0] || ''; }
+  function configuredGemKeys() {
+    try { return root.SageAI?.getKeys ? root.SageAI.getKeys() : gemKeys().map(key => ({key})); }
+    catch { return []; }
+  }
+  function unavailableKey() {
+    const configured = configuredGemKeys();
+    if (!configured.length) return new Error('no-key');
+    const rests = root.SageAI?.readBackoff?.()?.keys || {};
+    const entries = configured.map(key => rests[key.id]);
+    const rejected = entries.every(rest => rest?.kind === 'rejected' && rest.until > Date.now());
+    const retryAt = Math.min(...entries.map(rest => rest?.until > Date.now() ? rest.until : Infinity));
+    return Object.assign(new Error(rejected ? 'stt-auth' : 'quota'),Number.isFinite(retryAt) ? {retryAt} : {});
+  }
 
   function decodeSpeech(inline, streaming = false) {
     const mime = inline.mimeType || 'audio/L16;rate=24000';
@@ -167,7 +186,7 @@
     // also prevents direct callers or stale code from sending Tamil to TTS.
     if ([...clean].some(c => /\p{L}/u.test(c) && !/\p{Script=Latin}/u.test(c))) throw new Error('english-only');
     const keys = gemKeys().filter(k => (audioKeyRest.get(k) || 0) <= Date.now()).slice(0, 2);
-    if (!keys.length) throw new Error(gemKeys().length ? 'quota' : 'no-key');
+    if (!keys.length) throw gemKeys().length ? new Error('quota') : unavailableKey();
     let model = S.ttsModel;
     for (let attempt=0;attempt<keys.length;attempt++) {
       if ((audioKeyRest.get(keys[attempt]) || 0) > Date.now()) {
@@ -596,10 +615,22 @@
   function englishBrowserListener(take) {
     const Recognition = root.SpeechRecognition || root.webkitSpeechRecognition;
     if (!Recognition || Date.now() < nativeRestUntil) return null;
-    let recognizer, final = '', unclear = false, active = true, ending = false, resolveEnd, timer, startTimer;
+    let recognizer, final = '', unclear = false, active = true, ending = false, resolveEnd, timer, startTimer, restartTimer;
     const valid = () => active && capture === take && current(take.owner) && !take.cancelled;
     const result = () => final.trim() ? {transcript:final.trim(),unclear} : null;
     const finish = () => { clearTimeout(timer); resolveEnd?.(result()); resolveEnd = null; };
+    const start = () => {
+      take.nativeReady = false;
+      clearTimeout(startTimer);
+      startTimer = setTimeout(() => {
+        if (!valid() || take.nativeReady || ending) return;
+        take.nativeFailed = true; nativeRestUntil = Date.now()+60000;
+        active = false; try { recognizer.abort(); } catch { /* unavailable */ }
+        paintCaptureReadiness(take);
+      },2000);
+      recognizer.start();
+      paintCaptureReadiness(take);
+    };
     try {
       recognizer = new Recognition();
       recognizer.lang = 'en-IN'; recognizer.continuous = true;
@@ -615,8 +646,12 @@
           if (row.isFinal && row[0].confidence > 0 && row[0].confidence < .5) unclear = true;
         }
         final = committed.join(' ');
+        take.nativeDraft = !!draft.length;
         const text = [...committed,...draft].join(' ');
         if (text) { take.heard = true; take.previewText = text; paintCaption(text,!!draft.length); }
+        if (ending && final && !draft.length) {
+          clearTimeout(timer); timer = setTimeout(finish,40);
+        }
       };
       recognizer.onerror = event => {
         if (!valid()) return;
@@ -629,35 +664,31 @@
       recognizer.onend = () => {
         if (!valid()) return;
         take.nativeReady = false;
-        finish();
+        // A final may arrive after stop/onend. Do not discard it immediately.
+        if (!ending) finish();
         if (!ending && !take.stopping) {
           if (take.nativeFailed) { paintCaptureReadiness(take); return; }
           if (take.heard || final) finishGeminiListen(true);
           else {
             clearTimeout(startTimer);
-            startTimer = setTimeout(() => {
+            restartTimer = setTimeout(() => {
               if (!valid() || ending || take.stopping) return;
-              try { recognizer.start(); } catch { take.nativeFailed = true; paintCaptureReadiness(take); }
+              try { start(); } catch { take.nativeFailed = true; paintCaptureReadiness(take); }
             }, 150);
           }
         }
       };
-      startTimer = setTimeout(() => {
-        if (!valid() || take.nativeReady) return;
-        take.nativeFailed = true; nativeRestUntil = Date.now()+60000;
-        active = false; try { recognizer.abort(); } catch { /* unavailable */ }
-        paintCaptureReadiness(take);
-      },2000);
-      recognizer.start();
+      start();
       return {
         end() {
           ending = true;
           return new Promise(resolve => {
-            resolveEnd = resolve; timer = setTimeout(finish,220);
+            clearTimeout(restartTimer); clearTimeout(startTimer);
+            resolveEnd = resolve; timer = setTimeout(finish,final && !take.nativeDraft ? 40 : 900);
             try { recognizer.stop(); } catch { finish(); }
           });
         },
-        cancel() { active = false; clearTimeout(timer); clearTimeout(startTimer); resolveEnd?.(null); resolveEnd = null; try { recognizer.abort(); } catch { /* ended */ } },
+        cancel() { active = false; clearTimeout(timer); clearTimeout(startTimer); clearTimeout(restartTimer); resolveEnd?.(null); resolveEnd = null; try { recognizer.abort(); } catch { /* ended */ } },
       };
     } catch { active = false; clearTimeout(startTimer); nativeRestUntil = Date.now()+60000; return null; }
   }
@@ -714,7 +745,7 @@
       take.live.bind({
         onText:(text, final) => {
           if (!current(owner) || capture !== take || take.cancelled || take.stopping) return;
-          if (!take.heard || !text.trim()) return; // never turn idle noise into a command
+          if (!take.heard) return; // never turn idle noise into a command
           take.previewText = text;
           paintCaption(text, !final);
           paintCaptureReadiness(take);
@@ -747,13 +778,16 @@
       S.recording = true;
       recorder.start(100);
       const pcmStarted = Date.now();
+      const abandonPartialPCM = () => {
+        take.liveGap = true; take.pcmUnavailable = true;
+        take.live?.close(); take.live = null;
+        paintCaptureReadiness(take);
+      };
       take.readyTimer = setTimeout(() => {
         if (!current(owner) || capture !== take || take.cancelled || take.stopping || take.pcmAt || take.pcmUnavailable) return;
         // A stalled worklet must not strand startup. MediaRecorder already
         // owns the complete utterance; switch this turn to that recording.
-        take.liveGap = true; take.pcmUnavailable = true;
-        take.live?.close(); take.live = null;
-        paintCaptureReadiness(take);
+        abandonPartialPCM();
       }, 1500);
       root.SageTranscription?.attach(stream, actx, frame => {
         if (capture !== take || take.cancelled) return;
@@ -818,6 +852,9 @@
       take.timer = setInterval(() => {
         if (capture !== take || take.stopping) return;
         const now = Date.now();
+        // A node can stall without firing processorerror. Its earlier packets
+        // are not a complete recording. Keep the MediaRecorder's full turn.
+        if (take.pcmAt && now - take.pcmAt > 500 && !take.pcmUnavailable) abandonPartialPCM();
         // Detection runs independently of visual animation frames. Lower the
         // continuation threshold so quiet syllables remain in the turn.
         // A crashed/stalled worklet must not freeze its last loud frame and
@@ -940,7 +977,10 @@
   function finalizeCapture(take) {
     return take.finalizing ||= (async () => {
       const native = take.native?.end();
-      try { await bounded(take.pcm?.stop(), 200, 'capture-timeout'); } catch { /* recorder fallback */ }
+      try {
+        if (await bounded(take.pcm?.stop(), 200, 'capture-timeout') === false) take.pcmBroken = true;
+      } catch { take.pcmBroken = true; }
+      if (take.pcmBroken) { take.live?.close(); take.live = null; }
       let live;
       try { live = take.liveGap || take.pcmBroken ? null : await bounded(take.live?.end(), 2500, 'timeout'); }
       catch { take.live?.close(); }
@@ -1106,7 +1146,7 @@
   }
   async function transcribeWithGemini(b64, owner) {
     const configured = gemKeys().slice(0, 3);
-    if (!configured.length) throw new Error('no-key');
+    if (!configured.length) throw unavailableKey();
     const preferred = GEM_STT_MODEL;
     const models = [...new Set([sttRoute?.preferred === preferred ? sttRoute.model : preferred, preferred, 'gemini-3.5-flash-lite'])];
     const id = route => route.model + ':' + route.key;
@@ -1286,7 +1326,7 @@
       e.caption.textContent = '';
       return;
     }
-    e.caption.innerHTML = `<span class="sage-voice-you">you · </span>${esc(f.length > 200 ? f.slice(-200) : f)}`
+    e.caption.innerHTML = `<span class="sage-voice-you">you · </span>${esc(f)}`
       + (live ? '<span class="sage-voice-caret" aria-hidden="true"></span>' : '');
   }
 
@@ -1300,7 +1340,7 @@
     if (!e.lines || !text) return;
     const div = document.createElement('p');
     div.className = `sage-voice-line ${who === 'you' ? 'is-you' : 'is-her'}`;
-    div.innerHTML = `<strong>${who === 'you' ? 'You' : 'Sage'}</strong><span>${esc(String(text))}</span>`;
+    div.innerHTML = `<strong>${who === 'you' ? 'You' : 'Sage'}</strong><span>${esc(who === 'you' ? String(text) : plainVoiceText(text))}</span>`;
     const previous = [...e.lines.children];
     const tops = previous.map(line => line.getBoundingClientRect().top);
     e.lines.appendChild(div);
@@ -1361,6 +1401,7 @@
     if (err?.message === 'quota') return 'Voice quota reached. Your reply is saved in chat. Try again shortly.';
     if (err?.message === 'play-blocked') return 'Sound is blocked by the browser. Tap the orb to enable audio.';
     if (err?.message === 'no-key') return 'Add or unlock a Gemini key in Sage settings for spoken replies.';
+    if (err?.message === 'stt-auth') return 'Your Gemini key was rejected. Check it in settings; your reply is saved in chat.';
     if (/^tts-(?:401|403|404)$/.test(err?.message || '')) return 'Your Gemini key cannot access the saved voice model. Check the key in settings; your reply is saved in chat.';
     return 'Audio is unavailable right now. Your reply is saved in chat. You can keep talking.';
   }
@@ -1660,11 +1701,17 @@
     startVisualizer();
 
     // The next capture starts after each completed spoken reply.
-    if (!gemKey()) {
+    if (!configuredGemKeys().length) {
       pauseListening('Add or unlock your Gemini key in Sage settings for voice conversation.');
     } else if (!audioCaptureSupported()) {
       pauseListening('Audio recording is unavailable. Open this site in a browser with microphone recording support.');
-    } else { warmRecognition(); startListening(); }
+    } else {
+      if (!gemKeys().length) {
+        recognitionNotice = recognitionProblem(unavailableKey());
+        nativeEnglishFallback = !!(root.SpeechRecognition || root.webkitSpeechRecognition);
+      }
+      warmRecognition(); startListening();
+    }
     return true;
   }
 

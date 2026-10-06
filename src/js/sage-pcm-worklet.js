@@ -1,6 +1,6 @@
 // Continuous 16 kHz mono PCM, 100 ms packets. Fractional integration preserves
 // sample continuity across 44.1/48 kHz render blocks and low-pass downsamples.
-import {createSpeechDetector} from '../../vendor/sage-vad.js?v=1.9.39';
+import {createSpeechDetector} from '../../vendor/sage-vad.js?v=1.9.40';
 class SagePCMCapture extends AudioWorkletProcessor {
   constructor() {
     super(); this.samples = new Int16Array(1600); this.offset = 0;

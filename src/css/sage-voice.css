@@ -47,6 +47,7 @@
 .sage-voice-line:nth-last-child(2) { opacity:.78; }
 .sage-voice-caption { margin:0; flex:none; padding:4px 0; background:none; border:0; min-height:0; color:#c8c9cf; font:400 13px/1.6 var(--sl-read); text-align:center; }
 .sage-voice-caption:empty { display:none; }
+.sage-voice-caption { max-height:4.8em; overflow-y:auto; overflow-wrap:anywhere; white-space:pre-wrap; scrollbar-width:thin; }
 .sage-voice-you { color:#ffbc86; }
 .sage-voice-caret { display:inline-block; height:1em; width:2px; margin-left:3px; background:currentColor; animation:sageDots 1s steps(2) infinite; }
 .sage-voice-controls { flex:none; display:flex; justify-content:center; align-items:center; gap:14px; margin-top:auto; padding-top:20px; }

@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {readFile} from 'node:fs/promises';
 const source=await readFile(new URL('../src/js/sage-ai.js',import.meta.url),'utf8');
+const controlsSource=await readFile(new URL('../src/js/sage-tools.js',import.meta.url),'utf8');
 const tick=()=>new Promise(resolve=>setTimeout(resolve,5));
 async function until(check){for(let i=0;i<100;i++){if(check())return;await tick();}assert.ok(check(),'request did not start');}
 const answer=text=>({ok:true,status:200,json:async()=>({candidates:[{content:{parts:[{text}]},finishReason:'STOP'}]})});
@@ -19,6 +20,51 @@ function harness(fetch){
   root.SageAI.addKey('fake-test-key-one');
   return {root,AI:root.SageAI,delays,requests,cleanup(){timers.forEach(clearTimeout);}};
 }
+
+test('English hyphenation and filenames survive the common reply formatter',async()=>{
+  const text='Plan-A needs vitamin-a and service_bill_2.pdf.';
+  const h=harness(async()=>answer(text));
+  try {assert.equal((await h.AI.askSage('Tell me the plan',{voice:true,tools:false})).text,text);}
+  finally{h.cleanup();}
+});
+test('explicit compound navigation runs in order locally, before quota and with actual results',async()=>{
+  const h=harness(async()=>{throw new Error('No model request expected');});const opened=[];
+  try {vm.runInNewContext(controlsSource,h.root);
+    h.root.dkApp={goToSection:async({section})=>{opened.push(section);return {ok:true,opened:section};}};
+    h.root.SageVoice={minimize(){return true;}};
+    h.AI.noteKeyLimited(h.AI.getKeys()[0].id);
+    const reply=await h.AI.askSage('open service and then open documents',{voice:true});
+    assert.equal(reply.ok,true);assert.deepEqual(opened,['service','docs']);assert.equal(reply.calls.length,2);assert.equal(h.requests.length,0);
+    assert.match(reply.text,/Service history is open/);assert.match(reply.text,/Documents is open/);
+  }finally{h.cleanup();}
+});
+test('failed and cancelled compound actions stop without acknowledging later actions',async()=>{
+  const h=harness(async()=>{throw new Error('No model request expected');});const opened=[];
+  try {vm.runInNewContext(controlsSource,h.root);
+    h.root.dkApp={goToSection:async({section})=>{opened.push(section);return {ok:false,error:'Page unavailable.'};}};
+    const reply=await h.AI.askSage('open service then open documents',{voice:true});
+    assert.deepEqual(opened,['service']);assert.equal(reply.calls.length,1);assert.equal(reply.text,'Page unavailable.');
+    const cancelled=await h.AI.askSage('open service then open documents',{voice:true,isCancelled:()=>true});
+    assert.equal(cancelled.reason,'cancelled');assert.equal(opened.length,1);
+  }finally{h.cleanup();}
+});
+test('model context includes actual visible controls instead of guessed fields',async()=>{
+  const h=harness(async()=>answer('Choose Showroom.'));
+  try {h.root.SageTools={declarations:()=>[],run(){}};
+    h.root.SagePageControls={inspect:()=>({ok:true,section:'service',fields:[{field:'serviceType',options:[{value:'Showroom',label:'Showroom'}]}],actions:['show_filters']})};
+    await h.AI.askSage('Which option should I pick?',{voice:true});
+    const system=JSON.stringify(h.requests[0].body.systemInstruction);
+    assert.match(system,/Current visible page controls/);assert.match(system,/serviceType/);assert.match(system,/Showroom/);
+  }finally{h.cleanup();}
+});
+test('ordinary requests to choose something are answered by the model, not treated as missing UI fields',async()=>{
+  const h=harness(async()=>answer('Call your bike Ember.'));
+  try {vm.runInNewContext(controlsSource,h.root);
+    h.root.SagePageControls={intent:()=>null,canHandle:()=>true,inspect:()=>({ok:true,fields:[]})};
+    const reply=await h.AI.askSage('choose a name for my bike',{voice:true});
+    assert.equal(reply.text,'Call your bike Ember.');assert.equal(h.requests.length,1);
+  }finally{h.cleanup();}
+});
 
 test('voice starts while background HTTP is pending; ordinary requests remain serialized',async()=>{
   let finishBackground;
