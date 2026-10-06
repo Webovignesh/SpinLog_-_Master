@@ -881,7 +881,7 @@ gone rather than left as links that go nowhere. What was in them that still matt
   back to localStorage then to the `data-due` values in `index.html`; Sage's memory
   falls back to localStorage; the key ring stays on the device.
 
-## Sage voice — v1.9.33
+## Sage voice — v1.9.34
 
 Open **Talk to Sage** inside the chat card, or type **go to voice mode**, **open
 voice chat** or **let’s talk**. The translucent room centers the latest four
@@ -907,8 +907,12 @@ The WebSocket starts alongside microphone permission. PCM is buffered until
 `setupComplete`, and the next connection is warmed while the reply plays.
 MediaRecorder starts immediately when permission resolves and preserves the
 whole utterance as a fallback. An existing gesture-unlocked AudioContext and
-microphone stream are reused across turns. “Listening” appears only after the
-recorder actually starts. A slow worklet startup uses the full recording rather
+microphone stream are reused across turns. The status distinguishes opening the
+microphone, starting audio and connecting captions. “I’m listening” appears after capture and live setup are ready, or after
+the complete-recording fallback is available. The UI explains that first words
+are kept during connection and that fallback captions appear after a pause.
+A worklet that has not delivered PCM after 1.5 seconds switches the current turn
+to the complete recording. A slow worklet startup uses the full recording rather
 than submitting a potentially missing first word.
 
 Local audio-level sampling runs every 100 ms independently of animation frames.
@@ -956,9 +960,12 @@ with the chosen speaker (Kore by default) and playback rate fixed for the call.
 The style instruction is empty, following Google’s guidance to avoid unnecessary
 identity/accent direction. Tamil stays in Tamil script for pronunciation. There
 is no browser voice, separate Tamil narrator, or legacy 3.1/2.5 TTS fallback.
-A supported 3.8 model is remembered across calls and locked after playback starts;
-a subsequent error cannot silently switch it. This removes application-driven
-voice changes; it cannot guarantee identical generated timbre on every reply.
+The first successful 3.8 model is remembered and pinned across calls, including
+the first reply after reopening. Access errors may try another configured key
+with that same model and speaker; quota cooldowns never choose another voice.
+Only a new setup with no previously successful voice may select an accessible
+model before the first playback. This removes application-driven voice changes;
+it cannot guarantee identical generated timbre on every reply.
 
 Streaming 24 kHz PCM packets are coalesced into at least 120 ms of audio and
 scheduled contiguously on the Web Audio clock. Odd-byte transport splits retain
@@ -968,6 +975,21 @@ incomplete replies retry once before playback; already-started speech is not
 repeated. Transient failures resume listening with a status rather than offering
 a replay button. These checks remove avoidable gaps but cannot repair distortion
 already present in generated audio. See [Google’s TTS guidance](https://ai.google.dev/gemini-api/docs/generate-content/speech-generation).
+
+The orb samples microphone and actual reply playback levels, with a smoothed
+scale and small movement; silence has no fixed speaking boost. Its animation
+loop and output analyser are released on close. Reduced-motion mode suppresses
+the movement. Visualization does not drive speech-end detection.
+
+Voice has its own persona instead of inheriting the English-first text-chat
+policy. Tamil answers are composed directly in familiar spoken Tamil, with
+Chennai/Theni register, singular address and natural app/bike English terms.
+English greetings with an address such as “da” stay English; common spoken
+Tanglish forms such as “enna panra” and “saptiya” are recognized as Tamil.
+Viky remains spelled exactly in captions/history, with “Vik-ee” used only in the
+speech transcript. Prompt regressions verify that English-only grammar rules
+are absent from voice; real Tamil fluency and generated pronunciation still
+require listening tests with the configured provider.
 
 Voice answers use Gemini 3.5 Flash-Lite with minimal thinking, a separate serial
 queue and per-model request spacing. Tools must complete before claims of success.

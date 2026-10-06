@@ -132,16 +132,28 @@ test('an older in-flight success cannot erase a newer project quota cooldown',as
   }finally{h.cleanup();}
 });
 
-test('voice language rules override chat mixing restrictions without imposing pet names',async()=>{
-  for(const text of ['எது ரொம்ப விலை அதிகம்','Which update costs the most?']) {
+test('voice uses a native Tamil persona without contradictory text-chat restrictions',async()=>{
+  for(const text of ['எது ரொம்ப விலை அதிகம்','enna panra','saptiya','Which update costs the most?','hello da']) {
     const h=harness(async()=>answer('Test response'));
     try {await h.AI.askSage(text,{voice:true,tools:false});
       const system=JSON.stringify(h.requests[0].body.systemInstruction);
       assert.match(system,/Answer what he actually asked first/);assert.match(system,/Do not keep adding da/);
       assert.doesNotMatch(system,/FINISH EVERY CLAUSE/);
-      assert.match(system,text.startsWith('Which')?/He spoke English/:/natural spoken Tamil/);
+      assert.doesNotMatch(system,/ENGLISH LETTERS ONLY|nouns.*verbs must stay ENGLISH|NEVER.*naan/i);
+      assert.match(system,/Compose the answer directly/);
+      assert.match(system,/familiar singular நீ/);assert.match(system,/Keep Viky in Latin letters/);
+      assert.match(system,/^(?:Which|hello)/.test(text)?/He spoke English/:/natural spoken Tamil/);
     }finally{h.cleanup();}
   }
+});
+test('spoken moods never reintroduce text emojis or parked-bike status as a greeting',()=>{
+  const h=harness(async()=>answer('ready'));
+  try {for(const mood of Object.keys(h.AI.MOOD_DIRECTION)) {
+    const voice=h.AI.personaFor(mood,'chat',{voice:true});
+    assert.doesNotMatch(voice,/Emoji:|Afternoon, parked|Early morning, everything in you still cold/);
+    assert.match(voice,/His name is spelled Viky/);
+    assert.ok(h.AI.personaFor(mood,'chat').includes(h.AI.PERSONA),'ordinary text personality is preserved');
+  }}finally{h.cleanup();}
 });
 test('closing a voice session during tool execution stops later tools and follow-up generation',async()=>{
   let cancelled=false;
