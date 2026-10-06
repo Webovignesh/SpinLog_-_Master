@@ -1114,3 +1114,13 @@ from a missing key. Explicit commands can now open a form, select its dropdown
 and fill fields in one turn, using the real controls. English compounds and
 filenames are preserved in replies, and full captions are retained. The selected
 English speaker and existing centered/docked conversation UI remain in place.
+
+## Sage startup and spoken replies — v1.9.41
+
+Startup microphone noise is checked locally before processing or transcription,
+while a real first word spoken during a cold audio load retains its complete
+recorded prefix. Failed speech streams can recover once through complete audio
+using the same selected model and speaker. WAV decoding, interrupted output
+contexts and persistent audio-error hints are fixed. The
+[follow-up report](docs/sage-startup-audio-fix.md) records nine reproduced failures,
+176 passing deterministic tests and real Chromium recording/playback checks.

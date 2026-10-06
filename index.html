@@ -13,7 +13,7 @@
        needs no JS change. Keep the version segment of CACHE_NAME in service-worker.js
        in step with this — that file cannot read a meta tag, and a mismatch means the
        number on screen is not the number that is actually cached. -->
-  <meta name="version" content="1.9.40"/>
+  <meta name="version" content="1.9.41"/>
   <title>SpinLog</title>
   <!-- Not decoration. This is what an install prompt, a shared link and a
        browser's own history entry show underneath the title, and without it they
@@ -21,7 +21,7 @@
        chip. The manifest has its own description; this one is for the page. -->
   <meta name="description" content="SpinLog — service, document and insurance tracker for a KTM Duke 250 Gen 3. Offline-capable, with Sage, the bike's own AI companion."/>
   <link rel="preload" href="assets/img/sage.webp" as="image" fetchpriority="high">
-  <link rel="preload" href="src/js/sage-pcm-worklet.js?v=1.9.40" as="script">
+  <link rel="preload" href="src/js/sage-pcm-worklet.js?v=1.9.41" as="script">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
   <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;600&display=swap" rel="stylesheet">
   <link rel="manifest" href="manifest.json">
@@ -38,9 +38,9 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="icon" href="assets/icons/icon-192.png" type="image/png">
   <link rel="apple-touch-icon" href="assets/icons/icon-192.png">
-  <link rel="stylesheet" href="src/css/styles.css?v=1.9.40"/>
-  <link rel="stylesheet" href="src/css/home.css?v=1.9.40"/>
-  <link rel="stylesheet" href="src/css/sage-voice.css?v=1.9.40"/>
+  <link rel="stylesheet" href="src/css/styles.css?v=1.9.41"/>
+  <link rel="stylesheet" href="src/css/home.css?v=1.9.41"/>
+  <link rel="stylesheet" href="src/css/sage-voice.css?v=1.9.41"/>
 </head>
 <body>
   <!-- three.js site backdrop (home3d.js): assets/img/bike-bg.webp run through a
@@ -2106,33 +2106,33 @@
       <!-- Shared with the service worker via importScripts, so the page and the
            background checks agree on one queue, cap and cooldown set. Must load
            before notifications.js, which pumps it. -->
-      <script src="src/js/sage-scheduler.js?v=1.9.40"></script>
+      <script src="src/js/sage-scheduler.js?v=1.9.41"></script>
       <!-- What she remembers about Viky. Before sage-ai.js, which reads it when
            building her system instruction. -->
-      <script src="src/js/sage-memory.js?v=1.9.40"></script>
+      <script src="src/js/sage-memory.js?v=1.9.41"></script>
       <!-- Her hands: the controls she can actually operate. Declarations only,
            so load order against script.js does not matter — window.dkApp is
            looked up when a control is used, not when this file runs. -->
-      <script src="src/js/sage-tools.js?v=1.9.40"></script>
+      <script src="src/js/sage-tools.js?v=1.9.41"></script>
       <!-- Gemini key + model. Loaded before notifications.js so her voice is
            available to the first notification of the session. -->
-      <script src="src/js/sage-ai.js?v=1.9.40"></script>
+      <script src="src/js/sage-ai.js?v=1.9.41"></script>
       <!-- Encrypted cloud backup of the key ring. After sage-ai.js, which owns
            the ring it reads and writes. -->
       <script src="src/js/sage-keyvault.js"></script>
-      <script src="src/js/notifications.js?v=1.9.40"></script>
-      <script src="src/js/script.js?v=1.9.40"></script>
-      <script src="src/js/sage-page-controls.js?v=1.9.40"></script>
+      <script src="src/js/notifications.js?v=1.9.41"></script>
+      <script src="src/js/script.js?v=1.9.41"></script>
+      <script src="src/js/sage-page-controls.js?v=1.9.41"></script>
       <!-- Sage filling in the service form and the document fields. After
            script.js so the forms and the data snapshot exist first. -->
       <script src="src/js/sage-autofill.js"></script>
       <!-- Settings modal. After script.js so the app shell exists first. -->
-      <script src="src/js/sage-ui.js?v=1.9.40"></script>
+      <script src="src/js/sage-ui.js?v=1.9.41"></script>
       <!-- Hands-free voice mode: ears + mouth around the same brain.
            After sage-ai.js (the brain) and sage-ui.js (the chat log it
            appends to). Classic script, one global: window.SageVoice. -->
-      <script src="src/js/sage-transcription.js?v=1.9.40"></script>
-      <script src="src/js/sage-voice.js?v=1.9.40"></script>
+      <script src="src/js/sage-transcription.js?v=1.9.41"></script>
+      <script src="src/js/sage-voice.js?v=1.9.41"></script>
       <script type="module" src="src/js/home3d.js"></script>
       <!-- Animates the three Documents archive drop zones. Injects its own
            canvas and only takes over once it has proven it can paint, so the

@@ -31,6 +31,23 @@ for(const rate of [16000,44100,48000]) {
 const fixture=JSON.parse(await readFile(new URL('fixtures/sage-english-speech.json',import.meta.url),'utf8'));
 const fixtureBytes=Buffer.from(fixture.pcm,'base64');
 const utterance=new Int16Array(fixtureBytes.buffer.slice(fixtureBytes.byteOffset,fixtureBytes.byteOffset+fixtureBytes.length));
+// Run the production full-recording validator with its real WASM detector.
+// VM dynamic import alone is substituted to avoid Node's experimental VM flag.
+const earsSource=await readFile(new URL('../src/js/sage-transcription.js',import.meta.url),'utf8');
+const ears={document:{},self:null,createSpeechDetector,DataView,Int16Array};ears.self=ears;
+vm.runInNewContext(earsSource.replace('import(detectorURL)','Promise.resolve({createSpeechDetector:root.createSpeechDetector})'),ears);
+function wav(pcm) {
+  const bytes=Buffer.alloc(44+pcm.length*2);bytes.write('RIFF');bytes.writeUInt32LE(bytes.length-8,4);
+  bytes.write('WAVEfmt ',8);bytes.writeUInt32LE(16,16);bytes.writeUInt16LE(1,20);bytes.writeUInt16LE(1,22);
+  bytes.writeUInt32LE(16000,24);bytes.writeUInt32LE(32000,28);bytes.writeUInt16LE(2,32);bytes.writeUInt16LE(16,34);
+  bytes.write('data',36);bytes.writeUInt32LE(pcm.length*2,40);pcm.forEach((n,i)=>bytes.writeInt16LE(n,44+i*2));
+  return new Blob([bytes],{type:'audio/wav'});
+}
+for(const scale of [1,.15])test(`complete recorder validation retains a cold-start first word at amplitude ${scale}`,async()=>{
+  const prefix=Int16Array.from(utterance.subarray(0,9600),n=>n*scale),full=new Int16Array(32000);
+  full.set(prefix,1600); // word precedes late worklet attachment; trailing audio is silent
+  assert.equal(await ears.SageTranscription.hasSpeech(wav(full)),true);
+});
 function classify(pcm) {
   const packets=[];let Ctor;
   class Processor {port={postMessage:m=>packets.push(m)};}
@@ -49,7 +66,7 @@ for(const scale of [1,.15])test(`bundled WebRTC VAD detects English speech at am
   assert.ok(first>=0&&first<5,'first speech is detected within 500ms, without another utterance');
   assert.ok(packets.every(p=>p.speechMs<=100&&p.activeMs<=100),'classification uses 20ms windows, not whole-buffer loudness');
 });
-for(const name of ['silence','fan','click','dc'])test(`startup ${name} never reaches the 120ms speech gate`,()=>{
+for(const name of ['silence','fan','click','dc'])test(`startup ${name} never reaches the 120ms speech gate or passes complete recorder validation`,async()=>{
   const samples=new Int16Array(16000);let seed=11;
   for(let i=0;i<samples.length;i++){
     seed=(seed*1664525+1013904223)>>>0;
@@ -60,4 +77,5 @@ for(const name of ['silence','fan','click','dc'])test(`startup ${name} never rea
   let run=0,max=0;
   for(const packet of classify(samples)){run=packet.speechMs?run+Math.min(packet.speechMs,packet.activeMs):0;max=Math.max(max,run);}
   assert.ok(max<120,`${name} was rejected (max ${max}ms)`);
+  assert.equal(await ears.SageTranscription.hasSpeech(wav(samples)),false);
 });
