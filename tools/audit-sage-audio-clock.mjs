@@ -8,7 +8,7 @@ let chromium;
 try {({chromium}=await import('playwright'));}
 catch {({chromium}=await import(pathToFileURL(path.join(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES,'playwright/index.mjs'))));}
 const source=await readFile(new URL('../src/js/sage-voice.js',import.meta.url),'utf8');
-const scheduler=source.slice(source.indexOf('  async function playSpeech('),source.indexOf('\n  function stopAllAudio()'));
+const scheduler=source.slice(source.indexOf('  let outputAnalyser ='),source.indexOf('\n  function stopAllAudio()'));
 const browser=await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE||undefined,args:['--no-sandbox','--disable-dev-shm-usage','--disable-gpu']});
 try {
   const page=await browser.newPage();

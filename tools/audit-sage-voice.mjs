@@ -18,10 +18,10 @@ async function until(check) {
 function harness(options = {}) {
   const timers = new Set(), intervals = new Map(), nodes = new Map(), streams = [], recordings = [], recognition = [];
   const asks = [], requests = [], decoded = [], playback = [], contexts = [];
-  const sockets = [], worklets = [];
+  const sockets = [], worklets = [], analysers = [], animationFrames = new Map();
   let history = [], now = 100000;
   class Element {
-    constructor(id = '') { this.id = id; this.children = []; this.events = {}; this.attrs = {}; this.hidden = false; this.value = ''; this.type = ''; this.isConnected = true; this.style = { setProperty() {} }; this.classList = { add() {}, remove() {}, toggle() {} }; }
+    constructor(id = '') { this.id = id; this.children = []; this.events = {}; this.attrs = {}; this.hidden = false; this.value = ''; this.type = ''; this.isConnected = true; this.style = { setProperty(k,v) { this[k]=v; } }; this.classList = { add() {}, remove() {}, toggle() {} }; }
     addEventListener(name, fn) { (this.events[name] ||= []).push(fn); }
     emit(name) { this.events[name]?.forEach(fn => fn({ preventDefault() {}, stopPropagation() {}, target: this })); }
     setAttribute(k,v) { this.attrs[k] = v; }
@@ -62,7 +62,7 @@ function harness(options = {}) {
     currentTime = 0;
     constructor() { contexts.push(this); }
     state = options.audioBlocked ? 'suspended' : 'running';
-    audioWorklet = {addModule:async()=>{}};
+    audioWorklet = {addModule:options.addModule || (async()=>{})};
     destination = {};
     resume() { return Promise.resolve(); }
     createBuffer(channels,length,rate) { return {duration:length/rate,copyToChannel(data) { this.samples = new Float32Array(data); }}; }
@@ -74,7 +74,7 @@ function harness(options = {}) {
     }
     close() { return Promise.resolve(); }
     createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
-    createAnalyser() { return { fftSize: 1024, disconnect(){},getByteTimeDomainData(data) { data.fill(options.loud ? 136 : 128); } }; }
+    createAnalyser() { const analyser={ fftSize:1024, sample:null,connect(){},disconnect(){this.disconnected=true;},getByteTimeDomainData(data) { data.fill(this.sample ?? (options.loud ? 136 : 128)); } };analysers.push(analyser);return analyser; }
     async decodeAudioData(buffer) { decoded.push(Buffer.from(buffer).toString()); if(options.hangDecode)return new Promise(()=>{}); return { duration: 0.1 }; }
   }
   class OfflineAudioContext {
@@ -113,7 +113,7 @@ function harness(options = {}) {
     localStorage: { getItem: k => storage.get(k) ?? null, setItem: (k,v) => storage.set(k,v) },
     setTimeout(fn,ms) { const timer = setTimeout(fn,options.fastTimeouts && ms >= 1000 ? 30 : options.fastRestarts && ms >= 500 && ms <= 3000 ? 0 : ms); timers.add(timer); return timer; }, clearTimeout,
     setInterval(fn) { const id = Symbol(); intervals.set(id,fn); return id; }, clearInterval: id => intervals.delete(id),
-    requestAnimationFrame: () => 1, cancelAnimationFrame() {}, matchMedia: () => ({ matches: true }),
+    requestAnimationFrame: fn => { const id=Symbol();animationFrames.set(id,fn);return id; }, cancelAnimationFrame:id=>animationFrames.delete(id), matchMedia: () => ({ matches: true }),
     Date: class extends Date { static now() { return now; } },
     dkReduceMotion: () => true,
     dkCloudStore: { chatHistory: () => history.slice(), setChat: rows => { history = rows; } },
@@ -128,9 +128,10 @@ function harness(options = {}) {
   root.self = root;
   if (options.live) {root.WebSocket=Socket;root.AudioWorkletNode=Worklet;vm.runInNewContext(liveSource,root,{filename:'sage-transcription.js'});}
   vm.runInNewContext(source, root, { filename: 'sage-voice.js' });
-  return { root, nodes, streams, recordings, recognition, asks, requests, decoded, storage, playback, contexts,sockets,worklets,
+  return { root, nodes, streams, recordings, recognition, asks, requests, decoded, storage, playback, contexts,sockets,worklets,analysers,animationFrames,
     get history() { return history; },
     tick(ms) { now += ms; [...intervals.values()].forEach(fn => fn()); },
+    animate() { const frames=[...animationFrames.values()];animationFrames.clear();frames.forEach(fn=>fn()); },
     async open() { root.SageVoice.open(); await until(() => recordings.length || (options.storage?.sage_voice_recognition === 'browser' && recognition.length)); },
     async finish() { nodes.get('sageVoiceOrb').emit('click'); await until(() => requests.some(r => !r.body.generationConfig.responseModalities)); },
     cleanup() { root.SageVoice.close(); timers.forEach(clearTimeout); }, newStream,
@@ -469,17 +470,55 @@ test('more than four exchanges keep listening and hide activity outside website 
 });
 
 test('streaming TTS keeps the successful model and speaker across bilingual turns and reopening',async()=>{
-  const h=harness();let calls=[];
-  try {await h.open();const fallback=h.root.fetch;
-    h.root.fetch=async(url,init)=>{calls.push(url);if(url.includes('gemini-3.8-flash-lite-tts'))return {ok:false,status:404};return fallback(url,init);};
+  const h=harness({storage:{sage_voice_tts_model:'gemini-3.8-flash-tts'}});
+  try {await h.open();
     await h.root.SageVoice.sendVoiceText('சொல்லு டா');await h.root.SageVoice.sendVoiceText('English reply');
     h.root.SageVoice.close();await h.open();await h.root.SageVoice.sendVoiceText('Another English reply');
-    assert.equal(calls.filter(u=>u.includes('gemini-3.8-flash-lite-tts')).length,1);
-    assert.equal(calls.filter(u=>u.includes('gemini-3.8-flash-tts')).length,3);
+    assert.equal(h.requests.length,3);
+    assert.ok(h.requests.every(r=>r.url.includes('gemini-3.8-flash-tts')));
     assert.equal(h.storage.get('sage_voice_tts_model'),'gemini-3.8-flash-tts');
     assert.ok(h.requests.every(r=>r.body.generationConfig.speechConfig.voiceConfig.voice==='Kore'));
     assert.ok(h.requests.every(r=>r.body.contents[0].parts[0].speech_metadata.style===''));
   } finally {h.cleanup();}
+});
+test('access errors on the first reply retry another key without changing the saved model or voice',async()=>{
+  const h=harness({storage:{sage_voice_tts_model:'gemini-3.8-flash-tts'}});const calls=[];
+  try {await h.open();const fetch=h.root.fetch;
+    h.root.SageAI.availableKeys=()=>[{key:'test-only'},{key:'test-other'}];
+    h.root.fetch=(url,init)=>{calls.push({url,key:init.headers['x-goog-api-key']});return calls.length===1?Promise.resolve({ok:false,status:403}):fetch(url,init);};
+    await h.root.SageVoice.sendVoiceText('hello');
+    assert.equal(calls.length,2);assert.equal(calls[0].url,calls[1].url);
+    assert.notEqual(calls[0].key,calls[1].key);assert.equal(h.playback.length,1);
+    assert.equal(h.storage.get('sage_voice_tts_model'),'gemini-3.8-flash-tts');
+  }finally{h.cleanup();}
+});
+test('an unavailable first-reply model cannot quietly select another model on each wake',async()=>{
+  const h=harness({storage:{sage_voice_tts_model:'gemini-3.8-flash-lite-tts'}});const calls=[];
+  try {await h.open();h.root.fetch=async(url)=>{calls.push(url);return {ok:false,status:404};};
+    await h.root.SageVoice.sendVoiceText('hello');h.root.SageVoice.close();await h.open();
+    await h.root.SageVoice.sendVoiceText('hello again');
+    assert.equal(calls.length,2);assert.equal(calls[0],calls[1]);
+    assert.equal(h.playback.length,0);assert.equal(h.root.SageVoice.isOpen(),true);
+  }finally{h.cleanup();}
+});
+test('a new setup can choose one available voice model and retain that first successful voice',async()=>{
+  const h=harness();const calls=[];
+  try {await h.open();const fetch=h.root.fetch;
+    h.root.fetch=(url,init)=>{calls.push(url);return url.includes('flash-lite-tts')?Promise.resolve({ok:false,status:404}):fetch(url,init);};
+    await h.root.SageVoice.sendVoiceText('hello');h.root.SageVoice.close();await h.open();
+    await h.root.SageVoice.sendVoiceText('வணக்கம்');
+    assert.equal(calls.length,3);assert.equal(calls.filter(url=>url.includes('flash-lite-tts')).length,1);
+    assert.equal(h.storage.get('sage_voice_tts_model'),'gemini-3.8-flash-tts');assert.equal(h.playback.length,2);
+  }finally{h.cleanup();}
+});
+test('Viky stays in the visible reply with one speech-only pronunciation in either language',async()=>{
+  for(const reply of ['Hello Viky.','சொல்லு, Viky.']) {
+    const h=harness({askSage:async()=>({ok:true,text:reply})});
+    try {await h.open();await h.root.SageVoice.sendVoiceText('hello');
+      assert.equal(h.history.at(-1).text,reply);
+      assert.equal(h.requests[0].body.contents[0].parts[0].text,reply.replace('Viky','Vik-ee'));
+    }finally{h.cleanup();}
+  }
 });
 test('truncated audio before playback retries once and then recovers the mic',async()=>{
   const h=harness({fastRestarts:true});
@@ -693,14 +732,40 @@ test('voice quota does not trigger a rapid retry loop or close the call',async()
     assert.equal(h.root.SageVoice.isOpen(),true);assert.match(h.nodes.get('sageVoiceHint').textContent,/quota/);
   }finally{h.cleanup();}
 });
+test('quota rotates keys with the same speaker/model and does not reuse the resting key on wake',async()=>{
+  const h=harness();const calls=[];
+  try {await h.open();const fetch=h.root.fetch;
+    h.root.SageAI.availableKeys=()=>[{key:'test-only'},{key:'test-other'}];
+    h.root.fetch=(url,init)=>{calls.push({url,key:init.headers['x-goog-api-key'],body:JSON.parse(init.body)});return calls.length===1?Promise.resolve({ok:false,status:429}):fetch(url,init);};
+    await h.root.SageVoice.sendVoiceText('hello');h.root.SageVoice.close();await h.open();
+    await h.root.SageVoice.sendVoiceText('வணக்கம்');
+    assert.equal(calls.length,3);assert.deepEqual(calls.map(c=>c.key),['test-only','test-other','test-other']);
+    assert.equal(new Set(calls.map(c=>c.url)).size,1);
+    assert.ok(calls.every(c=>c.body.generationConfig.speechConfig.voiceConfig.voice==='Kore'));
+  }finally{h.cleanup();}
+});
+test('a late voice access failure after closing cannot change the next call’s model',async()=>{
+  const h=harness();let resolve;
+  try {await h.open();const fetch=h.root.fetch;
+    h.root.fetch=()=>new Promise(r=>{resolve=r;});
+    const old=h.root.SageVoice.sendVoiceText('hello');await until(()=>resolve);
+    h.root.SageVoice.close();await old;await h.open();h.root.fetch=fetch;
+    resolve({ok:false,status:404});await delay(10);
+    await h.root.SageVoice.sendVoiceText('next call');
+    assert.match(h.requests[0].url,/gemini-3.8-flash-lite-tts/);assert.equal(h.playback.length,1);
+  }finally{h.cleanup();}
+});
 
 test('first PCM words are buffered through delayed Live setup and committed once without a second upload',async()=>{
   const h=harness({live:true,autoSetup:false,liveEnd:ws=>ws.message({serverContent:{turnComplete:true}})});
   try {
     await h.open();await until(()=>h.worklets.length===1 && h.sockets[0].sent.length===1);
     const ws=h.sockets[0];h.worklets[0].frame();
+    assert.equal(h.nodes.get('sageVoiceState').textContent,'Connecting…');
+    assert.match(h.nodes.get('sageVoiceInstruction').textContent,/First words are kept/);
     assert.equal(ws.sent.filter(m=>m.realtimeInput?.audio).length,0);
     ws.message({setupComplete:{}});await until(()=>ws.sent.some(m=>m.realtimeInput?.audio));
+    await until(()=>h.nodes.get('sageVoiceState').textContent==='I’m listening');
     assert.equal(Buffer.from(ws.sent.find(m=>m.realtimeInput?.audio).realtimeInput.audio.data,'base64').equals(speechPCM),true);
     ws.message({serverContent:{inputTranscription:{text:'Hello, how are you?'}}});
     await until(()=>h.nodes.get('sageVoiceCaption').innerHTML.includes('Hello'));
@@ -708,6 +773,41 @@ test('first PCM words are buffered through delayed Live setup and committed once
     assert.deepEqual(h.asks,['Hello, how are you?']);assert.equal(h.decoded.length,0);
     assert.equal(h.requests.length,1,'only the spoken reply, no batch transcription');
     assert.equal(h.recognition.length,0);assert.equal(h.sockets.length,2,'next socket is warmed once during reply');
+  }finally{h.cleanup();}
+});
+
+test('slow first worklet startup visibly waits and submits the whole recording once',async()=>{
+  let ready;const h=harness({live:true,addModule:()=>new Promise(resolve=>{ready=resolve;})});
+  try {await h.open();
+    assert.equal(h.nodes.get('sageVoiceState').textContent,'Starting audio…');
+    assert.match(h.nodes.get('sageVoiceInstruction').textContent,/mic is recording/);
+    h.tick(200);ready();await until(()=>h.worklets.length===1);
+    h.worklets[0].frame();await until(()=>h.nodes.get('sageVoiceState').textContent==='I’m listening');
+    assert.match(h.nodes.get('sageVoiceInstruction').textContent,/after your pause/);
+    await h.finish();await until(()=>h.recordings.length===2);
+    assert.equal(h.decoded[0],'first-LAST','late live capture never replaces the complete recording');
+    assert.equal(h.asks.length,1);assert.equal(h.requests.filter(r=>!r.body.generationConfig.responseModalities).length,1);
+  }finally{h.cleanup();}
+});
+test('a never-ready worklet falls back visibly instead of keeping startup indefinitely',async()=>{
+  const h=harness({live:true,fastTimeouts:true,addModule:()=>new Promise(()=>{})});
+  try {await h.open();await until(()=>h.nodes.get('sageVoiceState').textContent==='I’m listening');
+    assert.match(h.nodes.get('sageVoiceInstruction').textContent,/after your pause/);
+    await h.finish();await until(()=>h.asks.length===1);
+    assert.equal(h.decoded[0],'first-LAST');assert.equal(h.asks.length,1);
+  }finally{h.cleanup();}
+});
+test('orb reads fresh microphone and reply samples, returns to silence, and releases its animation on close',async()=>{
+  const h=harness({live:true,holdPlayback:true});
+  const orb=h.nodes.get('sageVoiceOrb'),level=()=>Number(orb.style['--sage-voice-level']);
+  try {await h.open();await until(()=>h.worklets.length===1);h.worklets[0].frame();
+    h.analysers[0].sample=144;h.animate();assert.ok(level()>0.2,'PCM path still animates microphone input');
+    h.analysers[0].sample=128;for(let i=0;i<30;i++)h.animate();assert.ok(level()<0.01);
+    const reply=h.root.SageVoice.sendVoiceText('hello');await until(()=>h.playback.length===1);
+    const output=h.analysers[1];output.sample=148;h.animate();assert.ok(level()>0.2,'reply audio drives the orb');
+    output.sample=128;for(let i=0;i<30;i++)h.animate();assert.ok(level()<0.01,'silent reply has no fixed speaking boost');
+    h.root.SageVoice.close();await reply;
+    assert.equal(level(),0);assert.equal(output.disconnected,true);assert.equal(h.animationFrames.size,0);
   }finally{h.cleanup();}
 });
 test('server endpoint finishes a soft first utterance even under constant background energy',async()=>{
@@ -837,7 +937,9 @@ test('opening status waits for microphone permission; old browser/review prefere
   let allow;const h=harness({live:true,storage:{sage_voice_recognition:'browser',sage_voice_review:'true'},getUserMedia:()=>new Promise(resolve=>{allow=resolve;})});
   try{h.root.SageVoice.open();assert.equal(h.nodes.get('sageVoiceState').textContent,'Opening microphone…');
     assert.equal(h.recognition.length,0);assert.equal(h.nodes.has('sageVoiceReview'),false);assert.equal(h.nodes.has('sageVoiceMethod'),false);
-    allow(h.newStream());await until(()=>h.recordings.length===1);assert.equal(h.nodes.get('sageVoiceState').textContent,'I’m listening');
+    allow(h.newStream());await until(()=>h.recordings.length===1 && h.worklets.length===1);
+    assert.equal(h.nodes.get('sageVoiceState').textContent,'Starting audio…');
+    h.worklets[0].frame(0);await until(()=>h.nodes.get('sageVoiceState').textContent==='I’m listening');
   }finally{h.cleanup();}
 });
 test('explicit bare close voice works locally and greetings/negations keep the room open',async()=>{

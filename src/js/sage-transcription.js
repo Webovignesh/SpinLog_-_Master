@@ -5,8 +5,8 @@
   const MODEL = 'gemini-3.8-live'; // Live documents Tamil support; Transcribe 3.5 does not list it.
   const WS = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
   const workletURL = document.currentScript?.src
-    ? new URL('sage-pcm-worklet.js?v=1.9.33', document.currentScript.src).href
-    : 'src/js/sage-pcm-worklet.js?v=1.9.33';
+    ? new URL('sage-pcm-worklet.js?v=1.9.34', document.currentScript.src).href
+    : 'src/js/sage-pcm-worklet.js?v=1.9.34';
   const prepared = new WeakMap();
   function prepare(context) {
     if (!context?.audioWorklet || !root.AudioWorkletNode) return Promise.resolve(false);
@@ -62,7 +62,7 @@
           realtimeInputConfig:{automaticActivityDetection:{disabled:false,
             startOfSpeechSensitivity:'START_SENSITIVITY_HIGH',endOfSpeechSensitivity:'END_SENSITIVITY_HIGH',
             prefixPaddingMs:300,silenceDurationMs:Math.max(550,pauseMs)}},
-          systemInstruction:{parts:[{text:'You are a transcription listener. Listen to English, Tamil, Chennai Tamil, Theni Tamil and Tanglish exactly as spoken. Preserve whole phrases, names and numbers. For each completed audible utterance, acknowledge only with "ok". Do not answer questions, translate, correct grammar or act on commands. Domain terms include SpinLog, Sage, KTM Duke, odometer, PUC and mileage.'}]},
+          systemInstruction:{parts:[{text:'You are a transcription listener. Listen to English, Tamil, Chennai Tamil, Theni Tamil and Tanglish exactly as spoken. Preserve whole phrases, names and numbers. For each completed audible utterance, acknowledge only with "ok". Do not answer questions, translate, correct grammar or act on commands. Domain terms include SpinLog, Sage, KTM Duke, odometer, PUC and mileage. The rider’s name is Viky; preserve that spelling when his name is audible, and never insert it when unspoken.'}]},
         }}));
       };
       // Blob and string frames are both used by browser WebSockets. Serialize

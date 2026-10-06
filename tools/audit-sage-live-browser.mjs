@@ -14,7 +14,7 @@ const server=http.createServer(async(req,res)=>{
   if(!file.startsWith(root+path.sep)){res.writeHead(403).end();return;}
   try{let data=await readFile(file);
     if(rel==='index.html')data=data.toString().replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace('</body>',
-      '<script src="src/js/sage-transcription.js?v=1.9.33"></script><script src="src/js/sage-voice.js?v=1.9.33"></script></body>');
+      '<script src="src/js/sage-transcription.js?v=1.9.34"></script><script src="src/js/sage-voice.js?v=1.9.34"></script></body>');
     res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.css':'text/css'})[path.extname(file)]||'application/octet-stream');res.end(data);
   }catch{res.writeHead(404).end();}
 });
@@ -61,7 +61,14 @@ try{
     };
   });
   await page.goto(base,{waitUntil:'domcontentloaded'});
-  await page.evaluate(()=>{document.querySelectorAll('main section').forEach(s=>s.classList.toggle('active',s.id==='sage'));document.getElementById('sage').style.display='block';});
+  await page.evaluate(()=>{
+    document.querySelectorAll('main section').forEach(s=>s.classList.toggle('active',s.id==='sage'));document.getElementById('sage').style.display='block';
+    window.readiness=[];window.visuals=[];
+    const status=document.getElementById('sageVoiceState'),orb=document.getElementById('sageVoiceOrb');
+    new MutationObserver(()=>readiness.push(status.textContent)).observe(status,{childList:true});
+    new MutationObserver(()=>visuals.push({mode:orb.dataset.voiceMode,level:Number(orb.style.getPropertyValue('--sage-voice-level')),
+      transform:getComputedStyle(orb.querySelector('.sage-voice-core')).transform})).observe(orb,{attributes:true,attributeFilter:['style']});
+  });
   await page.locator('#sageChatMic').click();
   await page.waitForFunction(()=>asks.length>=5&&document.getElementById('sageVoiceState').textContent==='I’m listening',{},{timeout:15000});
   await page.waitForFunction(()=>ears[5]?.packets.length>=6);
@@ -70,7 +77,12 @@ try{
   await page.waitForFunction(()=>ears[6]?.packets.length>=6);
   await page.locator('#sageVoiceOrb').click();
   await page.waitForFunction(()=>asks.length===7&&document.getElementById('sageVoiceState').textContent==='I’m listening');
-  const result=await page.evaluate(()=>({asks,requests,ears:ears.map(e=>({sent:e.sent,packets:e.packets,readyState:e.readyState})),browserStarts}));
+  const result=await page.evaluate(()=>({asks,requests,ears:ears.map(e=>({sent:e.sent,packets:e.packets,readyState:e.readyState})),browserStarts,readiness,visuals}));
+  assert.ok(result.readiness.includes('Starting audio…'),'cold startup is visible before real PCM arrives');
+  assert.ok(result.readiness.includes('Connecting…'),'live setup wait is visible while the first audio is buffered');
+  assert.ok(result.visuals.some(v=>v.mode==='listening'&&v.level>.02),'real microphone samples animate the orb');
+  assert.ok(result.visuals.some(v=>v.mode==='speaking'&&v.level>.02),'real reply playback animates the orb');
+  assert.ok(new Set(result.visuals.map(v=>v.transform)).size>3,'orb transforms follow changing amplitude');
   assert.deepEqual(result.asks.slice(0,5),['hello there','சொல்லு டா','hello there','சொல்லு டா','hello there']);
   assert.deepEqual(result.asks.slice(5),['சொல்லு டா','Fallback audio was preserved']);
   assert.equal(result.browserStarts,0);assert.equal(result.requests.length,8,'only the silent connection needs one batch fallback');
@@ -93,6 +105,8 @@ try{
   }
   await page.locator('#sageVoiceEnd').click();
   assert.equal(await page.evaluate(()=>ears.every(e=>e.readyState===3)),true,'end call releases every socket');
+  await page.waitForTimeout(100);const stoppedCount=await page.evaluate(()=>visuals.length);
+  await page.waitForTimeout(150);assert.equal(await page.evaluate(()=>visuals.length),stoppedCount,'no visualizer frames after close');
   assert.deepEqual(errors,[]);
-  console.log('✓ Real microphone/worklet: five automatic bilingual turns, committed input without model acknowledgement, silent-provider PCM fallback, one speaker and resource cleanup');
+  console.log('✓ Real microphone/worklet: visible cold startup, reactive input/output orb, five bilingual turns, committed input without model acknowledgement, silent-provider PCM fallback, one speaker and cleanup');
 }finally{await browser?.close();server.close();}
