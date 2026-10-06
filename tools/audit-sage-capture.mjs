@@ -26,7 +26,17 @@ try {
   page.on('pageerror',e=>errors.push(e.message));
   await page.route('**/*',r=>r.request().url().startsWith(base)?r.continue():r.abort());
   await page.addInitScript(()=>{
-    window.SpeechRecognition=class {constructor(){window.voicePreview=this;} start(){} abort(){} stop(){}};
+    // Keep the real fake-device microphone/MediaRecorder/decoder pipeline, but
+    // give the test deliberate speech and silence instead of an endless beep.
+    const getMic=navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+    navigator.mediaDevices.getUserMedia=async constraints=>{
+      const stream=await getMic(constraints),ctx=new AudioContext();
+      const source=ctx.createMediaStreamSource(stream),gain=ctx.createGain(),out=ctx.createMediaStreamDestination();
+      source.connect(gain);gain.connect(out);window.testMicGain=gain;
+      out.stream.getTracks()[0].onended=()=>{stream.getTracks().forEach(t=>t.stop());ctx.close();};
+      return out.stream;
+    };
+    window.SpeechRecognition=class {constructor(){window.voicePreview=this;} start(){this.onstart?.();} abort(){this.onend?.();} stop(){this.onend?.();}};
     window.recordedRequests=[];window.replies=[];window.failRecognition=true;
     window.SageAI={availableKeys:()=>[{key:'test-only'}],askSage:async text=>{replies.push(text);return {ok:true,text:'Okay, heard you.'};}};
     let history=[];window.dkCloudStore={chatHistory:()=>history,setChat:rows=>history=rows};
@@ -37,14 +47,14 @@ try {
       if(body.generationConfig.responseModalities)return {ok:true,json:async()=>({candidates:[{content:{parts:[{inlineData:{mimeType:'audio/L16;rate=24000',data:speech}}]}}]})};
       recordedRequests.push({url,body});
       if(failRecognition)return {ok:false,status:503,json:async()=>({error:{message:'test outage'}})};
-      return {ok:true,json:async()=>({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify({transcript:'சொல்லு டா',unclear:false})}]}}]})};
+      return {ok:true,json:async()=>({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify({transcript:'Tell me more',unclear:false})}]}}]})};
     };
   });
   await page.goto(base,{waitUntil:'domcontentloaded'});
   await page.evaluate(()=>{document.querySelectorAll('main section').forEach(s=>s.classList.toggle('active',s.id==='sage'));document.getElementById('sage').style.display='block';});
   await page.locator('#sageChatMic').click();
   await page.waitForFunction(()=>document.getElementById('sageVoiceState').textContent==='I’m listening');
-  await page.waitForTimeout(800);await page.locator('#sageVoiceOrb').click();
+  await page.waitForTimeout(800);await page.evaluate(()=>{testMicGain.gain.value=0;});await page.locator('#sageVoiceOrb').click();
   await page.waitForFunction(()=>document.getElementById('sageVoiceLines').textContent.includes('say it again') && document.getElementById('sageVoiceState').textContent==='I’m listening');
   const requests=await page.evaluate(()=>recordedRequests);
   assert.equal(requests.length,2,'one bounded server retry');
@@ -62,11 +72,14 @@ try {
     }
   }
   await mkdir('/tmp/sage-capture-preview',{recursive:true});await page.screenshot({path:'/tmp/sage-capture-preview/recovery.png'});
-  await page.evaluate(()=>{failRecognition=false;});await page.locator('#sageVoiceOrb').click();
+  await page.evaluate(()=>{failRecognition=false;testMicGain.gain.value=1;});
+  await page.waitForTimeout(600);await page.evaluate(()=>{testMicGain.gain.value=0;});await page.locator('#sageVoiceOrb').click();
   await page.waitForFunction(()=>replies.length===1 && document.getElementById('sageVoiceState').textContent==='I’m listening');
   const retry=await page.evaluate(()=>recordedRequests[2]);assert.notEqual(retry.body.contents[0].parts[0].inlineData.data,requests[0].body.contents[0].parts[0].inlineData.data,'a new utterance uses fresh captured audio');
   for(let i=0;i<4;i++){
+    await page.evaluate(()=>{testMicGain.gain.value=1;});
     await page.waitForTimeout(600);
+    await page.evaluate(()=>{testMicGain.gain.value=0;});
     await page.locator('#sageVoiceOrb').click();
     await page.waitForFunction(n=>replies.length===n && document.getElementById('sageVoiceState').textContent==='I’m listening',i+2);
   }

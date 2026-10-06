@@ -77,18 +77,19 @@ test('multiple stored documents arrive as readable attachments rather than base6
   }finally{h.cleanup();}
 });
 
-test('spoken answers preserve Tamil script and instruct full regional phrases',async()=>{
-  const h=harness(async()=>answer('சொல்லு டா, என்ன விஷயம்?'));
-  try {const reply=await h.AI.askSage('நான் பேசுறது கேக்குதா',{voice:true});
-    assert.equal(reply.ok,true);assert.match(reply.text,/சொல்லு டா/);
-    const system=JSON.stringify(h.requests[0].body.systemInstruction);
-    assert.match(system,/Chennai/);assert.match(system,/Theni/);assert.match(system,/sollu da/);
-  } finally {h.cleanup();}
+test('spoken answers and chat language remain English regardless of input or past Tamil turns',async()=>{
+  for(const voice of [true,false])for(const text of ['என்ன பண்ற','sollu da','hello','please speak Tamil']) {
+    const h=harness(async()=>answer('I’m here with you.'));
+    try {const reply=await h.AI.askSage(text,{voice,tools:false});assert.equal(reply.text,'I’m here with you.');
+      const system=JSON.stringify(h.requests[0].body.systemInstruction);
+      assert.match(system,/English/);assert.doesNotMatch(system,/familiar singular|Chennai\/Theni|Speak Tamil|Answer in.*Thanglish|Write correctly spelled spoken Tamil/);
+    }finally{h.cleanup();}
+  }
 });
 
 const quota=(violations,retryDelay='65s')=>({ok:false,status:429,headers:{get:()=>null},json:async()=>({error:{details:[{violations},{retryDelay}]}})});
 test('model quota falls through to another model without resting the key or clearing the quota',async()=>{
-  const h=harness(async(url,init,n)=>n===1?quota([{quotaId:'GenerateRequestsPerMinutePerProjectPerModel',quotaDimensions:{model:'gemini-3.5-flash-lite'}}]):answer('சொல்லு டா'));
+  const h=harness(async(url,init,n)=>n===1?quota([{quotaId:'GenerateRequestsPerMinutePerProjectPerModel',quotaDimensions:{model:'gemini-3.5-flash-lite'}}]):answer('Tell me.'));
   try{const at=Date.now(),reply=await h.AI.askSage('hello',{voice:true,tools:false});
     assert.equal(reply.ok,true);assert.equal(h.requests.length,2);
     assert.match(h.requests[1].url,/gemini-3.5-flash:/);
@@ -132,19 +133,16 @@ test('an older in-flight success cannot erase a newer project quota cooldown',as
   }finally{h.cleanup();}
 });
 
-test('voice uses a native Tamil persona without contradictory text-chat restrictions',async()=>{
-  for(const text of ['எது ரொம்ப விலை அதிகம்','enna panra','saptiya','Which update costs the most?','hello da']) {
-    const h=harness(async()=>answer('Test response'));
-    try {await h.AI.askSage(text,{voice:true,tools:false});
-      const system=JSON.stringify(h.requests[0].body.systemInstruction);
-      assert.match(system,/Answer what he actually asked first/);assert.match(system,/Do not keep adding da/);
-      assert.doesNotMatch(system,/FINISH EVERY CLAUSE/);
-      assert.doesNotMatch(system,/ENGLISH LETTERS ONLY|nouns.*verbs must stay ENGLISH|NEVER.*naan/i);
-      assert.match(system,/Compose the answer directly/);
-      assert.match(system,/familiar singular நீ/);assert.match(system,/Keep Viky in Latin letters/);
-      assert.match(system,/^(?:Which|hello)/.test(text)?/He spoke English/:/natural spoken Tamil/);
-    }finally{h.cleanup();}
-  }
+test('English voice has one persona, a full control brief and no inherited thirty-word cap',async()=>{
+  const h=harness(async()=>answer('Test response'));
+  try {await h.AI.askSage('explain my service history in detail',{voice:true,tools:false});
+    const system=JSON.stringify(h.requests[0].body.systemInstruction);
+    assert.match(system,/Speak only natural English/);assert.match(system,/search, reads, updates, uploads/);
+    assert.doesNotMatch(system,/30 words|familiar singular|Chennai\/Theni|Compose.*Tamil/);
+    assert.match(system,/His name is spelled Viky/);
+    assert.match(h.requests[0].url,/gemini-3.5-flash:/);assert.equal(h.requests[0].body.generationConfig.thinkingConfig.thinkingLevel,'medium');
+    assert.equal(h.requests[0].body.generationConfig.maxOutputTokens,1200);assert.ok(h.delays.includes(18000));
+  }finally{h.cleanup();}
 });
 test('spoken moods never reintroduce text emojis or parked-bike status as a greeting',()=>{
   const h=harness(async()=>answer('ready'));
@@ -190,9 +188,9 @@ test('Tamil interface commands execute locally even offline and never request mo
     vm.runInNewContext(await readFile(new URL('../src/js/sage-tools.js',import.meta.url),'utf8'),h.root);
     const nav=await h.AI.askSage('service பேஜ் ஓபன் பண்ணு',{voice:true});
     assert.equal(section,'service');assert.equal(docked,true);assert.equal(closed,false);
-    assert.equal(nav.calls[0].result.opened,'service');assert.match(nav.text,/திறந்திருக்கு/);
+    assert.equal(nav.calls[0].result.opened,'service');assert.match(nav.text,/Service history is open/);
     const end=await h.AI.askSage('வாய்ஸ் மோட் க்ளோஸ் பண்ணு',{voice:true});
-    assert.equal(closed,true);assert.equal(end.calls[0].result.ok,true);assert.match(end.text,/மூடிட்டேன்/);
+    assert.equal(closed,true);assert.equal(end.calls[0].result.ok,true);assert.match(end.text,/Voice mode is closed/);
     assert.equal(h.requests.length,0);
   }finally{h.cleanup();}
 });
@@ -231,5 +229,15 @@ test('minimized voice retains the real tool catalog for search, changes and atta
     }
     assert.deepEqual(calls.map(c=>c[0]),['search','change','upload']);
     assert.equal(h.root.SageVoice.isMinimized(),true);
+  }finally{h.cleanup();}
+});
+
+test('a non-English provider reply is repaired once without rerunning a successful mutation',async()=>{
+  let phase=0;
+  const h=harness(async()=>++phase===1?{ok:true,status:200,json:async()=>({candidates:[{content:{parts:[{functionCall:{name:'update_service',args:{id:7,description:'Chain adjusted'}}}]},finishReason:'STOP'}]})}:answer(phase===2?'சரி மாற்றிட்டேன்':'The chain description is updated.'));
+  try {let writes=0;h.root.dkApp={updateService:async()=>{writes++;return {ok:true};}};
+    vm.runInNewContext(await readFile(new URL('../src/js/sage-tools.js',import.meta.url),'utf8'),h.root);
+    const reply=await h.AI.askSage('update record 7 description',{voice:true});assert.equal(reply.ok,true);assert.equal(reply.text,'The chain description is updated.');
+    assert.equal(writes,1);assert.equal(h.requests.length,3);assert.equal(h.requests[2].body.tools,undefined);
   }finally{h.cleanup();}
 });

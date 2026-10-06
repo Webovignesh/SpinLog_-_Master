@@ -30,7 +30,7 @@ const server = http.createServer(async (req,res) => {
   try {
     let content = await readFile(filename);
     if (rel === 'index.html') content = content.toString().replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'')
-      .replace('</body>','<script src="src/js/sage-voice.js?v=1.9.36"></script></body>');
+      .replace('</body>','<script src="src/js/sage-voice.js?v=1.9.37"></script></body>');
     res.setHeader('Content-Type', ({'.html':'text/html','.js':'text/javascript','.css':'text/css','.woff2':'font/woff2','.webp':'image/webp'})[path.extname(filename)] || 'application/octet-stream');
     res.end(content);
   } catch {res.writeHead(404).end();}
@@ -47,7 +47,7 @@ try {
   await page.addInitScript(() => {
     let history = [];
     window.dkCloudStore = {chatHistory:()=>history.slice(),setChat:rows=>history=rows};
-    window.SageAI = {availableKeys:()=>[{key:'test-only'}],askSage:async()=>({ok:true,text:'சரி bro, உன் Duke-க்கு next service எப்போன்னு பார்க்கலாம். Last service reading சொல்லு.'})};
+    window.SageAI = {availableKeys:()=>[{key:'test-only'}],askSage:async()=>({ok:true,text:'Let’s check the Duke’s next service. What was the last service reading?'})};
     const samples=new Int16Array(2400); for(let i=0;i<samples.length;i++) samples[i]=Math.sin(i/6)*5000;
     const speech=btoa(String.fromCharCode(...new Uint8Array(samples.buffer)));
     window.fetch = async()=>({ok:true,json:async()=>({candidates:[{content:{parts:[{inlineData:{data:speech,mimeType:'audio/L16;rate=24000'}}]}}]})});
@@ -73,12 +73,12 @@ try {
     await page.locator('#sageChatMic').click();
     assert.equal(await page.locator('.sage-voice-core').evaluate(el=>getComputedStyle(el).display),'block','new orb CSS bypasses stale unversioned cache');
     for (const asset of ['src/css/styles.css','src/css/home.css','src/css/sage-voice.css','src/js/sage-voice.js']) {
-      assert.ok(await page.evaluate(asset=>[...document.querySelectorAll('link[href],script[src]')].some(el=>(el.href||el.src).endsWith(asset+'?v=1.9.36')),asset),'voice assets use versioned URLs');
+      assert.ok(await page.evaluate(asset=>[...document.querySelectorAll('link[href],script[src]')].some(el=>(el.href||el.src).endsWith(asset+'?v=1.9.37')),asset),'voice assets use versioned URLs');
     }
     await page.evaluate(async()=>{
-      await SageVoice.sendVoiceText('Bro, நேத்து petrol போட்டேன்.');
-      await SageVoice.sendVoiceText('அடுத்த service எப்போ பண்ணணும்?');
-      await SageVoice.sendVoiceText('Mileage கொஞ்சம் குறையுது போல.');
+      await SageVoice.sendVoiceText('I filled petrol yesterday.');
+      await SageVoice.sendVoiceText('When is the next service due?');
+      await SageVoice.sendVoiceText('My mileage has dropped a little.');
     });
     await page.waitForTimeout(350);
     assert.equal(await page.locator('#sageVoiceLines > p').count(),4);

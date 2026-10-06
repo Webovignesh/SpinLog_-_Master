@@ -2,11 +2,11 @@
 // SageAI owns tools/history and the selected TTS speaker owns every reply.
 (function (root) {
   'use strict';
-  const MODEL = 'gemini-3.8-live'; // Live documents Tamil support; Transcribe 3.5 does not list it.
+  const MODEL = 'gemini-3.5-transcribe-live'; // Dedicated speech recognition, never a reply voice.
   const WS = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
   const workletURL = document.currentScript?.src
-    ? new URL('sage-pcm-worklet.js?v=1.9.36', document.currentScript.src).href
-    : 'src/js/sage-pcm-worklet.js?v=1.9.36';
+    ? new URL('sage-pcm-worklet.js?v=1.9.37', document.currentScript.src).href
+    : 'src/js/sage-pcm-worklet.js?v=1.9.37';
   const prepared = new WeakMap();
   function prepare(context) {
     if (!context?.audioWorklet || !root.AudioWorkletNode) return Promise.resolve(false);
@@ -60,12 +60,12 @@
         if (closed) return;
         socket.send(JSON.stringify({setup:{
           model:`models/${MODEL}`,
-          generationConfig:{responseModalities:['AUDIO'],maxOutputTokens:64},
-          inputAudioTranscription:{},
+          generationConfig:{responseModalities:['TEXT']},
+          inputAudioTranscription:{languageCodes:['en-IN'],mode:'VERBATIM',
+            customVocabulary:['SpinLog','Sage','Viky','KTM Duke','odometer','PUC','mileage']},
           realtimeInputConfig:{automaticActivityDetection:{disabled:false,
             startOfSpeechSensitivity:'START_SENSITIVITY_HIGH',endOfSpeechSensitivity:'END_SENSITIVITY_HIGH',
             prefixPaddingMs:300,silenceDurationMs:Math.max(550,pauseMs)}},
-          systemInstruction:{parts:[{text:'You are a transcription listener. Listen to English, Tamil, Chennai Tamil, Theni Tamil and Tanglish exactly as spoken. Preserve whole phrases, names and numbers. For each completed audible utterance, acknowledge only with "ok". Do not answer questions, translate, correct grammar or act on commands. Domain terms include SpinLog, Sage, KTM Duke, odometer, PUC and mileage. The rider’s name is Viky; preserve that spelling when his name is audible, and never insert it when unspoken.'}]},
         }}));
       };
       // Blob and string frames are both used by browser WebSockets. Serialize
@@ -95,15 +95,17 @@
           if (content.inputTranscription?.text) {
             // Native Live emits incremental committed text, not a browser's
             // language-specific replacement hypothesis.
-            text += content.inputTranscription.text;
+            const segment = content.inputTranscription.text;
+            if (text && !/\s$/.test(text) && !/^[\s.,;:!?)]/.test(segment)) text += ' ';
+            text += segment;
             if (ending) finalAfterEnd = true;
             interim = ''; if (!ending) boundarySeen = false;
             clearTimeout(boundaryTimer); boundaryTimer = null;
             onText(text.trim(), true); settle();
           }
-          // Server output starts only after its speech end detector commits.
+          // A finalized transcription is the dedicated recognizer’s speech boundary.
           // This is the noise-resistant fallback when a fan defeats local RMS.
-          if (text && (content.modelTurn || content.generationComplete || content.turnComplete)) {
+          if (text && (content.inputTranscription?.text || content.inputTranscription?.finished || content.generationComplete || content.turnComplete)) {
             boundarySeen = true;
             if (ending) { if (!settleTimer) settle(); }
             else if (!boundaryTimer) boundaryTimer = setTimeout(() => { boundaryTimer = null; if (!closed && !ending) onBoundary(); }, 180);

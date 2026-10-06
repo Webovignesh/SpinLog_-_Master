@@ -14,7 +14,7 @@ const server=http.createServer(async(req,res)=>{
   if(!file.startsWith(root+path.sep)){res.writeHead(403).end();return;}
   try{let data=await readFile(file);
     if(rel==='index.html')data=data.toString().replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace('</body>',
-      '<script src="src/js/sage-transcription.js?v=1.9.36"></script><script src="src/js/sage-voice.js?v=1.9.36"></script></body>');
+      '<script src="src/js/sage-transcription.js?v=1.9.37"></script><script src="src/js/sage-voice.js?v=1.9.37"></script></body>');
     res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.css':'text/css'})[path.extname(file)]||'application/octet-stream');res.end(data);
   }catch{res.writeHead(404).end();}
 });
@@ -37,13 +37,13 @@ try{
         if(value.setup)setTimeout(()=>this.message({setupComplete:{}}),this.id===0?700:0);
         if(value.realtimeInput?.audio){this.packets.push(value.realtimeInput.audio);
           if(this.packets.length===6 && this.id<6){
-            this.message({serverContent:{interimInputTranscription:{text:this.id%2?'சொல்லு டா':'hello there'}}});
-            if(this.id<5)setTimeout(()=>this.message({serverContent:{inputTranscription:{text:this.id%2?'சொல்லு டா':'hello there'},generationComplete:true}}),50);
+            this.message({serverContent:{interimInputTranscription:{text:this.id%2?'tell me more':'hello there'}}});
+            if(this.id<5)setTimeout(()=>this.message({serverContent:{inputTranscription:{text:this.id%2?'tell me more':'hello there'},generationComplete:true}}),50);
           }
         }
         if(value.realtimeInput?.audioStreamEnd){
           if(this.id<5)this.message({serverContent:{turnComplete:true}});
-          if(this.id===5)this.message({serverContent:{inputTranscription:{text:'சொல்லு டா'}}});
+          if(this.id===5)this.message({serverContent:{inputTranscription:{text:'tell me more'}}});
           // The seventh connection acknowledges setup and receives audio, but
           // never returns any transcript or model output.
         }
@@ -83,8 +83,8 @@ try{
   assert.ok(result.visuals.some(v=>v.mode==='listening'&&v.level>.02),'real microphone samples animate the orb');
   assert.ok(result.visuals.some(v=>v.mode==='speaking'&&v.level>.02),'real reply playback animates the orb');
   assert.ok(new Set(result.visuals.map(v=>v.transform)).size>3,'orb transforms follow changing amplitude');
-  assert.deepEqual(result.asks.slice(0,5),['hello there','சொல்லு டா','hello there','சொல்லு டா','hello there']);
-  assert.deepEqual(result.asks.slice(5),['சொல்லு டா','Fallback audio was preserved']);
+  assert.deepEqual(result.asks.slice(0,5),['hello there','tell me more','hello there','tell me more','hello there']);
+  assert.deepEqual(result.asks.slice(5),['tell me more','Fallback audio was preserved']);
   assert.equal(result.browserStarts,0);assert.equal(result.requests.length,8,'only the silent connection needs one batch fallback');
   const replies=result.requests.filter(r=>r.body.generationConfig.responseModalities?.[0]==='AUDIO');
   assert.equal(replies.length,7);
@@ -95,7 +95,7 @@ try{
   const wav=Buffer.from(fallback.body.contents[0].parts[0].inlineData.data,'base64');
   assert.equal(wav.toString('ascii',0,4),'RIFF');assert.equal(wav.readUInt32LE(24),16000);
   for(const ear of result.ears){
-    assert.ok(ear.sent[0].setup.model==='models/gemini-3.8-live');
+    assert.ok(ear.sent[0].setup.model==='models/gemini-3.5-transcribe-live');
     assert.ok(ear.sent.some(m=>m.realtimeInput?.audioStreamEnd),'each utterance ends its audio stream');
     assert.ok(ear.packets.every(p=>p.mimeType==='audio/pcm;rate=16000'));
     const audio=Buffer.concat(ear.packets.map(p=>Buffer.from(p.data,'base64')));
@@ -108,5 +108,5 @@ try{
   await page.waitForTimeout(100);const stoppedCount=await page.evaluate(()=>visuals.length);
   await page.waitForTimeout(150);assert.equal(await page.evaluate(()=>visuals.length),stoppedCount,'no visualizer frames after close');
   assert.deepEqual(errors,[]);
-  console.log('✓ Real microphone/worklet: visible cold startup, reactive input/output orb, five bilingual turns, committed input without model acknowledgement, silent-provider PCM fallback, one speaker and cleanup');
+  console.log('✓ Real microphone/worklet: visible cold startup, reactive input/output orb, five English turns, committed input without model acknowledgement, silent-provider PCM fallback, one speaker and cleanup');
 }finally{await browser?.close();server.close();}

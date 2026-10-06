@@ -27,7 +27,7 @@ const server=http.createServer(async(req,res)=>{
   try {
     let data=await readFile(file);
     if(rel==='index.html')data=data.toString().replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace('</body>',
-      ['sage-tools','sage-ai','sage-transcription','sage-voice'].map(n=>`<script src="src/js/${n}.js?v=1.9.36"></script>`).join('')+'<script src="/audit-router.js"></script></body>');
+      ['sage-tools','sage-ai','sage-transcription','sage-voice'].map(n=>`<script src="src/js/${n}.js?v=1.9.37"></script>`).join('')+'<script src="/audit-router.js"></script></body>');
     res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.css':'text/css'})[path.extname(file)]||'application/octet-stream');res.end(data);
   }catch {res.writeHead(404).end();}
 });
@@ -61,7 +61,7 @@ try {
     await page.evaluate(()=>{
       const localAsk=SageAI.askSage;
       SageAI.availableKeys=()=>[{key:'test-only'}];
-      SageAI.askSage=(text,opts)=>SageTools.uiIntent(text)?localAsk(text,opts):Promise.resolve({ok:true,text:'சரி, சொல்லு. I’m here.'});
+      SageAI.askSage=(text,opts)=>SageTools.uiIntent(text)?localAsk(text,opts):Promise.resolve({ok:true,text:'I’m here. Keep talking.'});
       window.SageUI={open(){document.getElementById('testSettings').hidden=false;},isOpen(){return !document.getElementById('testSettings').hidden;}};
       const button=document.createElement('button');button.id='testPageButton';button.textContent='Page action';
       button.style.cssText='position:fixed;left:20px;top:120px;z-index:1100';button.onclick=()=>{window.pageClicked=true;};document.body.append(button);
@@ -98,10 +98,14 @@ try {
     assert.ok(Math.hypot(before.x-moved.x,before.y-moved.y)>50,'orb drags to another corner');
     assert.ok(moved.x>=12 && moved.y>=12 && moved.x+moved.width<=width-11 && moved.y+moved.height<=height-11,'drag clamps the whole control into view');
     assert.deepEqual(await page.evaluate(()=>({audio:audioRequests,turns:historyRows.length,captures:captureRequests})),counts,'drag never submits speech or restarts audio');
-    await page.locator('#sageVoiceDrag').focus();await page.keyboard.press('ArrowRight');
+    await page.locator('#sageVoiceOrb').focus();await page.keyboard.press('ArrowRight');
     assert.ok((await page.locator('#sageVoiceOverlay').boundingBox()).x>moved.x,'keyboard movement works');
+    assert.ok(Math.abs(moved.width-88)<1 && Math.abs(moved.height-88)<1,'minimized view is only the orb');
+    assert.equal(await page.locator('#sageVoiceOverlay button:visible').count(),1,'there is no minimized panel or extra control');
+    for(const id of ['sageVoiceState','sageVoiceLines','sageVoiceEnd','sageVoiceCaption']) assert.equal(await page.locator('#'+id).isVisible(),false,id);
     await page.screenshot({path:path.join(output,`${name}-docked.png`)});
-    await page.locator('#sageVoiceWindow').click();assert.equal(await page.evaluate(()=>SageVoice.isMinimized()),false);
+    await page.waitForTimeout(410);
+    await page.locator('#sageVoiceOrb').click();assert.equal(await page.evaluate(()=>SageVoice.isMinimized()),false);
     assert.equal(await page.locator('#sageVoiceOverlay').getAttribute('aria-modal'),'true');
     assert.equal(await page.evaluate(()=>captureRequests),initial.captures,'expansion never reacquires microphone');
     await page.locator('#sageVoiceWindow').click();assert.equal(await page.evaluate(()=>SageVoice.isMinimized()),true);
@@ -116,6 +120,7 @@ try {
     assert.equal(await page.evaluate(()=>document.querySelector('main section.active').id),'docs');
     const prep=await page.evaluate(()=>SageTools.run('prepare_file_upload',{kind:'image'},{userText:'upload a photo'}));
     assert.equal(prep.ok,true);assert.equal(prep.uploaded,false);
+    await page.locator('#sageVoiceOrb').click();
     const pickerPromise=page.waitForEvent('filechooser');await page.locator('#sageVoiceChooseFile').click();
     const picker=await pickerPromise;assert.equal(await picker.element().getAttribute('accept'),'.jpg,.jpeg,.png,.webp');
     await picker.setFiles([]);
@@ -131,7 +136,7 @@ try {
     await page.waitForFunction(()=>document.getElementById('sageVoiceState').textContent==='I’m listening');
     await page.setViewportSize({width:320,height:420});
     const resized=await page.locator('#sageVoiceOverlay').boundingBox();
-    assert.ok(resized.x>=12 && resized.y>=12 && resized.x+resized.width<=309 && resized.y+resized.height<=409,'resizing cannot hide End');
+    assert.ok(resized.x>=12 && resized.y>=12 && resized.x+resized.width<=309 && resized.y+resized.height<=409,'resizing keeps the orb in view');
     const frames=await page.evaluate(async()=>{
       const samples=[];const overlay=document.getElementById('sageVoiceOverlay');
       SageVoice.sendVoiceText('வாய்ஸ் மோட் க்ளோஸ் பண்ணு');
@@ -142,7 +147,7 @@ try {
     assert.equal(await page.evaluate(()=>SageVoice.isOpen()),false);
     assert.equal(await page.evaluate(()=>ears.every(ws=>ws.readyState===3)),true,'close releases all Live sockets');
     await page.waitForFunction(()=>document.getElementById('sageVoiceOverlay').hidden);
-    console.log(`✓ ${name}: real router/Back, Tamil route/close, continuing call, drag/tap separation, keyboard, page/settings access, spoken minimize/expand, Back/Next, upload picker, six replies, flash-free close and resize bounds`);
+    console.log(`✓ ${name}: real router/Back, Tamil route/close, continuing call, drag/tap separation, keyboard, page/settings access, orb-only click/drag, spoken minimize/expand, Back/Next, upload picker, six replies, flash-free close and resize bounds`);
   }
   assert.deepEqual(errors,[]);console.log('✓ No page errors; provider speech quality is outside this simulated transport audit');
 }finally {await browser?.close();await new Promise(r=>server.close(r));}
