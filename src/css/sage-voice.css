@@ -1,4 +1,4 @@
-/* Sage voice room v1.9.36. Loaded after the app styles with its own version URL. */
+/* Sage voice room v1.9.37. Loaded after the app styles with its own version URL. */
 .sage-voice-entry { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 18px; font-family:var(--sl-read); }
 .sage-voice-entry > span { color:#989ba4; font:400 12px/1.5 var(--sl-read); }
 .sage-chat-mic { display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; width:auto; min-width:128px; height:40px; padding:0 14px; gap:8px; border:1px solid #ffd2ae40; border-radius:12px; background:#2c251f; color:#ffd6b5; font:600 12px/1 var(--sl-read); white-space:nowrap; box-shadow:none; animation:none; cursor:pointer; }
@@ -13,8 +13,8 @@
 .sage-voice-file:focus-visible { outline:2px solid #ffbc86; outline-offset:3px; }
 .sage-voice-card { --sage-accent:#ffb776; position:relative; display:flex; flex-direction:column; width:100%; max-width:1000px; height:100dvh; max-height:100dvh; padding:28px 40px max(20px,env(safe-area-inset-bottom)); border:0; border-radius:0; background:none; box-shadow:none; overflow:visible; font-family:var(--sl-read); gap:0; }
 .sage-voice-window-controls { position:absolute; right:20px; top:max(16px,env(safe-area-inset-top)); display:flex; gap:4px; z-index:1; }
-.sage-voice-window,.sage-voice-drag { display:grid; place-items:center; width:40px; height:40px; padding:0; border:0; border-radius:50%; background:#ffffff08; color:#b9bbc5; cursor:pointer; }
-.sage-voice-drag,.sage-window-expand { display:none; }
+.sage-voice-window { display:grid; place-items:center; width:40px; height:40px; padding:0; border:0; border-radius:50%; background:#ffffff08; color:#b9bbc5; cursor:pointer; }
+.sage-window-expand { display:none; }
 .sage-voice-orb[data-speech-active="true"] .sage-voice-aura { background:#ffb47a32; }
 .sage-voice-close { flex:none; width:42px; height:42px; display:grid; place-items:center; border:1px solid #ffffff13; border-radius:50%; background:transparent; color:#b5b7c0; cursor:pointer; }
 .sage-voice-stage { display:flex; flex-direction:column; align-items:center; justify-content:center; flex:0 0 auto; height:clamp(220px,30dvh,300px); gap:0; padding:12px 0 6px; }
@@ -101,27 +101,10 @@
 .sage-listening-settings > small { color: #aaaab4; line-height: 1.6; font-size: 0.72rem; }
 
 
-/* The corner controls own only their bounds. The page and other dialogs stay
-   interactive; presentation changes never replace the audio session. */
-.sage-voice-overlay.is-docked { inset:auto; width:208px; height:auto; display:flex; visibility:visible; opacity:1; pointer-events:auto; padding:0; align-items:stretch; background:none; backdrop-filter:none; -webkit-backdrop-filter:none; transition:none; }
-.sage-voice-overlay.is-docked .sage-voice-card { width:100%; height:auto; max-height:none; min-height:0; padding:12px; border:1px solid #ffffff24; border-radius:26px; background:#1c1d24eb; box-shadow:0 12px 40px #0005; backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px); transform:none; opacity:1; overflow:visible; }
-.is-docked .sage-voice-window-controls { inset:6px 6px auto; justify-content:space-between; }
-.is-docked .sage-voice-window,.is-docked .sage-voice-drag { width:36px; height:36px; background:transparent; }
-.is-docked .sage-voice-drag { display:grid; cursor:grab; touch-action:none; }
-.is-docked .sage-voice-drag:active { cursor:grabbing; }
-.is-docked .sage-window-expand { display:block; }
-.is-docked .sage-window-min { display:none; }
-.is-docked .sage-voice-stage { height:auto; min-height:0; padding:12px 0 4px; }
-.is-docked .sage-voice-orb { width:72px; height:72px; touch-action:none; }
-.is-docked .sage-voice-state { margin:4px 0 0; font-size:12px; letter-spacing:0; }
-.is-docked .sage-voice-instruction,.is-docked .sage-voice-lines,.is-docked .sage-voice-bars { display:none; }
-.is-docked .sage-voice-captions { min-height:0; max-height:52px; width:100%; gap:0; }
-.is-docked .sage-voice-caption { padding:4px 0; font-size:11px; line-height:1.5; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; }
-.is-docked .sage-voice-caption:empty { display:none; }
-.is-docked .sage-voice-activity { margin:4px 0 0; padding:2px 0; font-size:10px; max-width:100%; }
-.is-docked .sage-voice-dots { display:none; }
-.is-docked .sage-voice-controls { margin:4px 0 0; padding:4px 0 0; gap:8px; }
-.is-docked .sage-voice-btn { width:44px; height:44px; font-size:12px; }
-.is-docked .sage-voice-btn.is-end { min-width:86px; padding:0 14px; gap:7px; }
-.is-docked .sage-voice-hint { margin:6px 0 0; min-height:0; font-size:10px; line-height:1.45; }
-.is-docked .sage-voice-hint:empty { display:none; }
+/* Only the movable, reactive orb remains in the corner. */
+.sage-voice-overlay.is-docked { inset:auto; width:88px; height:88px; display:flex; visibility:visible; opacity:1; pointer-events:auto; padding:0; align-items:stretch; background:none; backdrop-filter:none; -webkit-backdrop-filter:none; transition:none; }
+.sage-voice-overlay.is-docked .sage-voice-card { width:88px; height:88px; max-height:none; min-height:0; padding:4px; border:0; border-radius:50%; background:none; box-shadow:none; backdrop-filter:none; -webkit-backdrop-filter:none; transform:none; opacity:1; overflow:visible; }
+.is-docked .sage-voice-stage { height:80px; min-height:0; padding:0; }
+.is-docked .sage-voice-orb { width:80px; height:80px; touch-action:none; cursor:grab; }
+.is-docked .sage-voice-orb:active { cursor:grabbing; }
+.is-docked :is(.sage-voice-window-controls,.sage-voice-state,.sage-voice-instruction,.sage-voice-bars,.sage-voice-captions,.sage-voice-activity,.sage-voice-controls,.sage-voice-hint,.sage-voice-file) { display:none!important; }

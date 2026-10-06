@@ -51,7 +51,7 @@ function harness(options = {}) {
   }
   class Recognition {
     constructor() { recognition.push(this); }
-    start() { this.onstart?.(); }
+    start() { if(!options.hangNative)this.onstart?.(); }
     abort() { this.onend?.(); }
     stop() { this.onend?.(); }
     result(text, final = true, confidence = 0.9) {
@@ -118,7 +118,7 @@ function harness(options = {}) {
     Date: class extends Date { static now() { return now; } },
     dkReduceMotion: () => true,
     dkCloudStore: { chatHistory: () => history.slice(), setChat: rows => { history = rows; } },
-    SageAI: { availableKeys: () => options.noKey ? [] : [{ key: 'test-only' }], askSage: options.askSage || (async text => { asks.push(text); return { ok: true, text: 'சரி bro, service history பார்க்கலாம்.' }; }) },
+    SageAI: { availableKeys: () => options.noKey ? [] : [{ key: 'test-only' }], askSage: options.askSage || (async text => { asks.push(text); return { ok: true, text: 'Okay, let’s check your service history.' }; }) },
     fetch: async (url, init) => {
       const body = JSON.parse(init.body); requests.push({url,body,signal:init.signal});
       if (body.generationConfig.responseModalities) return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ inlineData: { data: options.emptyAudio ? 'AAAAAA==' : (options.silentAudio ? Buffer.alloc(speechPCM.length) : speechPCM).toString('base64'), mimeType:'audio/L16;rate=24000' } }] } }] }) };
@@ -340,8 +340,8 @@ for (const [name,option] of [['silent PCM','silentAudio'],['empty PCM','emptyAud
   });
 }
 
-test('one mixed-language TTS request starts playback before the stream finishes',async()=>{
-  const h=harness({holdPlayback:true,askSage:async()=>({ok:true,text:'சொல்லு டா. Tell me what happened.'})});
+test('one English TTS request starts playback before the stream finishes',async()=>{
+  const h=harness({holdPlayback:true,askSage:async()=>({ok:true,text:'Tell me what happened.'})});
   let controller,requests=0;
   const event=(finish=false)=>new TextEncoder().encode('data: '+JSON.stringify({candidates:[{content:{parts:[{inlineData:{data:Buffer.concat([speechPCM,speechPCM]).toString('base64'),mimeType:'audio/L16;rate=24000'}}]},...(finish?{finishReason:'STOP'}:{})}]})+'\n\n');
   try {
@@ -350,7 +350,7 @@ test('one mixed-language TTS request starts playback before the stream finishes'
       requests++;const body=JSON.parse(init.body);
       assert.match(url,/streamGenerateContent/);
       assert.equal(body.generationConfig.speechConfig.voiceConfig.voice,'Kore');
-      assert.match(body.contents[0].parts[0].text,/சொல்லு டா/);
+      assert.equal(body.contents[0].parts[0].text,'Tell me what happened.');
       return {ok:true,status:200,headers:new Headers({'content-type':'text/event-stream'}),body:new ReadableStream({start(c){controller=c;c.enqueue(event());}})};
     };
     const reply=h.root.SageVoice.sendVoiceText('hello');
@@ -369,7 +369,7 @@ test('missing Gemini key pauses explicitly without switching recognizers', async
     h.root.SageVoice.open(); await delay(20);
     assert.equal(h.recognition.length,0);
     assert.equal(h.recordings.length,0);
-    assert.equal(h.nodes.get('sageVoiceOverlay').getAttribute('data-recognition'),'gemini');
+    assert.equal(h.nodes.get('sageVoiceOverlay').getAttribute('data-recognition'),'gemini-transcribe');
     assert.match(h.nodes.get('sageVoiceHint').textContent,/Gemini key/);
   } finally { h.cleanup(); }
 });
@@ -381,10 +381,10 @@ test('audio recognition and a 650ms pause are defaults; careful preferences rema
   try {
     assert.equal(h.root.SageVoice.settings.pauseMs,650);
     await h.open(); await h.finish();
-    assert.match(h.requests[0].url,/gemini-3.5-flash:generateContent/);
+    assert.match(h.requests[0].url,/gemini-2.5-flash:generateContent/);
     assert.equal(careful.root.SageVoice.settings.pauseMs,1200);
     await careful.open(); await careful.finish();
-    assert.match(careful.requests[0].url,/gemini-3.8-flash:generateContent/);
+    assert.match(careful.requests[0].url,/gemini-2.5-flash:generateContent/);
   } finally {h.cleanup();careful.cleanup();}
 });
 
@@ -512,8 +512,8 @@ test('a new setup can choose one available voice model and retain that first suc
     assert.equal(h.storage.get('sage_voice_tts_model'),'gemini-3.8-flash-tts');assert.equal(h.playback.length,2);
   }finally{h.cleanup();}
 });
-test('Viky stays in the visible reply with one speech-only pronunciation in either language',async()=>{
-  for(const reply of ['Hello Viky.','சொல்லு, Viky.']) {
+test('Viky stays in the visible English reply with one speech-only pronunciation',async()=>{
+  for(const reply of ['Hello Viky.','Tell me more, Viky.']) {
     const h=harness({askSage:async()=>({ok:true,text:reply})});
     try {await h.open();await h.root.SageVoice.sendVoiceText('hello');
       assert.equal(h.history.at(-1).text,reply);
@@ -536,11 +536,11 @@ test('unavailable recognition model falls back on the same audio and remembers t
   let calls=0;const h=harness({transcribe:async()=>++calls===1?sttError(404):transcriptResponse()});
   try {await h.open();await h.finish();await until(()=>h.recordings.length===2);
     const first=h.requests.filter(r=>!r.body.generationConfig.responseModalities);
-    assert.equal(first.length,2);assert.match(first[1].url,/gemini-2.5-flash/);
+    assert.equal(first.length,2);assert.match(first[1].url,/gemini-2.5-flash-lite/);
     assert.equal(first[0].body.contents[0].parts[0].inlineData.data,first[1].body.contents[0].parts[0].inlineData.data);
-    assert.equal(first[0].body.generationConfig.thinkingConfig.thinkingLevel,'low');
+    assert.equal(first[0].body.generationConfig.thinkingConfig.thinkingBudget,0);
     await h.finish();await until(()=>h.recordings.length===3);
-    assert.match(h.requests.filter(r=>!r.body.generationConfig.responseModalities).at(-1).url,/gemini-2.5-flash/);
+    assert.match(h.requests.filter(r=>!r.body.generationConfig.responseModalities).at(-1).url,/gemini-2.5-flash-lite/);
   }finally{h.cleanup();}
 });
 test('unsupported thinking option retries once without it, preserving schema safeguards',async()=>{
@@ -568,7 +568,7 @@ test('invalid key has an honest hint, stays listening and skips unchanged reject
     assert.match(h.nodes.get('sageVoiceHint').textContent,/key was rejected/);
     h.nodes.get('sageVoiceOrb').emit('click');await until(()=>h.recordings.length===3);
     assert.equal(h.requests.filter(r=>!r.body.generationConfig.responseModalities).length,1);
-    assert.equal(h.nodes.has('sageVoiceSTTBrowser'),false);assert.equal(h.recognition.length,0);
+    assert.equal(h.nodes.has('sageVoiceSTTBrowser'),false);assert.ok(h.recognition.length>=1);
   }finally{h.cleanup();}
 });
 test('quota cooldown allows fresh listening but bounds requests until the key is ready',async()=>{
@@ -656,7 +656,17 @@ test('tiny and odd-byte PCM packets are reassembled without missing or shifted s
     for(let i=0;i<samples.length;i++)assert.equal(samples[i],bytes.readInt16LE(i*2)/32768);
   }finally{h.cleanup();}
 });
-test('Tamil and English use a short constant style and cannot switch models after speaking',async()=>{
+test('direct speech cannot send a non-English script to the selected speaker',async()=>{
+  const h=harness();
+  try {
+    await h.open();
+    await assert.rejects(h.root.SageVoice.speak('வணக்கம்'),/english-only/);
+    assert.equal(h.requests.length,0);
+    assert.equal(h.playback.length,0);
+    assert.equal(h.root.SageVoice.isOpen(),true);
+  } finally { h.cleanup(); }
+});
+test('English uses a constant style and cannot switch models after speaking',async()=>{
   const h=harness();
   try{
     await h.open();await h.root.SageVoice.sendVoiceText('hello');
@@ -712,7 +722,7 @@ test('temporarily suspended output resumes automatically before requesting speec
     assert.equal(h.nodes.get('sageVoiceMic').getAttribute('aria-pressed'),'false');
   }finally{h.cleanup();}
 });
-test('speaker, style and playback speed stay identical across Tamil and English in one call',async()=>{
+test('speaker, style and playback speed stay identical across input languages in one call',async()=>{
   const h=harness({storage:{sage_voice_gem:'Aoede',sage_voice_rate:'1.08'}});
   try{await h.open();await h.root.SageVoice.sendVoiceText('hello');h.storage.set('sage_voice_gem','Kore');h.storage.set('sage_voice_rate','1.3');
     await h.root.SageVoice.sendVoiceText('வணக்கம்');
@@ -859,7 +869,7 @@ test('late committed words rearm the server endpoint rather than leaving the rec
 test('waitingForInput expects more speech and does not end a still-speaking turn',async()=>{
   const h=harness({live:true,loud:true});
   try{await h.open();await until(()=>h.worklets.length===1);
-    h.sockets[0].message({serverContent:{inputTranscription:{text:'Hello'},waitingForInput:true}});
+    h.sockets[0].message({serverContent:{interimInputTranscription:{text:'Hello'},waitingForInput:true}});
     await delay(250);assert.equal(h.recordings[0].state,'recording');assert.equal(h.asks.length,0);
   }finally{h.cleanup();}
 });
@@ -1023,5 +1033,46 @@ test('a replacement recognition key works immediately during a rejected-key cool
     failing=false;h.root.SageAI.availableKeys=()=>[{key:'new-test-key'}];
     h.nodes.get('sageVoiceOrb').emit('click');await until(()=>h.recordings.length===3);
     assert.equal(h.asks.length,1);assert.equal(h.requests.filter(r=>!r.body.generationConfig.responseModalities).length,2);
+  }finally{h.cleanup();}
+});
+
+test('dedicated English streaming setup requests text, language hint and domain vocabulary only',async()=>{
+  const h=harness({live:true});
+  try {await h.open();const setup=h.sockets[0].sent[0].setup;
+    assert.equal(setup.model,'models/gemini-3.5-transcribe-live');assert.deepEqual(Array.from(setup.generationConfig.responseModalities),['TEXT']);
+    assert.deepEqual(Array.from(setup.inputAudioTranscription.languageCodes),['en-IN']);assert.ok(setup.inputAudioTranscription.customVocabulary.includes('Viky'));
+    assert.equal(setup.systemInstruction,undefined);assert.equal(setup.generationConfig.maxOutputTokens,undefined);
+  }finally{h.cleanup();}
+});
+test('English browser fallback captures the next hello without another Gemini recognition request',async()=>{
+  const h=harness({transcribe:async()=>sttError(429)});
+  try {await h.open();await h.finish();await until(()=>h.recordings.length===2);
+    const rec=h.recognition.at(-1);assert.equal(rec.lang,'en-IN');assert.equal(rec.interimResults,true);
+    rec.result('Hello there',false);assert.match(h.nodes.get('sageVoiceCaption').innerHTML,/Hello there/);
+    assert.equal(h.asks.length,0,'interim never executes a command');
+    rec.result('Hello there',true);h.tick(100);h.tick(651);await until(()=>h.recordings.length===3);
+    assert.deepEqual(h.asks,['Hello there']);assert.equal(h.requests.filter(r=>!r.body.generationConfig.responseModalities).length,1);
+    assert.equal(h.streams.length,1);assert.equal(h.root.SageVoice.isOpen(),true);
+  }finally{h.cleanup();}
+});
+test('repeated service failures produce one spoken recovery row and no repeated announcements',async()=>{
+  const h=harness({transcribe:async()=>sttError(503)});
+  try {await h.open();await h.finish();await until(()=>h.recordings.length===2);
+    h.nodes.get('sageVoiceOrb').emit('click');await until(()=>h.recordings.length===3);
+    assert.equal(h.playback.length,1);assert.equal(h.nodes.get('sageVoiceLines').children.length,1);assert.equal(h.asks.length,0);
+  }finally{h.cleanup();}
+});
+test('uncertain English fallback words ask again without sending a guessed write to the brain',async()=>{
+  const h=harness({transcribe:async()=>sttError(429)});
+  try {await h.open();await h.finish();await until(()=>h.recordings.length===2);
+    h.recognition.at(-1).result('delete record seven',true,.2);h.nodes.get('sageVoiceOrb').emit('click');await until(()=>h.recordings.length===3);
+    assert.equal(h.asks.length,0);assert.match(h.nodes.get('sageVoiceLines').children.at(-1).innerHTML,/say it once more/);
+  }finally{h.cleanup();}
+});
+test('a never-started English recognizer has bounded readiness and cannot remain Connecting forever',async()=>{
+  const h=harness({transcribe:async()=>sttError(429),hangNative:true,fastTimeouts:true});
+  try {await h.open();await h.finish();await until(()=>h.recordings.length===2);
+    await until(()=>h.nodes.get('sageVoiceState').textContent==='Recognition unavailable');
+    assert.equal(h.root.SageVoice.isOpen(),true);assert.equal(h.requests.filter(r=>!r.body.generationConfig.responseModalities).length,1);
   }finally{h.cleanup();}
 });

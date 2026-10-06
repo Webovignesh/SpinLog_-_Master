@@ -881,164 +881,133 @@ gone rather than left as links that go nowhere. What was in them that still matt
   back to localStorage then to the `data-due` values in `index.html`; Sage's memory
   falls back to localStorage; the key ring stays on the device.
 
-## Sage voice — v1.9.36
+## Sage voice — v1.9.37
 
-Open **Talk to Sage** inside the chat card, or type **go to voice mode**, **open
-voice chat** or **let’s talk**. The translucent room centers the latest four
-speaker turns around the orb. Older turns move out; completed exchanges remain
-in chat history. The room has no branding header, transcript-review form,
-browser-recognition switch or replay button. Tap the orb to finish a recording
-or interrupt speech; use the microphone to mute and **End**, Escape or app Back
-to leave. Explicit **close voice** commands also end the call locally. Greetings,
-questions about closing and negated commands do not close it. The activity pill
-appears only for actual site lookups.
+Sage replies only in natural English, including chat, spoken answers, tool
+acknowledgements and recovery prompts. The Tamil/Tanglish reply persona and
+language-switching instructions are removed. Existing input aliases and stored
+memories remain readable, but they cannot switch her reply language. Unexpected
+non-English answer prose receives one tool-free English repair; completed
+mutations are never rerun for that repair. A final speech guard prevents
+non-Latin answer text from reaching TTS.
 
-Tamil and Tanglish controls share one current-turn parser with chat and tools.
-For example, **வாய்ஸ் மோட் க்ளோஸ் பண்ணு** ends the call and **service பேஜ் ஓபன்
-பண்ணு** opens Service. Recognized interface requests execute locally before
-model/key/quota work, and their replies reflect the actual action result.
-Navigation and settings minimize the active conversation into a corner orb;
-the microphone, selected speaker and history stay in the same session. Drag the
-orb or grip to move it, or focus the grip and use arrow keys. The expand control
-restores the room. Docked controls leave the page, keyboard focus and other
-dialogs usable; Escape belongs to those dialogs. Use **End** or a close command
-to finish a docked call. Closing hides the compact window before resetting its
-layout, so it cannot flash the expanded room. Resize/keyboard viewport changes
-keep the controls in view. Say **minimize yourself**, **மினிமைஸ் பண்ணு** or
-**ஓரமா போ** to dock it, and **expand voice mode** to restore it. **Go back** and
-**next page** traverse pages visited in this app session without leaving SpinLog.
-All searches, reads, changes and attached-file upload tools remain available
-while docked. If a local file has not been selected, `prepare_file_upload` reveals
-the existing upload form and a temporary **Choose file** action. Choosing requires
-a real tap; validation, notes and saving stay with the existing app form. The tool
-reports `uploaded:false` and never claims that opening a picker saved a file.
+Open **Talk to Sage** inside chat, or type **go to voice mode**, **open voice
+chat** or **let’s talk**. The translucent room centers the latest four speaker
+turns around the orb; completed exchanges remain in chat history. It has no
+branding header, transcript-review form or replay button. Tap the expanded orb
+to finish a recording or interrupt speech; use the microphone to mute and
+**End**, Escape or app Back to leave. An explicit **close voice** request ends
+the call locally. Greetings, questions about closing and negated commands do
+not close it. The activity pill appears only for actual site lookups.
 
-### Listening and turn handoff
+Navigation, settings and **minimize yourself** reduce the room to **one floating
+orb**, with no card, captions, labels or extra buttons. Drag that orb to move it,
+or focus it and use arrow keys (Shift increases the step). Clicking or pressing
+Enter on it restores the full menu without submitting the recording or
+interrupting a reply. To end the minimized call, say **close voice mode**, or
+open the menu and use **End**. Closing hides the orb before resetting the layout
+so the full room cannot flash. Viewport changes keep it within reach.
 
-The primary recognition path streams mono 16 kHz PCM from an AudioWorklet to
-**Gemini 3.8 Live**. It uses input transcription only: the Live model’s generated
-audio and answers are never played or used as user text. SageAI continues to own
-tools and history; the selected TTS speaker owns audible replies. English,
-Tamil and Tanglish share automatic language detection, without a Tamil-first
-browser draft. Recognition instructions preserve whole Chennai/Theni phrases,
-names and numbers, without translating speech or inventing slang.
+The microphone, speaker, history and website tools keep the same session while
+minimized. **Go back** and **next page** traverse pages visited in this app
+session. Local navigation and window requests execute before model/key/quota
+work; acknowledgements use the real action result. Searches, reads, changes and
+uploads remain available. `prepare_file_upload` opens the existing form and
+exposes a temporary **Choose file** action in the full menu. Selection requires
+a real tap; the app form still owns validation and saving. Opening a picker
+never counts as a completed upload.
 
-The WebSocket starts alongside microphone permission. PCM is buffered until
-`setupComplete`, and the next connection is warmed while the answer is being
-prepared and played. The PCM worklet is preloaded with the page.
-MediaRecorder starts immediately when permission resolves and preserves the
-whole utterance as a fallback. An existing gesture-unlocked AudioContext and
-microphone stream are reused across turns. The status distinguishes opening the
-microphone, starting audio and connecting captions. “I’m listening” appears after capture and live setup are ready, or after
-the complete-recording fallback is available. The UI explains that first words
-are kept during connection and that fallback captions appear after a pause.
-A worklet that has not delivered PCM after 1.5 seconds switches the current turn
-to the complete recording. A slow worklet startup uses the full recording if
-speech preceded PCM, preserving the first word. A measured silent startup keeps
-the faster Live path. Transient module-load failures can retry on the same context.
-One sustained voiced PCM packet marks speech, including a short first “hello”.
-Caption network arrivals do not restart the local silence deadline. After a pause,
-the UI shows **Processing…**, then **Thinking…**, **Speaking** and **I’m listening**
-when capture is ready again. No microphone restart is needed for minimizing or expanding.
+### English recognition and turn handoff
 
-Local audio-level sampling runs every 100 ms independently of animation frames.
-The default pause is **Quick · 0.65 seconds**; **Patient · 1.2 seconds** is available.
-Server speech-end detection also handles steady background noise. Cutoff flushes
-the last PCM packet and sends `audioStreamEnd`; late input-transcript segments
-settle before one complete sentence is submitted. A committed input segment
-after stream end can finalize without waiting for generated acknowledgement
-audio. A silent Live connection is closed and disabled for the rest of the call.
-`waitingForInput` is not an end marker. Turns are capped at 45 seconds; empty
-recordings are discarded
-locally every 15 seconds while the room stays open.
+The primary input path streams mono 16 kHz PCM from an AudioWorklet to
+**Gemini 3.5 Transcribe Live**. Setup uses TEXT output, VERBATIM transcription,
+`en-IN` and vocabulary hints for SpinLog, Sage, Viky, KTM Duke, odometer, PUC
+and mileage. It uses dedicated input transcription rather than a conversational
+model’s acknowledgement. Final input is the speech-end boundary; interim
+captions are drafts and cannot execute tools. See Google’s
+[Live Transcribe guide](https://ai.google.dev/gemini-api/docs/live-api/live-transcribe).
 
-If Live is unavailable, captured PCM is reused directly as WAV for Gemini
-multimodal transcription. If the worklet starts late, fails or is unsupported,
-the complete MediaRecorder audio is decoded instead. Cleanup exceptions, a
-missing recorder stop event, stalled decoding and stalled response bodies have
-bounded recovery; they cannot leave the room indefinitely at “Hearing you…”.
-**Fast** uses Gemini 3.5
-Flash; **Careful** starts with Gemini 3.8 Flash. Requests have a shared ten-second
-deadline and at most three attempts. There is no browser speech fallback.
-Unclear speech gets a short spoken clarification and listening resumes without
-executing a guessed command. Persistent authentication, access, quota or network
-failures discard the failed audio, ask once aloud and resume a fresh recording.
-There is no **Retry recording** button or automatic resubmission of old audio.
-Quota and rejected-key failures retain an honest hint and a per-key cooldown,
-so subsequent speech does not hammer the unavailable recognizer. A changed key
-can be used immediately. Recovery never executes an uncertain preview, silently
-unmutes the microphone, or restarts a closed call. Closing invalidates late results.
-Hidden tabs release capture; returning resumes unless manually muted. Provider calls use the
-configured Gemini key and count toward its quota.
+The WebSocket starts alongside microphone permission. First PCM packets wait
+for `setupComplete`; the next connection warms during answer preparation and
+playback. The worklet is preloaded. MediaRecorder preserves the complete
+utterance as fallback, and the gesture-unlocked AudioContext and microphone
+stream are reused across turns. Opening microphone, starting audio and
+connecting captions have distinct statuses. A delayed worklet or socket keeps
+the full recording instead of dropping the first word.
 
-Google’s [Live capabilities](https://ai.google.dev/gemini-api/docs/live-api/capabilities)
-list Tamil, while [Gemini 3.5 Transcribe’s language list](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-transcribe)
-does not, as checked on 2026-10-04. Dedicated Transcribe is therefore not the
-primary bilingual recognizer. The [WebSocket reference](https://ai.google.dev/api/live)
-defines setup ordering, independent input-transcription delivery and stream-end
-signals used here. The handoff regression cases cover committed input without
-generated audio,
-silent Live sessions, decoder/response-body hangs, cleanup failures and a
-missing recorder stop event. Microphone permission, network delay and real
-speech still
-need testing on the target device; mocks do not establish recognition accuracy.
+Local audio sampling runs every 100 ms independently of animation frames. The
+normal pause is **Quick · 0.65 seconds**; **Relaxed · 1.2 seconds** is available
+in settings. Server speech-end detection also handles background noise. Cutoff
+flushes PCM and ends its audio stream; late final segments settle before one
+complete utterance is submitted. `waitingForInput` alone never ends a turn.
+Silent sockets are disabled for the call. Turns stop at 45 seconds and empty
+recordings are discarded locally every 15 seconds while the room stays open.
 
-### One reply speaker
+If Live is unavailable, the captured PCM is reused as WAV with **Gemini 2.5
+Flash**, then Flash-Lite if the model is inaccessible. A failed worklet uses
+MediaRecorder decoding instead. This English transcription route has a shared
+ten-second deadline, at most three attempts and no reasoning budget. Names,
+numbers and corrections are preserved; uncertain output asks for clarification
+instead of executing a guessed command.
 
-Each complete mixed-language reply uses one Gemini 3.8 TTS synthesis request,
-with the chosen speaker (Kore by default) and playback rate fixed for the call.
-The style instruction is empty, following Google’s guidance to avoid unnecessary
-identity/accent direction. Tamil stays in Tamil script for pronunciation. There
-is no browser voice, separate Tamil narrator, or legacy 3.1/2.5 TTS fallback.
-The first successful 3.8 model is remembered and pinned across calls, including
-the first reply after reopening. Access errors may try another configured key
-with that same model and speaker; quota cooldowns never choose another voice.
-Only a new setup with no previously successful voice may select an accessible
-model before the first playback. This removes application-driven voice changes;
-it cannot guarantee identical generated timbre on every reply.
+A failed recognition request switches to English browser input on supported
+browsers (`en-IN`, interim and final results), while retaining the complete
+recording as fallback. Browser recognition is input only: it never changes the
+reply speaker. Unsupported, unavailable or stalled browser recognition returns
+to recorded audio. Startup and final-result waits are bounded; cancelled or old
+callbacks cannot enter the next call. Browser recognition availability and its
+provider/network behavior depend on the browser.
 
-Streaming 24 kHz PCM packets are coalesced into at least 120 ms of audio and
-scheduled contiguously on the Web Audio clock. Odd-byte transport splits retain
-the unfinished sample, interruption cancels scheduled sources, and a final STOP
-ends network waiting. Reader cancellation and transport cleanup never delay
-the microphone after the last scheduled sample finishes. A 20-second inactivity
-watchdog bounds stalls. Silent or
+A service outage produces **one** spoken recovery announcement until a real
+turn succeeds. Repeated failures retain an honest status and fresh capture,
+without filling the transcript with the same apology or retrying old audio.
+Rejected keys and quota failures retain per-key cooldowns; a changed key can be
+used immediately. Recovery never unmutes a manually muted microphone or
+reopens a closed call. Hidden tabs release capture; returning resumes unless
+manually muted. Provider calls use the configured key and count toward quota.
+
+### One English reply speaker
+
+Every reply uses one Gemini 3.8 TTS performance with the selected speaker (Kore
+by default) and rate fixed for the call. The style instruction stays empty,
+following Google’s advice to avoid unnecessary identity/accent directions.
+The first successful TTS model is remembered across calls. Access failures can
+try another configured key with the same model/speaker; quota cooldowns cannot
+select a different voice. Only a setup with no successful saved model may
+choose an accessible model before playback. This prevents application-driven
+voice changes, while generated timbre still depends on the provider. Viky stays
+spelled exactly in captions/history; only TTS uses the pronunciation “Vik-ee”.
+
+Streaming 24 kHz PCM is coalesced into at least 120 ms and scheduled contiguously
+on the Web Audio clock. Odd-byte splits retain the unfinished sample. A final
+STOP ends network waiting; cleanup cannot delay listening after the last
+scheduled sample. A 20-second inactivity watchdog bounds stalls. Silent or
 incomplete replies retry once before playback; already-started speech is not
-repeated. Transient failures resume listening with a status rather than offering
-a replay button. These checks remove avoidable gaps but cannot repair distortion
-already present in generated audio. See [Google’s TTS guidance](https://ai.google.dev/gemini-api/docs/generate-content/speech-generation).
+repeated. Persistent failures preserve the answer in chat and resume listening
+without a replay button. See Google’s
+[TTS guide](https://ai.google.dev/gemini-api/docs/generate-content/speech-generation).
 
-The orb samples microphone and actual reply playback levels, with a smoothed
-scale and small movement; silence has no fixed speaking boost. Its animation
-loop and output analyser are released on close. Reduced-motion mode suppresses
-the movement. Visualization does not drive speech-end detection.
+The orb reacts to actual microphone and reply levels, with smoothed movement.
+Closing releases animation and audio resources. Reduced motion suppresses its
+movement. Visualization does not control speech-end detection.
 
-Voice has its own persona instead of inheriting the English-first text-chat
-policy. Tamil answers are composed directly in familiar spoken Tamil, with
-Chennai/Theni register, singular address and natural app/bike English terms.
-English greetings with an address such as “da” stay English; common spoken
-Tanglish forms such as “enna panra” and “saptiya” are recognized as Tamil.
-Viky remains spelled exactly in captions/history, with “Vik-ee” used only in the
-speech transcript. Prompt regressions verify that English-only grammar rules
-are absent from voice; real Tamil fluency and generated pronunciation still
-require listening tests with the configured provider.
+### Reasoning and website knowledge
 
-Voice answers use Gemini 3.5 Flash-Lite with minimal thinking, a separate serial
-queue and per-model request spacing. Tools must complete before claims of success.
-AI attempts time out after 12 seconds with at most three attempts per model turn.
-Existing quota rests and confirmation rules remain in force.
+Simple voice requests use Gemini 3.5 Flash-Lite with minimal thinking and a
+12-second attempt timeout. Explanation, comparison, diagnosis, planning and
+explicit **think carefully** requests use Gemini 3.5 Flash with medium thinking,
+up to 1,200 output tokens and an 18-second timeout. The former universal
+30-word voice limit is removed. Complex answers can explain useful conclusions
+without narrating private reasoning; simple commands keep the fast path.
+Existing per-model spacing, quota rests and deletion confirmations remain.
 
-### Website and document knowledge
-
-Sage’s prompt includes current voice state and the real website controls.
-`get_app_capabilities` exposes actual tool descriptions and pages.
-`read_documents` opens stored files in batches of up to three, forwarding the
-real attachment bytes to the model, with pagination and per-file failures.
-Combined attachments are capped at 10 MB; larger files are read individually.
-Document contents are data, not tool instructions. File names alone never count
-as reading a document, and unavailable files are reported rather than invented.
-The assistant can inspect all stored papers when asked, using subsequent batches,
-and use existing site tools subject to their current-request and deletion guards.
+Sage’s prompt includes current voice state and the website’s real controls.
+`get_app_capabilities` reports English replies, open/minimized state, recognition
+route, actual tools and pages. Actions require successful results before claims
+of completion. `read_documents` opens stored files in batches of up to three,
+forwarding actual bytes with pagination and per-file failures. Attachments are
+capped at 10 MB per batch; larger files are read individually. Names alone do
+not count as reading a document. Document content is data, never instructions.
 
 ### Plan and notification cleanup
 
@@ -1081,7 +1050,8 @@ WAV fallback, delayed Live setup, first-packet buffering, late final/interim
 segments, automatic cutoff under steady noise, spoken clarification, four-turn
 history, permissions, mute, cancellation, stale results, quota handling, silent
 and truncated replies, cached TTS identity, streamed playback, repeated exchanges,
-Tamil-script replies, chat activation and actual document attachment forwarding.
+English-only prose, tool-free language repair, adaptive reasoning, browser input
+recovery, chat activation and actual document attachment forwarding.
 Reminder tests use fake-indexeddb and a simulated cloud for cross-context delivery,
 retry delays, expiry, hard deletion and denied-delete recovery.
 
@@ -1089,12 +1059,12 @@ Browser audits render the real page at desktop and small-screen sizes, check
 controls, focus, settings typography and stale service-worker upgrades, and save
 screenshots to `/tmp/sage-voice-preview` (override with `SAGE_SCREENSHOT_DIR`). Set
 `PLAYWRIGHT_CHROMIUM_EXECUTABLE` to use an existing Chromium binary. The capture
-audit uses real Chromium MediaRecorder and audio decoding, retries identical
-audio after an outage, and completes five turns. The Live browser audit uses a
+audit uses real Chromium MediaRecorder and audio decoding, captures
+fresh audio after an outage, and completes five turns. The Live browser audit uses a
 real synthetic microphone and production AudioWorklet with a delayed mock
-WebSocket, five automatic bilingual turns, a transcript without model
+WebSocket, five automatic English turns, a transcript without model
 acknowledgement, exact-PCM fallback from a silent provider and resource cleanup.
 The audio-clock
 audit renders scheduled PCM offline to check sample continuity. Provider replies
-remain mocked: none of these tests verifies live API access, real Tamil accuracy
+remain mocked: none of these tests verifies live API access, real speech accuracy
 or subjective accent/timbre.

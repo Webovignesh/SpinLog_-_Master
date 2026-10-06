@@ -646,7 +646,8 @@
       const nextOffset = Math.min(stored.length,offset+limit);
       return {ok:true,total:stored.length,documents,nextOffset,complete:nextOffset>=stored.length,_attachFiles:files};
     },
-    get_app_capabilities: () => ({ok:true,voiceOpen:!!root.SageVoice?.isOpen?.(),voiceMinimized:!!root.SageVoice?.isMinimized?.(),
+    get_app_capabilities: () => ({ok:true,replyLanguage:'English',voiceOpen:!!root.SageVoice?.isOpen?.(),voiceMinimized:!!root.SageVoice?.isMinimized?.(),
+      recognition:root.SageVoice?.recognitionMode?.() || 'closed',
       controls:TOOLS.map(tool=>({name:tool.name,description:tool.description})),
       pages:['home','service','docs','sage'],
       rules:'UI actions require an explicit current request. Deletions require the app confirmation. File contents must be opened with read tools, never inferred from names.'}),
@@ -1120,18 +1121,17 @@
     if (panels[target]) return { name:'open_sage_settings', tab:panels[target] };
     return null;
   }
-  function uiReply(intent, result, raw) {
-    const tamil = /[\u0B80-\u0BFF]|\b(?:pannu|pannunga|pannuda|pannudi|moodu|niruthu)\b/i.test(String(raw));
-    if (!result?.ok) return tamil ? 'அதைச் செய்ய முடியல. ' + (result?.error || 'இன்னொரு தடவை முயற்சி பண்ணு.') : (result?.error || 'That action could not finish. Try again.');
+  function uiReply(intent, result) {
+    if (!result?.ok) return result?.error || 'That action could not finish. Try again.';
     if (intent.name === 'control_voice') {
-      if (intent.action === 'close') return tamil ? 'வாய்ஸ் மோடை மூடிட்டேன்.' : 'Voice mode is closed.';
-      if (intent.action === 'minimize') return tamil ? 'ஓரமா இருக்கேன். சொல்லு, கேக்கறேன்.' : 'I’m in the corner. Keep talking.';
-      if (intent.action === 'expand') return tamil ? 'பெரிசா திறந்துட்டேன். சொல்லு.' : 'The conversation is expanded. Keep talking.';
-      return tamil ? 'சொல்லு, கேக்கறேன்.' : 'I’m listening.';
+      if (intent.action === 'close') return 'Voice mode is closed.';
+      if (intent.action === 'minimize') return 'I’m in the corner. Keep talking.';
+      if (intent.action === 'expand') return 'The conversation is expanded. Keep talking.';
+      return 'I’m listening.';
     }
     if (intent.name === 'navigate_history') intent = {...intent,section:result.opened};
     const page = {home:'Home',service:'Service history',docs:'Documents',sage:'Chat'}[intent.section] || 'Settings';
-    return tamil ? `${{home:'முகப்பு',service:'சர்வீஸ்',docs:'டாக்குமென்ட்ஸ்',sage:'சாட்'}[intent.section] || 'செட்டிங்ஸ்'} பக்கம் திறந்திருக்கு. இங்கயே பேசலாம்.` : `${page} is open. We can keep talking.`;
+    return `${page} is open. We can keep talking.`;
   }
   function uiAllowed(name, args, context) {
     if (name === 'prepare_file_upload') return /\b(?:upload|attach)\b|\b(?:choose|pick)\b.{0,48}\b(?:file|document|bill|photo|image|video|audio)\b|அப்லோட்|அப்லோடு|பதிவேற்று|கோப்பை தேர்வு/iu.test(context?.userText || '')
