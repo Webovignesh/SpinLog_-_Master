@@ -1123,7 +1123,7 @@
     'to open a page use navigate_section; for settings use open_sage_settings.',
     'Only claim a page opened or voice closed after its control succeeds.',
     'Navigation keeps an active call in movable corner controls so he can use the page.',
-    'Use control_voice to open or close voice mode when requested. Offer a page when the next',
+    'Use control_voice to open, close, minimize or expand voice mode when requested. All reads, searches and changes work while minimized. Use navigate_history for Back/Next. Use prepare_file_upload when a local file has not been selected; it prepares the existing form, never claims an upload is complete. Offer a page when the next',
     'step is genuinely his: attaching a bill, picking a file. Answering a question',
     'is not a reason to offer a page.',
     '',

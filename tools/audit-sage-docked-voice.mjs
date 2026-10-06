@@ -27,7 +27,7 @@ const server=http.createServer(async(req,res)=>{
   try {
     let data=await readFile(file);
     if(rel==='index.html')data=data.toString().replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace('</body>',
-      ['sage-tools','sage-ai','sage-transcription','sage-voice'].map(n=>`<script src="src/js/${n}.js?v=1.9.35"></script>`).join('')+'<script src="/audit-router.js"></script></body>');
+      ['sage-tools','sage-ai','sage-transcription','sage-voice'].map(n=>`<script src="src/js/${n}.js?v=1.9.36"></script>`).join('')+'<script src="/audit-router.js"></script></body>');
     res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.css':'text/css'})[path.extname(file)]||'application/octet-stream');res.end(data);
   }catch {res.writeHead(404).end();}
 });
@@ -105,6 +105,23 @@ try {
     assert.equal(await page.locator('#sageVoiceOverlay').getAttribute('aria-modal'),'true');
     assert.equal(await page.evaluate(()=>captureRequests),initial.captures,'expansion never reacquires microphone');
     await page.locator('#sageVoiceWindow').click();assert.equal(await page.evaluate(()=>SageVoice.isMinimized()),true);
+    await page.evaluate(()=>SageVoice.sendVoiceText('expand voice mode'));
+    assert.equal(await page.evaluate(()=>SageVoice.isMinimized()),false);
+    await page.evaluate(()=>SageVoice.sendVoiceText('மினிமைஸ் பண்ணு'));
+    await page.waitForFunction(()=>SageVoice.isMinimized() && document.getElementById('sageVoiceState').textContent==='I’m listening');
+    await page.evaluate(()=>SageVoice.sendVoiceText('open documents'));
+    await page.evaluate(()=>SageVoice.sendVoiceText('go back'));
+    assert.equal(await page.evaluate(()=>document.querySelector('main section.active').id),'service');
+    await page.evaluate(()=>SageVoice.sendVoiceText('next page'));
+    assert.equal(await page.evaluate(()=>document.querySelector('main section.active').id),'docs');
+    const prep=await page.evaluate(()=>SageTools.run('prepare_file_upload',{kind:'image'},{userText:'upload a photo'}));
+    assert.equal(prep.ok,true);assert.equal(prep.uploaded,false);
+    const pickerPromise=page.waitForEvent('filechooser');await page.locator('#sageVoiceChooseFile').click();
+    const picker=await pickerPromise;assert.equal(await picker.element().getAttribute('accept'),'.jpg,.jpeg,.png,.webp');
+    await picker.setFiles([]);
+    assert.equal(await page.evaluate(()=>SageVoice.isMinimized()),true);
+    assert.equal(await page.locator('#sageVoiceChooseFile').isVisible(),false);
+    assert.equal(await page.evaluate(()=>captureRequests),initial.captures,'file preparation keeps the microphone');
     await page.evaluate(()=>SageVoice.sendVoiceText('open voice settings'));
     await page.locator('#testSettingsInput').fill('Website remains interactive');
     await page.keyboard.press('Escape');assert.equal(await page.evaluate(()=>SageVoice.isOpen()),true,'Escape belongs to settings while docked');
@@ -115,11 +132,17 @@ try {
     await page.setViewportSize({width:320,height:420});
     const resized=await page.locator('#sageVoiceOverlay').boundingBox();
     assert.ok(resized.x>=12 && resized.y>=12 && resized.x+resized.width<=309 && resized.y+resized.height<=409,'resizing cannot hide End');
-    await page.evaluate(()=>SageVoice.sendVoiceText('வாய்ஸ் மோட் க்ளோஸ் பண்ணு'));
+    const frames=await page.evaluate(async()=>{
+      const samples=[];const overlay=document.getElementById('sageVoiceOverlay');
+      SageVoice.sendVoiceText('வாய்ஸ் மோட் க்ளோஸ் பண்ணு');
+      for(let i=0;i<12;i++){await new Promise(requestAnimationFrame);samples.push({display:getComputedStyle(overlay).display,width:overlay.getBoundingClientRect().width});}
+      return samples;
+    });
+    assert.ok(frames.every(f=>f.display==='none'),'closing compact controls never paints a full-screen flash');
     assert.equal(await page.evaluate(()=>SageVoice.isOpen()),false);
     assert.equal(await page.evaluate(()=>ears.every(ws=>ws.readyState===3)),true,'close releases all Live sockets');
     await page.waitForFunction(()=>document.getElementById('sageVoiceOverlay').hidden);
-    console.log(`✓ ${name}: real router/Back, Tamil route/close, continuing call, drag/tap separation, keyboard, page/settings access, six replies and resize bounds`);
+    console.log(`✓ ${name}: real router/Back, Tamil route/close, continuing call, drag/tap separation, keyboard, page/settings access, spoken minimize/expand, Back/Next, upload picker, six replies, flash-free close and resize bounds`);
   }
   assert.deepEqual(errors,[]);console.log('✓ No page errors; provider speech quality is outside this simulated transport audit');
 }finally {await browser?.close();await new Promise(r=>server.close(r));}

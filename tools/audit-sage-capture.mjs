@@ -45,7 +45,7 @@ try {
   await page.locator('#sageChatMic').click();
   await page.waitForFunction(()=>document.getElementById('sageVoiceState').textContent==='I’m listening');
   await page.waitForTimeout(800);await page.locator('#sageVoiceOrb').click();
-  await page.locator('#sageVoiceSTTError').waitFor({state:'visible'});
+  await page.waitForFunction(()=>document.getElementById('sageVoiceLines').textContent.includes('say it again') && document.getElementById('sageVoiceState').textContent==='I’m listening');
   const requests=await page.evaluate(()=>recordedRequests);
   assert.equal(requests.length,2,'one bounded server retry');
   const wav=Buffer.from(requests[0].body.contents[0].parts[0].inlineData.data,'base64');
@@ -53,17 +53,18 @@ try {
   let peak=0;for(let i=44;i<wav.length;i+=2)peak=Math.max(peak,Math.abs(wav.readInt16LE(i)));assert.ok(peak>100,'recording contains real fake-device audio');
   await page.waitForTimeout(2200);
   assert.equal(await page.evaluate(()=>recordedRequests.length),2,'no reconnect/upload loop');
-  assert.equal(await page.locator('#sageVoiceState').textContent(),'Couldn’t transcribe');
+  assert.equal(await page.locator('#sageVoiceState').textContent(),'I’m listening');
+  assert.equal(await page.locator('#sageVoiceSTTRetry').count(),0);
   for(const [width,height] of [[390,844],[320,568]]){
     await page.setViewportSize({width,height});
-    for(const id of ['sageVoiceSTTRetry','sageVoiceEnd']){
+    for(const id of ['sageVoiceMic','sageVoiceEnd']){
       if(await page.locator('#'+id).isVisible()){const b=await page.locator('#'+id).boundingBox();assert.ok(b.y>=0&&b.y+b.height<=height,`${id} fits ${width}x${height}`);}
     }
   }
   await mkdir('/tmp/sage-capture-preview',{recursive:true});await page.screenshot({path:'/tmp/sage-capture-preview/recovery.png'});
-  await page.evaluate(()=>{failRecognition=false;});await page.locator('#sageVoiceSTTRetry').click();
+  await page.evaluate(()=>{failRecognition=false;});await page.locator('#sageVoiceOrb').click();
   await page.waitForFunction(()=>replies.length===1 && document.getElementById('sageVoiceState').textContent==='I’m listening');
-  const retry=await page.evaluate(()=>recordedRequests[2]);assert.equal(retry.body.contents[0].parts[0].inlineData.data,requests[0].body.contents[0].parts[0].inlineData.data,'retry uses identical saved audio');
+  const retry=await page.evaluate(()=>recordedRequests[2]);assert.notEqual(retry.body.contents[0].parts[0].inlineData.data,requests[0].body.contents[0].parts[0].inlineData.data,'a new utterance uses fresh captured audio');
   for(let i=0;i<4;i++){
     await page.waitForTimeout(600);
     await page.locator('#sageVoiceOrb').click();
@@ -71,5 +72,5 @@ try {
   }
   await page.locator('#sageVoiceEnd').click();
   assert.deepEqual(errors,[]);
-  console.log('✓ Real MediaRecorder/decoder/WAV path, bounded outage recovery, identical-audio retry, five completed turns full-audio handoff, and phone recovery controls');
+  console.log('✓ Real MediaRecorder/decoder/WAV path, bounded outage recovery, fresh-audio recovery, five completed turns full-audio handoff, and phone recovery controls');
 }finally{await browser?.close();server.close();}

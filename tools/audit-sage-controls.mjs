@@ -12,7 +12,7 @@ function appMethod(name,next,context) {
 function harness(overrides={}) {
   let open=true,section=null,tab=null,docked=false;
   const root={console:{log(){},warn(){}},
-    SageVoice:{open(){open=true;return true;},close(){open=false;},minimize(){docked=true;},},
+    SageVoice:{open(){open=true;return true;},close(){open=false;},minimize(){if(!open)return false;docked=true;return true;},expand(){if(!open)return false;docked=false;return true;},},
     SageUI:{open(t){tab=t;},isOpen:()=>!!tab},...overrides};
   root.self=root;vm.runInNewContext(toolsSource,root);
   root.dkApp={goToSection:appMethod('goToSection','saveParkLocation',{setActiveSection:s=>{section=s;}}),
@@ -141,4 +141,40 @@ test('a failed action never gets a success acknowledgement or minimizes the call
   const raw='service பேஜ் ஓபன் பண்ணு',intent=h.root.SageTools.uiIntent(raw);
   const result=await h.run(intent.name,{section:intent.section},{userText:raw});
   assert.equal(h.docked,false);assert.doesNotMatch(h.root.SageTools.uiReply(intent,result,raw),/திறந்திருக்கு|opened/);
+});
+
+test('spoken minimize/restore uses the shared intent guard and keeps the call open',async()=>{
+  const h=harness();
+  for(const text of ['minimize yourself','minimize voice mode','voice mode minimize pannu','மினிமைஸ் பண்ணு','வாய்ஸ் மோடை மினிமைஸ் பண்ணு','ஓரமா போ']) {
+    const intent=h.root.SageTools.uiIntent(text);assert.equal(intent?.action,'minimize',text);
+    assert.equal((await h.run(intent.name,{action:intent.action},{userText:text})).ok,true);assert.equal(h.open,true);assert.equal(h.docked,true);
+  }
+  assert.equal((await h.run('control_voice',{action:'expand'},{userText:'expand voice mode'})).ok,true);assert.equal(h.docked,false);
+  for(const text of ["don't minimize yourself",'மினிமைஸ் பண்ணாத','how do I minimize voice mode','hello']) assert.equal(h.root.SageTools.uiIntent(text),null,text);
+});
+test('back/next requires the current request and reports actual in-app navigation',async()=>{
+  const h=harness();h.root.dkApp.navigateHistory=async({direction})=>direction==='back'?{ok:true,opened:'home'}:{ok:false,error:'No next page'};
+  for(const text of ['back','go back','previous page','பின்னாடி போ','back po']) {
+    assert.equal(h.root.SageTools.uiIntent(text)?.direction,'back',text);
+    assert.equal((await h.run('navigate_history',{direction:'back'},{userText:text})).ok,true);
+  }
+  assert.equal((await h.run('navigate_history',{direction:'forward'},{userText:'next page'})).ok,false);
+  for(const text of ['next page','முன்னாடி போ','அடுத்த பக்கத்துக்கு போ']) assert.equal(h.root.SageTools.uiIntent(text)?.direction,'forward',text);
+  assert.equal((await h.run('navigate_history',{direction:'back'},{userText:'hello'})).ok,false);
+});
+test('file picker preparation requires an upload request and never claims a completed upload',async()=>{
+  const h=harness();h.root.dkApp.prepareFileUpload=async({kind})=>({ok:true,ready:kind,uploaded:false});
+  assert.equal((await h.run('prepare_file_upload',{kind:'image'},{userText:'upload a photo'})).uploaded,false);
+  for(const text of ['hello','choose a different color','how do I upload a file',"don't upload anything",'அப்லோட் பண்ணாத']) assert.equal((await h.run('prepare_file_upload',{kind:'image'},{userText:text})).ok,false,text);
+});
+
+test('in-app Back/Next stops at session boundaries and cancels without losing its position',async()=>{
+  const trail=['home','service','docs'];let allow=true;const routed=[];
+  const context={sectionTrail:trail,sectionTrailIndex:2,setActiveSection:async(section,mode)=>{routed.push({section,mode});return allow;}};
+  const navigate=appMethod('navigateHistory','prepareFileUpload',context);
+  assert.equal((await navigate({direction:'forward'})).ok,false);assert.equal(routed.length,0);
+  allow=false;assert.equal((await navigate({direction:'back'})).ok,false);assert.equal(context.sectionTrailIndex,2);
+  allow=true;assert.equal((await navigate({direction:'back'})).opened,'service');assert.equal(context.sectionTrailIndex,1);
+  assert.equal((await navigate({direction:'back'})).opened,'home');assert.equal((await navigate({direction:'back'})).ok,false);
+  assert.equal((await navigate({direction:'forward'})).opened,'service');assert.equal(routed.at(-1).mode,'trail');
 });
