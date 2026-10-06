@@ -412,6 +412,8 @@
   let recognitionNotice = '', recoveryEpisode = '';
   let nativeEnglishFallback = false, nativeRestUntil = 0;
   const sttCooldowns = new Map(); // key-specific; no background retry of old audio
+  const sttModelRest = new Map(); // quota/access on one model must not block another
+  const liveKeyRest = new Map();
   let sttRoute = null; // remember a working model/configuration for this session
   let meterCtx = null;
   let meterAnalyser = null;
@@ -558,10 +560,29 @@
   let warmEars = null;
   let liveDisabled = false;
   function warmRecognition() {
+    if (warmEars && !warmEars.available) retireRecognition(warmEars);
     if (nativeEnglishFallback || liveDisabled || !S.open || S.backgrounded || S.muted || warmEars || !root.SageTranscription || !root.WebSocket) return;
-    warmEars = root.SageTranscription.connect({key:gemKey(),pauseMs:settings.pauseMs});
+    const key = gemKeys().find(k => (liveKeyRest.get(k) || 0) <= Date.now());
+    if (!key) return;
+    warmEars = root.SageTranscription.connect({key,pauseMs:settings.pauseMs});
+    warmEars.key = key;
   }
   function releaseWarmRecognition() { warmEars?.close(); warmEars = null; }
+  function retireRecognition(ears) {
+    if (!ears) return;
+    const code = ears.failure?.message || 'live-unavailable';
+    // Transient connection failures can recover in the same call. Access and
+    // quota failures try another configured key, with no rapid reconnect loop.
+    liveKeyRest.set(ears.key, Date.now() + (/stt-(auth|access|model)/.test(code) ? 300000 : code === 'quota' ? 60000 : 15000));
+    ears.close();
+    if (warmEars === ears) warmEars = null;
+  }
+  function keepRecognition(ears) {
+    if (!ears?.available || !S.open || S.muted || S.backgrounded) { ears?.close(); return; }
+    ears.park();
+    if (warmEars && warmEars !== ears) warmEars.close();
+    warmEars = ears;
+  }
   function bounded(work, ms, code, onTimeout) {
     let timer;
     return Promise.race([work, new Promise((_, reject) => {
@@ -597,8 +618,10 @@
         const text = [...committed,...draft].join(' ');
         if (text) { take.heard = true; take.previewText = text; paintCaption(text,!!draft.length); }
       };
-      recognizer.onerror = () => {
+      recognizer.onerror = event => {
         if (!valid()) return;
+        // Silence is a normal turn, not a 60-second browser outage.
+        if (event?.error === 'no-speech' || event?.error === 'aborted' && ending) return;
         take.nativeReady = false; take.nativeFailed = true; nativeRestUntil = Date.now()+60000;
         clearTimeout(startTimer);
         final = ''; finish(); paintCaptureReadiness(take); // recorded audio remains the fallback
@@ -608,8 +631,15 @@
         take.nativeReady = false;
         finish();
         if (!ending && !take.stopping) {
+          if (take.nativeFailed) { paintCaptureReadiness(take); return; }
           if (take.heard || final) finishGeminiListen(true);
-          else { take.nativeFailed = true; nativeRestUntil = Date.now()+60000; paintCaptureReadiness(take); }
+          else {
+            clearTimeout(startTimer);
+            startTimer = setTimeout(() => {
+              if (!valid() || ending || take.stopping) return;
+              try { recognizer.start(); } catch { take.nativeFailed = true; paintCaptureReadiness(take); }
+            }, 150);
+          }
         }
       };
       startTimer = setTimeout(() => {
@@ -659,7 +689,7 @@
     const epoch = ++captureEpoch;
     openingMic = true;
     setMode('starting', 'Opening microphone…');
-    const take = { recorder:null, chunks:[], frames:[], owner, epoch, heard:false, loudAt:0,
+    const take = { recorder:null, chunks:[], frames:[], preRoll:[], owner, epoch, heard:false, loudAt:0, voicedMs:0,
       quietAt:0, previewText:'', started:Date.now(), timer:null, stopping:false, cancelled:false,
       micStarted:false, liveReady:false, pcmUnavailable:!root.SageTranscription };
     capture = take;
@@ -672,10 +702,10 @@
     if (take.live) {
       take.live.connected.then(ready => {
         if (!current(owner) || capture !== take || take.cancelled || take.stopping) return;
+        ready &&= !!take.live?.available;
         take.liveReady = ready;
         if (!ready) {
-          take.live?.close(); take.live = null;
-          if (!take.liveGap) { liveDisabled = true; releaseWarmRecognition(); }
+          retireRecognition(take.live); take.live = null;
         }
         paintCaptureReadiness(take);
       });
@@ -684,13 +714,14 @@
       take.live.bind({
         onText:(text, final) => {
           if (!current(owner) || capture !== take || take.cancelled || take.stopping) return;
-          take.heard = true; take.previewText = text;
+          if (!take.heard || !text.trim()) return; // never turn idle noise into a command
+          take.previewText = text;
           paintCaption(text, !final);
           paintCaptureReadiness(take);
           // Caption arrival is networking, not renewed microphone activity.
         },
         onBoundary:() => {
-          if (current(owner) && capture === take && !take.stopping && take.previewText) finishGeminiListen(true);
+          if (current(owner) && capture === take && !take.stopping && take.heard && take.previewText) finishGeminiListen(true);
         },
       });
     }
@@ -733,15 +764,33 @@
           paintCaptureReadiness(take); return;
         }
         take.frames.push(frame.pcm);
-        take.live?.push(frame.pcm);
         take.pcmLevel = frame.rms;
         take.pcmAt = Date.now();
         let speechStarted = false;
-        // One sustained 80–100ms voiced packet is enough for a short hello.
-        // Waiting for two polling ticks used to miss the entire first word.
-        if (frame.rms > Math.max(0.005, noiseFloor * 1.6) && frame.pcm.byteLength >= 2560) {
+        if (!take.vadReady && Number.isFinite(frame.speechMs) && !take.previewText) {
+          // A startup click seen by the coarse meter must not survive the
+          // first real speech classification from a cold-loaded worklet.
+          take.heard = false; take.loudAt = take.quietAt = 0;
+        }
+        take.vadReady = Number.isFinite(frame.speechMs);
+        take.pcmSpeech = take.vadReady ? frame.speechMs > 0 && frame.activeMs > 0
+          : frame.rms > Math.max(0.005, noiseFloor * 1.6);
+        const duration = frame.pcm.byteLength / 32;
+        if (take.pcmSpeech) take.voicedMs += take.vadReady ? Math.min(frame.speechMs, frame.activeMs) : duration;
+        else take.voicedMs = 0;
+        // Real speech, not volume alone. Keep a half-second prefix so this
+        // confirmation never clips the first syllable or requires a repeat.
+        if (take.pcmSpeech && (take.voicedMs >= 120 || !take.vadReady && duration >= 80)) {
           speechStarted = !take.heard;
           take.heard = true; take.quietAt = 0;
+        }
+        if (take.heard) {
+          for (const pcm of take.preRoll) take.live?.push(pcm);
+          take.preRoll = [];
+          take.live?.push(frame.pcm);
+        } else {
+          take.preRoll.push(frame.pcm);
+          while (take.preRoll.reduce((n,pcm) => n+pcm.byteLength,0) > 16000) take.preRoll.shift();
         }
         clearTimeout(take.readyTimer);
         paintCaptureReadiness(take);
@@ -780,12 +829,12 @@
         // the absolute level remains above the old 0.0045 threshold.
         const threshold = Math.max(take.heard ? 0.003 : 0.005, noiseFloor * 1.6,
           take.heard ? take.peakLevel * 0.22 : 0);
-        const loud = level > threshold;
+        const loud = take.pcmAt && now - take.pcmAt < 250 && take.vadReady ? take.pcmSpeech : level > threshold;
         els().orb?.setAttribute('data-speech-active', String(loud));
         if (loud) {
           take.quietAt = 0;
           if (!take.loudAt) take.loudAt = now;
-          if (now - take.loudAt >= 100 && !take.heard) {
+          if (!take.vadReady && now - take.loudAt >= 100 && !take.heard) {
             take.heard = true;
             if (!take.previewText) setHint('I can hear you. No need to repeat — your words are on the way.');
           }
@@ -797,9 +846,10 @@
           }
         }
         // Bytes alone are not speech: silence also produces compressed data.
-        if (!take.heard && !take.loudAt && now - take.started >= 15000) {
+        if (!take.heard && (!take.loudAt || now-take.loudAt >= 1000) && now - take.started >= 15000) {
           // Bound the silent buffer, not the hands-free session. Discard it
           // locally and keep the same microphone stream enabled.
+          keepRecognition(take.live); take.live = null;
           cancelGeminiListen();
           startListening();
         } else if (now - take.started >= 45000) finishGeminiListen(true);
@@ -856,12 +906,18 @@
     clearTimeout(take.readyTimer);
     take.chunks = [];
     take.frames = [];
+    take.preRoll = [];
     try { if (take.recorder && take.recorder.state !== 'inactive') take.recorder.stop(); } catch { /* already stopped */ }
   }
   function finishGeminiListen(commit) {
     const take = capture;
     if (!take || take.stopping || !take.recorder) return;
     if (!commit) { cancelGeminiListen(); return; }
+    if (take.vadReady && !take.heard && !take.previewText) {
+      // Tapping the orb or a recording deadline in silence is still silence.
+      keepRecognition(take.live); take.live = null;
+      cancelGeminiListen(); startListening(); return;
+    }
     // Only the settled, authoritative transcript may execute a close command.
     take.stopping = true;
     clearInterval(take.timer);
@@ -901,9 +957,11 @@
     setMode('transcribing');
     const {native:nativeText,live:liveText} = await finalizeCapture(take);
     take.native?.cancel();
+    if (take.cancelled || capture !== take || !current(take.owner)) { take.live?.close(); return; }
     const liveFailed = take.live && !take.live.available;
-    take.live?.close();
-    if (take.cancelled || capture !== take || !current(take.owner)) return;
+    if (liveText && !take.liveGap && !take.pcmBroken) keepRecognition(take.live);
+    else if (liveFailed) retireRecognition(take.live);
+    else take.live?.close();
     capture = null;
     if (nativeText) {
       take.chunks = []; take.frames = []; S.transcribing = false;
@@ -918,7 +976,6 @@
     }
     // A rejected/slow Live route never loses this utterance or repeatedly
     // reconnects. Use the same complete audio, including its first syllable.
-    if (liveFailed) { liveDisabled = true; releaseWarmRecognition(); }
     const recording = {blob:new Blob(take.chunks, {type:take.recorder.mimeType || 'audio/webm'}),
       pcm:!take.liveGap && !take.pcmBroken && take.frames.length ? take.frames : null,
       b64:null, previewText:take.previewText};
@@ -960,6 +1017,16 @@
       nativeEnglishFallback = !!(root.SpeechRecognition || root.webkitSpeechRecognition);
       if (nativeEnglishFallback) { liveDisabled = true; releaseWarmRecognition(); }
       const episode = 'recognition'; // one announcement until a real turn succeeds
+      const blocked = /^(?:quota|no-key|stt-auth|stt-access|stt-model)$/.test(err.message);
+      if (blocked) {
+        // A service limit is not something the user said. Switch input quietly,
+        // retain the exact error in the hint, and never synthesize a quota loop.
+        S.busy = false;
+        paintCaption('', false);
+        await startListening();
+        if (current(owner)) setHint(recognitionNotice);
+        return;
+      }
       if (recoveryEpisode === episode) {
         S.busy = false;
         await startListening();
@@ -969,10 +1036,7 @@
       recoveryEpisode = episode;
       S.busy = true;
       paintCaption('', false);
-      const blocked = /^(?:quota|no-key|stt-auth|stt-access|stt-model)$/.test(err.message);
-      const clarification = blocked
-        ? (nativeEnglishFallback ? 'I’m switching recognition. Could you say that once more?' : 'The speech service is unavailable right now. Try again shortly.')
-        : 'Recognition had a problem. Could you say it again?';
+      const clarification = 'Recognition had a problem. Could you say it again?';
       addLine('her', clarification);
       paintMic();
       await deliverReply(clarification, owner);
@@ -1041,86 +1105,88 @@
     });
   }
   async function transcribeWithGemini(b64, owner) {
-    const configured = gemKeys().slice(0, 2);
+    const configured = gemKeys().slice(0, 3);
     if (!configured.length) throw new Error('no-key');
-    const keys = configured.filter(key => !sttCooldowns.has(key) || sttCooldowns.get(key).retryAt <= Date.now());
-    if (!keys.length) throw Object.assign(new Error(sttCooldowns.get(configured[0]).code), {retryAt:Math.min(...configured.map(key=>sttCooldowns.get(key).retryAt))});
     const preferred = GEM_STT_MODEL;
-    const models = [...new Set([preferred, 'gemini-3.5-flash-lite'])];
-    let model = sttRoute?.preferred === preferred ? sttRoute.model : preferred;
-    let simple = sttRoute?.preferred === preferred && sttRoute.simple;
-    let keyIndex = 0;
-    const controller = new AbortController();
-    sttController = controller;
-    // One deadline and at most three attempts for the SAME recording.
+    const models = [...new Set([sttRoute?.preferred === preferred ? sttRoute.model : preferred, preferred, 'gemini-3.5-flash-lite'])];
+    const id = route => route.model + ':' + route.key;
+    const routes = configured.flatMap(key => models.map(model => ({model,key,
+      simple:sttRoute?.model === model && sttRoute.simple}))).filter(route =>
+      (sttCooldowns.get(route.key)?.retryAt || 0) <= Date.now() && (sttModelRest.get(id(route))?.retryAt || 0) <= Date.now());
+    if (!routes.length) {
+      const rests = configured.flatMap(key => [sttCooldowns.get(key), ...models.map(model => sttModelRest.get(id({key,model})))]).filter(Boolean);
+      const rest = rests.find(r=>r.code==='stt-auth' || r.code==='stt-access') || rests.reduce((a,b)=>a.retryAt<b.retryAt?a:b);
+      throw Object.assign(new Error(rest.code), {retryAt:rest.retryAt});
+    }
+    const controller = new AbortController(); sttController = controller;
+    let index = 0, lastError;
+    // A quota belongs to a model + key, while invalid keys/restrictions apply
+    // to every model. Try an available route for the SAME complete recording.
     try {
       return await bounded((async () => {
-        for (let attempt=0; attempt<3; attempt++) {
+        for (let attempt=0; attempt<3 && index<routes.length; attempt++) {
           if (!current(owner) || controller.signal.aborted) throw new Error('cancelled');
+          const route = routes[index];
+          if ((sttCooldowns.get(route.key)?.retryAt || 0) > Date.now()) {index++; attempt--; continue;}
           const generationConfig = {temperature:0, maxOutputTokens:1200,
             responseMimeType:'application/json', responseSchema:{type:'OBJECT',
               properties:{transcript:{type:'STRING'}, unclear:{type:'BOOLEAN'}}, required:['transcript','unclear']}};
-          if (!simple) generationConfig.thinkingConfig = {thinkingLevel:'minimal'};
+          if (!route.simple) generationConfig.thinkingConfig = {thinkingLevel:'minimal'};
           let res;
           try {
-            res = await fetch(`${GEM_API}/models/${model}:generateContent`, {
-              method:'POST', headers:{'Content-Type':'application/json','x-goog-api-key':keys[keyIndex]}, signal:controller.signal,
+            res = await fetch(`${GEM_API}/models/${route.model}:generateContent`, {
+              method:'POST', headers:{'Content-Type':'application/json','x-goog-api-key':route.key}, signal:controller.signal,
               body:JSON.stringify({systemInstruction:{parts:[{text:'You transcribe audio; you do not converse. Return only the English words actually audible, preserving Indian-English speech, corrections, names and numbers. Never answer, translate, summarize, finish a sentence or add a greeting/name/addressee. A spoken hello is just Hello. Do not infer names from the app or context. Domain vocabulary only when audible: SpinLog, KTM Duke, odometer, mileage, petrol, service, PUC. Return JSON with transcript (string) and unclear (boolean). Silence, music or unintelligible audio means an empty transcript. Mark unclear true when a word or number cannot be confidently heard.'}]},
                 contents:[{role:'user',parts:[{inlineData:{mimeType:'audio/wav',data:b64}}]}],generationConfig}),
             });
-          } catch (err) {
+          } catch {
             if (controller.signal.aborted) throw new Error('timeout');
+            lastError = new Error('network');
             if (attempt === 0) continue;
-            throw new Error('network');
+            index++; continue;
           }
           if (!current(owner) || controller.signal.aborted) throw new Error('cancelled');
           if (!res.ok) {
             let detail = {};
-            try { detail = await res.json(); } catch { /* HTTP status still identifies the failure. */ }
+            try { detail = await res.json(); } catch { /* HTTP status identifies the failure. */ }
             const message = detail?.error?.message || '';
             const auth = res.status === 401 || /API.?key.*(?:invalid|expired|not valid)|API_KEY_INVALID/i.test(message);
             const restriction = res.status === 403 && /referer|referrer|API_KEY|blocked|disabled/i.test(message);
-            const quota = res.status === 429;
-            if (auth || quota || restriction) {
-              const retry = Number(res.headers?.get('retry-after'));
-              const retryAt = Date.now() + Math.max(quota ? 60000 : 300000, Number.isFinite(retry) ? retry*1000 : 0);
-              sttCooldowns.set(keys[keyIndex], {code:auth ? 'stt-auth' : restriction ? 'stt-access' : 'quota',retryAt});
+            const retry = Number(res.headers?.get('retry-after'));
+            if (auth || restriction) {
+              const code = auth ? 'stt-auth' : 'stt-access';
+              sttCooldowns.set(route.key,{code,retryAt:Date.now()+Math.max(300000,Number.isFinite(retry)?retry*1000:0)});
+              lastError = new Error(code); index++; continue;
             }
-            if ((auth || quota || restriction) && keyIndex+1<keys.length && attempt<2) {keyIndex++; continue;}
-            if (auth) throw new Error('stt-auth');
-            if (restriction) throw new Error('stt-access');
-            if (quota) {
-              const error = new Error('quota');
-              const retry = Number(res.headers?.get('retry-after'));
-              error.retryAt = Date.now() + Math.max(60000, Number.isFinite(retry) ? retry*1000 : 0);
-              throw error;
+            if (res.status === 429) {
+              const retryAt = Date.now()+Math.max(60000,Number.isFinite(retry)?retry*1000:0);
+              sttModelRest.set(id(route),{code:'quota',retryAt});
+              lastError = Object.assign(new Error('quota'),{retryAt}); index++; continue;
             }
-            if (res.status === 400 && !simple && /thinking|thinkingBudget|thinkingLevel/i.test(message)) {simple=true; continue;}
-            if ([403,404].includes(res.status) || (res.status===400 && /model.*(?:not found|not supported|unavailable)/i.test(message))) {
-              const next = models.indexOf(model)+1;
-              if (next<models.length && attempt<2) {model=models[next];simple=false;continue;}
-              throw new Error('stt-model');
+            if (res.status === 400 && !route.simple && /thinking|thinkingBudget|thinkingLevel/i.test(message)) {route.simple=true; continue;}
+            if ([403,404].includes(res.status) || res.status===400 && /model.*(?:not found|not supported|unavailable)/i.test(message)) {
+              sttModelRest.set(id(route),{code:'stt-model',retryAt:Date.now()+300000});
+              lastError = new Error('stt-model'); index++; continue;
             }
+            lastError = new Error(`stt-${res.status}`);
             if (res.status>=500 && attempt===0) continue;
-            throw new Error(`stt-${res.status}`);
+            index++; continue;
           }
           let json;
           try { json = await res.json(); } catch { throw new Error(controller.signal.aborted ? 'timeout' : 'invalid-transcript'); }
           const candidate = json?.candidates?.[0];
-          if (json?.promptFeedback?.blockReason || (candidate?.finishReason && candidate.finishReason!=='STOP')) throw new Error('stt-blocked');
+          if (json?.promptFeedback?.blockReason || candidate?.finishReason && candidate.finishReason!=='STOP') throw new Error('stt-blocked');
           const raw = (candidate?.content?.parts || []).filter(p=>!p.thought).map(p=>p.text||'').join('').trim().replace(/^```(?:json)?\s*|\s*```$/g,'');
           let parsed;
           try {parsed=JSON.parse(raw);} catch {throw new Error('invalid-transcript');}
           if (typeof parsed.transcript!=='string' || typeof parsed.unclear!=='boolean') throw new Error('invalid-transcript');
-          sttRoute={preferred,model,simple};
-          sttCooldowns.delete(keys[keyIndex]);
+          sttRoute={preferred,model:route.model,simple:route.simple};
+          sttCooldowns.delete(route.key); sttModelRest.delete(id(route));
           return parsed;
         }
-        throw new Error('stt-model');
+        throw lastError || new Error('stt-model');
       })(), 10000, 'timeout', () => controller.abort());
-    } finally {
-      if (sttController===controller) sttController=null;
-    }
+    } finally { if (sttController===controller) sttController=null; }
   }
   function acceptTranscript(result) {
     const text = cleanRepeatedPhrases(result.transcript);
@@ -1575,7 +1641,7 @@
     S.muted = false;
     S.resumeAfterReply = false;
     S.sttMode = 'gemini-transcribe';
-    liveDisabled = false; releaseWarmRecognition();
+    liveDisabled = false; nativeEnglishFallback = false; releaseWarmRecognition();
     e.overlay.setAttribute('data-recognition', S.sttMode);
     S.lastSaid = null;
     S.recognitionFailed = false;
