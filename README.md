@@ -1133,3 +1133,11 @@ Voice readiness and playback now drive the visible Connecting → Listening → 
 Sage can operate visible buttons, fields, dropdowns, switches, sliders and scrolling, and reveal a verified record while speaking from the corner. Costliest-mod questions automatically highlight the actual winner across the full history, including records beyond pagination. Existing upload gestures, drafts and deletion confirmations remain enforced.
 
 See [behavior, controls and validation](docs/sage-loop-controls-fix.md).
+
+## Sage file playback, noise filtering and hold-to-listen — v1.9.43
+
+Explicit saved-file commands open the actual in-app viewer instead of merely reading or highlighting the file. Video/audio playback reports the real result; driver licence aliases and latest-file commands resolve locally, and the movable orb stays above the viewer and away from its bottom playback controls.
+
+The shared speech detector filters concentrated background tones and learns non-speech noise; browser recognition cannot bypass local speech validation. Holding the orb for 550 ms cancels pending recognition, the active model request and queued speech, then resumes the same microphone. Dragging and short taps retain their existing behavior.
+
+See [implementation and validation](docs/sage-media-noise-hold-fix.md).

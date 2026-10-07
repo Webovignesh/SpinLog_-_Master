@@ -93,3 +93,23 @@ for(const name of ['silence','fan','click','dc'])test(`startup ${name} never rea
   assert.ok(max<120,`${name} was rejected (max ${max}ms)`);
   assert.equal(await ears.SageTranscription.hasSpeech(wav(samples)),false);
 });
+
+for(const frequency of [100,440,997,2200])test(`steady ${frequency}Hz background tone cannot start a voice turn`,async()=>{
+  const pcm=Int16Array.from({length:32000},(_,i)=>Math.sin(2*Math.PI*frequency*i/16000)*6000);
+  let run=0,max=0;
+  for(const packet of classify(pcm)){run=packet.speechMs?run+packet.speechMs:0;max=Math.max(max,run);}
+  assert.ok(max<120,`tone was rejected before a turn (${max}ms)`);
+  assert.equal(await ears.SageTranscription.hasSpeech(wav(pcm)),false);
+});
+test('quiet real speech survives after a learned fan floor, including its first word',async()=>{
+  const pcm=new Int16Array(16000+utterance.length);
+  let seed=37;
+  for(let i=0;i<pcm.length;i++){
+    seed=(seed*1664525+1013904223)>>>0;
+    pcm[i]=(Math.sin(2*Math.PI*100*i/16000)*.002+(seed/4294967296-.5)*.002)*32767;
+    if(i>=16000)pcm[i]+=utterance[i-16000]*.15;
+  }
+  const packets=classify(pcm);
+  assert.ok(packets.slice(10).reduce((n,p)=>n+p.speechMs,0)>500);
+  assert.equal(await ears.SageTranscription.hasSpeech(wav(pcm)),true);
+});

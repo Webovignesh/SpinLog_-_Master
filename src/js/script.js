@@ -2486,6 +2486,11 @@ function renderVehicleDocPreview(previewEl, type, fileName, origName, uploadBtn)
   uploadBtn.innerHTML = '<i class="fas fa-cloud-arrow-up" aria-hidden="true"></i> Upload document';
 }
 
+window.dkGetVehicleDocumentUrl = async type => {
+  const row=window._vehicleDocRows?.get(type);
+  return row?.fileName ? getSignedUrl(row.fileName) : null;
+};
+
 window._openVehicleDoc = async function(type) {
   const row = window._vehicleDocRows?.get(type);
   if (!row || !row.fileName) {
@@ -5715,9 +5720,9 @@ async function getBillFileUrl(fileName) {
       return { ok: true, documents: docs };
     },
 
-    async listMedia({ limit = 20 } = {}) {
+    async listMedia({ limit = 20, kind = null } = {}) {
       await ensureDocsLoaded();
-      const rows = Array.from(window._historicMediaRows?.values() || []);
+      const rows = Array.from(window._historicMediaRows?.values() || []).filter(r=>!kind || r.media_type===kind);
       rows.sort((a, b) => String(b.upload_date).localeCompare(String(a.upload_date)));
       return {
         ok: true,
@@ -6269,6 +6274,30 @@ async function getBillFileUrl(fileName) {
       }
       const shown = await window.SagePageControls?.highlight(target,isCancelled);
       return shown?.ok ? {ok:true,opened:kind==='service'?'service':'docs',kind,id,highlighted:true} : shown || {ok:false,error:'The record is unavailable on this page.'};
+    },
+
+    async openStoredFile({kind,id,action='open',isCancelled=()=>false}) {
+      if (!['media','document'].includes(kind) || !['open','play'].includes(action)) return {ok:false,error:'Unknown file or playback action.'};
+      if (isCancelled()) return {ok:false,error:'Opening cancelled.'};
+      const dialog=window.SagePageControls?.inspect().dialog;
+      if (dialog && dialog !== 'docsPlayer') return {ok:false,error:'Close the current form before opening a file.'};
+      const result=await this.goToSection({section:'docs'});
+      if(!result.ok || isCancelled()) return {ok:false,error:'Opening cancelled or navigation failed.'};
+      window.SageVoice?.minimize?.();
+      if(kind==='media') {
+        const target=[...document.querySelectorAll('#mediaRecordTable tbody tr[data-media-id]')].find(el=>el.dataset.mediaId===String(id));
+        if(!target) return {ok:false,error:'That archive file no longer exists.'};
+        document.getElementById('docsHistoryClearFilters')?.click();
+        window.dkDocsPager?.reveal?.(target);
+      }
+      if(isCancelled()) return {ok:false,error:'Opening cancelled.'};
+      window.SageVoice?.avoidMediaControls?.();
+      return await window.dkMediaPlayer?.openStored({kind,id,action,isCancelled}) || {ok:false,error:'The file viewer is unavailable.'};
+    },
+
+    async controlMediaPlayer({action,isCancelled=()=>false}) {
+      if(isCancelled()) return {ok:false,error:'Playback command cancelled.'};
+      return await window.dkMediaPlayer?.control(action,isCancelled) || {ok:false,error:'The file viewer is unavailable.'};
     },
 
     async navigateHistory({ direction }) {
@@ -8412,7 +8441,8 @@ window.setupCoverDateEditing = function() {
   const hydrated = new Set();
   // Signed URL per slot, so Save does not have to sign the same file twice.
   const urls = new Map();
-  let scrollSettle = null;
+  let scrollSettle = null, viewerEpoch = 0;
+  const loading = new Map();
 
   const $ = id => document.getElementById(id);
 
@@ -8476,7 +8506,7 @@ window.setupCoverDateEditing = function() {
     const stage = $('docsPlayerStage');
     const dots = $('docsPlayerDots');
     if (!stage) return;
-    hydrated.clear();
+    hydrated.clear(); loading.clear();
     urls.clear();
     stage.innerHTML = items.map((it, i) => `
       <figure class="docs-player-slide" data-slot="${i}" aria-label="${esc(it.name)}">
@@ -8494,7 +8524,13 @@ window.setupCoverDateEditing = function() {
   }
 
   /** The signed URL, then the right element for the kind of file it is. */
-  async function hydrate(i) {
+  function hydrate(i) {
+    if(loading.has(i)) return loading.get(i);
+    const pending=loadSlide(i).catch(()=>false);
+    loading.set(i,pending); return pending;
+  }
+  async function loadSlide(i) {
+    const epoch=viewerEpoch;
     const it = items[i];
     const frame = document.querySelector(`.docs-player-frame[data-frame="${i}"]`);
     if (!it || !frame || hydrated.has(i)) return;
@@ -8507,24 +8543,30 @@ window.setupCoverDateEditing = function() {
     // directly is a ReferenceError the first time anyone opens a file. That closure
     // already exposes it under this name for exactly this reason.
     const signer = window.dkGetHistoricMediaUrl;
-    const url = typeof signer === 'function' ? await signer(it.storage) : null;
+    const url = it.document ? await window.dkGetVehicleDocumentUrl?.(it.document)
+      : typeof signer === 'function' ? await signer(it.storage) : null;
+    if(epoch !== viewerEpoch || items[i] !== it || !frame.isConnected) return false;
     if (!url) {
       frame.innerHTML = '<p class="docs-player-fail">That file could not be opened.<br>'
         + 'Its link may have expired — close this and try again.</p>';
-      return;
+      return false;
     }
 
     urls.set(i, url);
 
     if (it.kind === 'image') {
       frame.innerHTML = `<img src="${esc(url)}" alt="${esc(it.name)}" decoding="async" />`;
-      return;
+      return true;
+    }
+    if (it.kind === 'pdf') {
+      frame.innerHTML = `<iframe title="${esc(it.name)}" src="${esc(url)}" style="width:100%;height:100%;border:0"></iframe>`;
+      return true;
     }
     if (it.kind !== 'video' && it.kind !== 'audio') {
       frame.innerHTML = `<a class="docs-player-open" href="${esc(url)}" target="_blank" rel="noopener">
           <i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i> Open this file
         </a>`;
-      return;
+      return true;
     }
 
     // ── A CODED PLAYER, not the browser's ──
@@ -8563,6 +8605,7 @@ window.setupCoverDateEditing = function() {
       </div>`;
 
     wirePlayer(frame.querySelector('.dkp'));
+    return true;
   }
 
   /** Clock format. 0:07, 1:42, 12:03 — no hours, nothing here runs that long. */
@@ -8772,11 +8815,13 @@ window.setupCoverDateEditing = function() {
 
   // ══ Opening and shutting ═══════════════════════════════════════════════
 
-  function open(id) {
+  function open(id, supplied) {
     const player = $('docsPlayer');
     if (!player) return;
-    items = collect();
-    const at = items.findIndex(it => it.id === Number(id));
+    viewerEpoch++;
+    document.querySelectorAll('#docsPlayerStage video, #docsPlayerStage audio').forEach(el=>el.pause());
+    items = supplied || collect();
+    const at = items.findIndex(it => String(it.id) === String(id));
     if (!items.length || at < 0) return;
 
     build();
@@ -8784,14 +8829,19 @@ window.setupCoverDateEditing = function() {
     player.classList.add('is-open');
     // The page behind must not scroll while a full-screen viewer is up.
     document.body.classList.add('docs-player-lock');
+    goTo(at, false);
+    const epoch=viewerEpoch;
     // After the class, or the track has no width yet and every slide is at 0.
     requestAnimationFrame(() => {
+      if (!player.classList.contains('is-open') || viewerEpoch !== epoch) return;
       goTo(at, false);
-      $('docsPlayerStage')?.focus({ preventScroll: true });
+      if (player.classList.contains('is-open')) $('docsPlayerStage')?.focus({ preventScroll: true });
     });
+    return hydrate(at);
   }
 
   function close() {
+    viewerEpoch++; clearTimeout(scrollSettle);
     const player = $('docsPlayer');
     if (!player) return;
     document.querySelectorAll('#docsPlayerStage video, #docsPlayerStage audio')
@@ -8801,10 +8851,69 @@ window.setupCoverDateEditing = function() {
     document.body.classList.remove('docs-player-lock');
     const stage = $('docsPlayerStage');
     if (stage) stage.innerHTML = '';
-    hydrated.clear();
+    hydrated.clear(); loading.clear();
     urls.clear();
     items = [];
   }
+
+  function waitViewer(promise,ms,isCancelled) {
+    return new Promise((resolve,reject)=>{
+      const settle=(fn,value)=>{clearTimeout(timer);clearInterval(poll);fn(value);};
+      const timer=setTimeout(()=>settle(reject,new Error('viewer-timeout')),ms);
+      const poll=setInterval(()=>{if(isCancelled())settle(reject,new Error('viewer-cancelled'));},75);
+      Promise.resolve(promise).then(value=>settle(resolve,value),error=>settle(reject,error));
+    });
+  }
+  async function control(action,isCancelled=()=>false) {
+    if(!['play','pause','next','previous','close'].includes(action)) return {ok:false,error:'Unknown playback control.'};
+    if(isCancelled() || !$('docsPlayer')?.classList.contains('is-open')) return {ok:false,error:'No file viewer is open.'};
+    if(action==='close') { close(); return {ok:true,closed:'file_viewer'}; }
+    if(action==='next' || action==='previous') {
+      const next=index+(action==='next'?1:-1);
+      if(next<0 || next>=items.length) return {ok:false,error:'There is no file in that direction.'};
+      goTo(next,true); const epoch=viewerEpoch;
+      const ready=await hydrate(next);
+      return ready && epoch===viewerEpoch && !isCancelled() ? {ok:true,opened:items[index]?.name} : {ok:false,error:'The file could not be opened.'};
+    }
+    const epoch=viewerEpoch,slot=index;
+    const ready=await hydrate(slot);
+    if(!ready || isCancelled() || epoch!==viewerEpoch || slot!==index) return {ok:false,error:'Playback cancelled or file unavailable.'};
+    const media=document.querySelector(`.docs-player-slide[data-slot="${slot}"] .dkp-media`);
+    if(!media) return {ok:false,error:'This file is an image or document; it has no playback.'};
+    if(action==='pause') {media.pause(); return {ok:true,paused:true};}
+    try {
+      await waitViewer(media.play(),5000,()=>isCancelled() || epoch!==viewerEpoch || slot!==index);
+      if(isCancelled() || epoch!==viewerEpoch || slot!==index) {media.pause();return {ok:false,error:'Playback cancelled.'};}
+      if(media.paused) return {ok:false,error:'Playback did not start.'};
+      return {ok:true,playing:true,name:items[slot].name};
+    } catch(error) {
+      media.pause();
+      return {ok:false,opened:true,error:error.name==='NotAllowedError' ? 'The file is open. Your browser needs one tap on Play to allow sound.' : 'The file is open, but playback failed. Try its Play control.'};
+    }
+  }
+  window.dkMediaPlayer = {
+    control,
+    async openStored({kind,id,action='open',isCancelled=()=>false}) {
+      if(isCancelled()) return {ok:false,error:'Opening cancelled.'};
+      let supplied;
+      if(kind==='document') {
+        const row=window._vehicleDocRows?.get(String(id));
+        if(!row?.fileName) return {ok:false,error:'That document has no uploaded file.'};
+        const ext=String(row.fileName).split('.').pop().toLowerCase();
+        supplied=[{id:String(id),name:String(id),document:String(id),kind:ext==='pdf'?'pdf':/^(png|jpe?g|webp|gif|avif)$/.test(ext)?'image':'file'}];
+      }
+      const pending=open(id,supplied),epoch=viewerEpoch;
+      if(!pending) return {ok:false,error:'That file is unavailable in the archive.'};
+      const ready=await waitViewer(pending,6000,isCancelled).catch(()=>false);
+      if(isCancelled() || epoch!==viewerEpoch) {
+        if(epoch===viewerEpoch) close();
+        return {ok:false,error:'Opening cancelled.'};
+      }
+      if(!ready) return {ok:false,error:'The file link could not be loaded. Please try again.'};
+      if(action==='play') return control('play',isCancelled);
+      return {ok:true,opened:'file_viewer',kind,id,name:items[index]?.name,playing:false};
+    },
+  };
 
   // ══ Wiring ═════════════════════════════════════════════════════════════
 

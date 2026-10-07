@@ -87,7 +87,7 @@
         + 'ids. Use this to find the id of an upload before editing its notes or deleting it.',
       parameters: {
         type: 'object',
-        properties: { limit: { ...INTEGER, description: 'How many, newest first. Default 20, max 50.' } },
+        properties: { limit: { ...INTEGER, description: 'How many, newest first. Default 20, max 50.' }, kind:{...STRING,enum:['image','video','audio'],description:'Optional type filter, applied before newest-first pagination.'} },
       },
     },
     {
@@ -519,6 +519,16 @@
 
     /* ── Doing things in the app ──────────────────────────────────── */
     {
+      name:'open_stored_file',
+      description:'Actually open an uploaded archive image, video, audio or vehicle document in the site viewer. Use list_media/list_documents/search first and its verified id (document label for documents). action play starts video/audio and checks the real playback result; images/documents use open. Do not use read_media/read_document merely to open a file: those read contents for analysis. Never claim playing if blocked by the browser.',
+      parameters:{type:'object',properties:{kind:{...STRING,enum:['media','document']},id:STRING,action:{...STRING,enum:['open','play']}},required:['kind','id']},
+    },
+    {
+      name:'control_media_player',
+      description:'Control the currently open file viewer when explicitly requested: play, pause, next, previous or close. Report the actual result. A browser may require a real Play tap before allowing sound.',
+      parameters:{type:'object',properties:{action:{...STRING,enum:['play','pause','next','previous','close']}},required:['action']},
+    },
+    {
       name:'show_record',
       description:'Reveal and highlight an actual service record, archive item or document. First look it up with the read/search tools and use its exact id (document label for documents). In voice mode show the relevant record while answering a factual question. action edit opens the existing service/media editor only when explicitly requested. Never discard an open draft or confirmation. Does not save or delete.',
       parameters:{type:'object',properties:{kind:{...STRING,enum:['service','media','document']},id:STRING,action:{...STRING,enum:['show','edit']}},required:['kind','id']},
@@ -686,7 +696,7 @@
       pageControls:root.SagePageControls?.inspect() || {ok:false,error:'Page controls are loading.'},
       controls:TOOLS.map(tool=>({name:tool.name,description:tool.description})),
       pages:['home','service','docs','sage'],
-      rules:'UI actions require a current request; in voice mode a factual answer may reveal its verified related record. Deletions require the app confirmation. File contents must be opened with read tools, never inferred from names.'}),
+      rules:'UI actions require a current request; in voice mode a factual answer may reveal its verified related record. Deletions require the app confirmation. Use open_stored_file for the actual viewer and playback. Use read tools to analyze file contents; never infer contents from names.'}),
     read_media: (app, a) => app.readMedia(a),
 
     // ── Writing ──
@@ -712,6 +722,8 @@
     delete_park_entry: (app, a) => app.deleteParkEntry(a),
 
     // ── Getting around ──
+    open_stored_file: (app,a,context) => app.openStoredFile({...a,isCancelled:context?.isCancelled}),
+    control_media_player: (app,a,context) => app.controlMediaPlayer({...a,isCancelled:context?.isCancelled}),
     show_record: (app,a,context) => app.showRecord({...a,isCancelled:context?.isCancelled}),
     click_page_control: (_app,a) => root.SagePageControls?.click(a) || {ok:false,error:'Page controls are still loading.'},
     scroll_page: (_app,a) => root.SagePageControls?.scroll(a) || {ok:false,error:'Page controls are still loading.'},
@@ -1222,12 +1234,66 @@
     if (!requests.length || !requests.every(text => uiIntent(text) || root.SagePageControls?.canHandle?.(text) || root.SagePageControls?.intent?.(text))) return null;
     return requests;
   }
+  function fileRequest(raw) {
+    const text=directRequest(String(raw || '')).replace(/^(?:(?:hey )?sage[, ]+)?(?:please\s+)?(?:(?:can|could|would) you\s+)?(?:please\s+)?/i,'').trim();
+    if(/\b(?:don't|do not|never|not|earlier|said)\b/i.test(text)) return null;
+    const match=text.match(/^(open|show|view|display|play)\s+(.+?)[.!?]*$/i);
+    return match ? {action:match[1].toLowerCase()==='play'?'play':'open',label:match[2]} : null;
+  }
+  function playbackIntent(raw) {
+    const text=directRequest(String(raw || '')).trim().replace(/[.!?]+$/,'');
+    const match=text.match(/^(?:please\s+)?(play|resume|pause|stop|close|next|previous)(?:\s+(?:the\s+)?(?:video|audio|player|file viewer|image|photo|file|it))?$/i);
+    if(!match) return null;
+    return {action:({resume:'play',stop:'pause'}[match[1].toLowerCase()] || match[1].toLowerCase())};
+  }
+  async function handleFileRequest(context) {
+    if(context?.isCancelled?.()) return {ok:false,reason:'cancelled'};
+    const playback=playbackIntent(context?.userText);
+    if(playback && root.SagePageControls?.inspect().dialog==='docsPlayer') {
+      const result=await run('control_media_player',playback,context);
+      return {ok:true,text:result.ok ? result.playing?'Playing.':result.paused?'Paused.':result.closed?'Closed the file viewer.':`Opened ${result.opened}.` : result.error};
+    }
+    if(uiPlan(context?.userText)) return null;
+    const request=fileRequest(context?.userText);
+    if(!request) return null;
+    const label=request.label.toLowerCase(),clean=t=>String(t).toLowerCase().replace(/[^a-z0-9]/g,'');
+    let kind,id,name;
+    const document=/\b(?:licen[cs]e|rc|puc|insurance|document|passport)\b/i.test(label);
+    const media=/\b(?:video|audio|recording|image|photo|picture|archive)\b/i.test(label);
+    if(document && !media) {
+      const inventory=await run('list_documents',{},context);
+      if(!inventory.ok) return {ok:true,text:inventory.error};
+      const alias=t=>/licen[cs]e/.test(t)?'license':/\b(rc|registration)\b/.test(t)?'rc':/\bpuc\b/.test(t)?'puc':/insurance/.test(t)?'insurance':clean(t);
+      const matches=(inventory.documents || []).filter(row=>row.onFile && (alias(row.document.toLowerCase())===alias(label) || clean(label).includes(clean(row.document))));
+      if(matches.length===1) {kind='document';id=matches[0].document;name=id;}
+    } else if(media) {
+      const type=/\bvideo\b/.test(label)?'video':/\b(audio|recording)\b/.test(label)?'audio':/\b(image|photo|picture)\b/.test(label)?'image':null;
+      const inventory=await run('list_media',{limit:50,...(type?{kind:type}:{})},context);
+      if(!inventory.ok) return {ok:true,text:inventory.error};
+      const records=(inventory.media || []).filter(row=>!type || row.kind===type);
+      const newest=/\b(last|latest|newest|recent)\b/.test(label);
+      const matches=newest ? records.slice(0,1) : records.filter(row=>clean(label).includes(clean(row.fileName)));
+      if(matches.length===1) {kind='media';id=String(matches[0].id);name=matches[0].fileName;}
+    }
+    if(!id || context?.isCancelled?.()) return context?.isCancelled?.()?{ok:false,reason:'cancelled'}:null;
+    const result=await run('open_stored_file',{kind,id,action:request.action},context);
+    return {ok:true,text:result.ok ? result.playing?`Playing ${name}.`:`Opened ${name}.` : result.error};
+  }
   function relatedPresentationAllowed(context) {
     const text=String(context?.userText || '');
     return context?.voice===true && !/\b(?:don't|do not|never)\b/i.test(text)
       && /\b(?:what|which|when|where|how|tell|find|show|compare|costliest|priciest|most expensive|highest cost)\b/i.test(text);
   }
   function uiAllowed(name, args, context) {
+    if(name==='open_stored_file') {
+      const request=fileRequest(context?.userText);
+      return !!request && context?.relatedRecords?.has(`${args?.kind}:${args?.id}`)
+        && (args?.action !== 'play' || request.action==='play');
+    }
+    if(name==='control_media_player') {
+      const intent=playbackIntent(context?.userText);
+      return !!intent && intent.action===args?.action;
+    }
     if (name === 'show_record') {
       const text=String(context?.userText || '');
       const known=context?.relatedRecords?.has(`${args?.kind}:${args?.id}`);
@@ -1274,6 +1340,8 @@
 
   /** Human phrase for the status line under the chat, so actions are visible. */
   const DOING = {
+    open_stored_file:'opening the file viewer',
+    control_media_player:'controlling playback',
     show_record:'showing the record I’m talking about',
     click_page_control:'using the requested button',
     scroll_page:'scrolling your page',
@@ -1291,7 +1359,7 @@
     get_notification_settings: 'checking her message settings',
     search: 'searching everything',
     read_document: 'reading your document',
-    read_media: 'opening that file',
+    read_media: 'reading that file',
     log_service: 'adding a service record',
     update_service: 'correcting a service record',
     update_cover: 'updating a cover date',
@@ -1466,6 +1534,6 @@
 
   root.SageTools = {
     declarations, run, isWrite, describe, iconFor, uiIntent, uiReply, uiRequests, uiPlan,
-    TOOLS, HANDLERS, WRITES, APP_FREE, DOING, ICONS,
+    TOOLS, HANDLERS, WRITES, APP_FREE, DOING, ICONS, handleFileRequest,
   };
 })(typeof self !== 'undefined' ? self : this);

@@ -46,7 +46,7 @@ const server=http.createServer(async(req,res)=>{
   try {
     let data=await readFile(file);
     if(rel==='index.html')data=data.toString().replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace('</body>',
-      ['date-picker','sage-page-controls','sage-tools','sage-ai','sage-transcription','sage-voice'].map(n=>`<script src="src/js/${n}.js?v=1.9.42"></script>`).join('')+'<script src="/audit-router.js"></script></body>');
+      ['date-picker','sage-page-controls','sage-tools','sage-ai','sage-transcription','sage-voice'].map(n=>`<script src="src/js/${n}.js?v=1.9.43"></script>`).join('')+'<script src="/audit-router.js"></script></body>');
     res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.css':'text/css'})[path.extname(file)]||'application/octet-stream');res.end(data);
   }catch {res.writeHead(404).end();}
 });
@@ -265,6 +265,24 @@ try {
       const state=SagePageControls.inspect(),result=SagePageControls.fill({fields:[{field:'dkSearchInput',value:'behind confirmation'}]});modal.remove();return {state,result};
     });
     assert.equal(confirmation.state.fields.length,0);assert.equal(confirmation.result.ok,false,'confirmation dialogs block underlying fields');
+    assert.equal(await page.evaluate(()=>SageVoice.avoidMediaControls()),true);
+    const safeOrb=await page.locator('#sageVoiceOverlay').boundingBox();
+    assert.ok(safeOrb.y+safeOrb.height<=height-150,'file placement avoids bottom playback controls');
+    // A real docked pointer hold aborts the current brain turn without expanding.
+    await page.evaluate(()=>{
+      window.normalAsk=SageAI.askSage;
+      SageAI.askSage=(_text,opts)=>new Promise(resolve=>{window.finishHeldReply=resolve;window.heldReplySignal=opts.signal;});
+      window.heldReplyPromise=SageVoice.sendVoiceText('Please think about my next ride');
+    });
+    await page.waitForFunction(()=>document.getElementById('sageVoiceState').textContent==='Processing…');
+    const holdBox=await page.locator('#sageVoiceOrb').boundingBox();
+    await page.mouse.move(holdBox.x+holdBox.width/2,holdBox.y+holdBox.height/2);await page.mouse.down();
+    await page.waitForFunction(()=>heldReplySignal.aborted,{},{timeout:1800});await page.mouse.up();
+    await page.waitForFunction(()=>document.getElementById('sageVoiceState').textContent==='Listening…');
+    assert.equal(await page.evaluate(()=>SageVoice.isMinimized()),true,'holding cancels without expanding the dock');
+    await page.evaluate(async()=>{finishHeldReply({ok:true,text:'Stale held answer'});await heldReplyPromise;SageAI.askSage=normalAsk;});
+    assert.equal(await page.evaluate(()=>historyRows.some(row=>row.text==='Stale held answer')),false);
+    assert.equal(await page.evaluate(()=>captureRequests),initial.captures,'holding retains the same microphone');
     await page.evaluate(()=>SageVoice.sendVoiceText('open voice settings'));
     await page.locator('#testSettingsInput').fill('Website remains interactive');
     await page.keyboard.press('Escape');assert.equal(await page.evaluate(()=>SageVoice.isOpen()),true,'Escape belongs to settings while docked');

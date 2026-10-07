@@ -444,6 +444,22 @@
       }
     }
   }
+  let brainController = null;
+  function cancelTurn() {
+    if (!S.open) return false;
+    // Invalidate the brain/tool callbacks as well as STT and queued playback.
+    // Keep the microphone stream, selected speaker and dock position intact.
+    S.session++;
+    brainController?.abort(); brainController = null;
+    stopListening(); stopAllAudio(); releaseWarmRecognition();
+    S.busy = false; S.speaking = false; S.lastSaid = null;
+    S.resumeAfterReply = false; S.recognitionFailed = false;
+    paintCaption('', false); setActivity(null); setHint('');
+    startVisualizer();
+    if (!S.muted && !S.backgrounded) { warmRecognition(); startListening(); }
+    else setMode('idle', S.muted ? 'Microphone paused' : 'Microphone paused while away');
+    return true;
+  }
   function interrupt() {
     stopAllAudio();
     if (S.open && !S.busy && !S.muted) startListening();
@@ -684,7 +700,8 @@
         final = [prefix,...committed].filter(Boolean).join(' ');
         take.nativeDraft = !!draft.length;
         const text = [prefix,...committed,...draft].filter(Boolean).join(' ');
-        if (text) { take.heard = true; take.previewText = text; paintCaption(text,!!draft.length); }
+        take.nativeCaption = text;
+        if (text && (take.vadConfirmed || take.pcmUnavailable)) { take.heard = true; take.previewText = text; paintCaption(text,!!draft.length); }
         if (ending && final && !draft.length) {
           clearTimeout(timer); timer = setTimeout(finish,40);
         }
@@ -845,7 +862,7 @@
         if (!take.vadReady && Number.isFinite(frame.speechMs) && !take.previewText) {
           // Coarse startup activity remains only a candidate. Check its full
           // recorded prefix locally if the first classified frame is quiet.
-          take.prefixCandidate ||= take.heard;
+          take.prefixCandidate ||= take.heard || !!(take.prefixSpeech && take.nativeCaption);
           take.heard = false; take.loudAt = take.quietAt = 0;
         }
         take.vadReady = Number.isFinite(frame.speechMs);
@@ -860,6 +877,7 @@
           speechStarted = !take.heard;
           take.heard = true; take.quietAt = 0;
           if (take.vadReady) take.vadConfirmed = true;
+          if (take.vadConfirmed && take.nativeCaption && !take.previewText) { take.previewText=take.nativeCaption; paintCaption(take.nativeCaption,take.nativeDraft); }
         }
         if (take.vadConfirmed) {
           for (const pcm of take.preRoll) take.live?.push(pcm);
@@ -1044,7 +1062,7 @@
     S.recording = false;
     S.transcribing = true;
     if (take.vadConfirmed || take.previewText || !root.SageTranscription?.hasSpeech) setMode('transcribing');
-    const {native:nativeText,live:liveText} = await finalizeCapture(take);
+    let {native:nativeText,live:liveText} = await finalizeCapture(take);
     take.native?.cancel();
     if (take.cancelled || capture !== take || !current(take.owner)) { take.live?.close(); return; }
     const liveFailed = take.live && !take.live.available;
@@ -1052,6 +1070,19 @@
     else if (liveFailed) retireRecognition(take.live);
     else take.live?.close();
     capture = null;
+    if (take.vadReady && !take.vadConfirmed && !take.prefixCandidate) {
+      take.chunks = []; take.frames = []; S.transcribing = false; paintCaption('',false); startListening(); return;
+    }
+    if (nativeText && !take.vadConfirmed && root.SageTranscription?.hasSpeech) {
+      // Native words alone are not proof of speech. Validate the complete cold
+      // prefix/fallback recording before accepting a browser hypothesis.
+      try {
+        const wav=await bounded(recordingToWav(new Blob(take.chunks,{type:take.recorder.mimeType || 'audio/webm'})),4000,'timeout');
+        const speech=await bounded(root.SageTranscription.hasSpeech(wav),2000,'vad-unavailable');
+        if(!current(take.owner) || take.epoch !== captureEpoch) return;
+        if(!speech) { take.chunks=[];take.frames=[];S.transcribing=false;paintCaption('',false);startListening();return; }
+      } catch { nativeText=null; }
+    }
     if (nativeText) {
       take.chunks = []; take.frames = []; S.transcribing = false;
       recognitionNotice = ''; recoveryEpisode = '';
@@ -1365,8 +1396,8 @@
     if (e.state) e.state.textContent = label;
     if (!S.recording) e.orb?.setAttribute('data-speech-active', 'false');
     const instruction = $('sageVoiceInstruction');
-    if (instruction) instruction.textContent = { listening: 'Speak naturally. Pause when you’re done.', thinking: 'You’ll hear the reply as soon as it’s ready.', transcribing: 'Catching every word.', speaking: 'Tap the orb to interrupt.', idle: 'Take your time. I’m here.' }[mode] || '';
-    if (e.orb) e.orb.setAttribute('aria-label', S.docked ? 'Open voice conversation' : mode === 'speaking' ? 'Interrupt reply' : S.recording ? 'Finish speaking and send' : S.lastSaid ? 'Restore audio' : 'Conversation controls');
+    if (instruction) instruction.textContent = { listening: 'Speak naturally. Pause when you’re done.', thinking: 'You’ll hear the reply as soon as it’s ready.', transcribing: 'Catching every word.', speaking: 'Tap to interrupt. Hold to listen again.', idle: 'Take your time. I’m here.' }[mode] || '';
+    if (e.orb) e.orb.setAttribute('aria-label', S.docked ? 'Open voice conversation; hold to cancel and listen' : mode === 'speaking' ? 'Interrupt reply' : S.recording ? 'Finish speaking and send' : S.lastSaid ? 'Restore audio' : 'Conversation controls');
     paintMic();
   }
 
@@ -1586,10 +1617,12 @@
 
     const history = chatHistory().slice(0, -1).map(t => ({ role: t.role, text: t.text }));
     let result = null;
+    const controller = new AbortController(); brainController = controller;
     try {
       result = await AI.askSage(said, {
         history,
         voice: true,
+        signal: controller.signal,
         isCancelled: () => !current(owner),
         maxTokens: 480, // leave room for complete replies; brevity belongs in the prompt
         onTool: name => {
@@ -1598,7 +1631,7 @@
       });
     } catch (err) {
       result = { ok: false, reason: 'failed' };
-    }
+    } finally { if (brainController === controller) brainController = null; }
 
     if (!S.open || owner !== S.session) return;
 
@@ -1668,10 +1701,17 @@
     e.overlay.setAttribute('role', 'region'); e.overlay.setAttribute('aria-modal', 'false');
     e.window?.setAttribute('aria-label', 'Expand conversation');
     e.window?.setAttribute('title', 'Expand conversation');
-    e.orb?.setAttribute('aria-label', 'Open voice conversation');
+    e.orb?.setAttribute('aria-label', 'Open voice conversation; hold to cancel and listen');
     e.orb?.focus({preventScroll:true});
     placeDock(dockPosition?.x, dockPosition?.y);
     animateWindow(before);
+    return true;
+  }
+  function avoidMediaControls() {
+    if(!S.open || !S.docked) return false;
+    const viewport=root.visualViewport;
+    const bottom=(viewport?.offsetTop || 0)+(viewport?.height || root.innerHeight);
+    placeDock(dockPosition?.x,Math.min(dockPosition?.y ?? bottom-340,bottom-340));
     return true;
   }
   function expand() {
@@ -1689,6 +1729,22 @@
   }
   function wireDock(e) {
     e.window?.addEventListener('click', () => S.docked ? expand() : minimize());
+    let hold = null, holdTimer = null;
+    const clearHold = () => { clearTimeout(holdTimer); holdTimer = null; hold = null; };
+    const beginHold = ev => {
+      if (!S.open || ev.button !== 0) return;
+      try { ev.currentTarget.setPointerCapture?.(ev.pointerId); } catch { /* pointer already released */ }
+      clearHold(); hold = {id:ev.pointerId,x:ev.clientX,y:ev.clientY,owner:S.session};
+      holdTimer = setTimeout(() => {
+        if (!hold || !S.open || hold.owner !== S.session) { clearHold(); return; }
+        suppressOrbClickUntil = Date.now()+800;
+        cancelDrag(); clearHold(); unlockAudio(); cancelTurn();
+      }, 550);
+    };
+    const moveHold = ev => {
+      if (hold?.id === ev.pointerId && Math.hypot(ev.clientX-hold.x,ev.clientY-hold.y) >= 8) clearHold();
+    };
+    const endHold = ev => { if (hold?.id === ev.pointerId) clearHold(); };
     const begin = ev => {
       if (!S.open || !S.docked || ev.button !== 0 || drag) return;
       drag = {id:ev.pointerId,target:ev.currentTarget,startX:ev.clientX,startY:ev.clientY,
@@ -1709,11 +1765,15 @@
     };
     [e.orb].forEach(el => {
       if (!el) return;
+      el.addEventListener('pointerdown',beginHold); el.addEventListener('pointermove',moveHold);
+      ['pointerup','pointercancel','lostpointercapture'].forEach(name => el.addEventListener(name,endHold));
+      el.addEventListener('contextmenu', ev => { if(S.open) ev.preventDefault(); });
       el.addEventListener('pointerdown',begin); el.addEventListener('pointermove',move);
       el.addEventListener('pointerup',end); el.addEventListener('pointercancel',end);
       el.addEventListener('lostpointercapture',end);
     });
     e.orb?.addEventListener('keydown', ev => {
+      if (S.open && ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); cancelTurn(); return; }
       if (!S.docked || !['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(ev.key)) return;
       ev.preventDefault(); const step = ev.shiftKey ? 40 : 12;
       placeDock(dockPosition.x+({ArrowLeft:-step,ArrowRight:step}[ev.key] || 0),
@@ -1785,6 +1845,7 @@
     const e = els();
     const wasDocked = S.docked;
     fileTarget = null; $('sageVoiceChooseFile').hidden = true;
+    brainController?.abort(); brainController = null;
     S.open = false;
     S.docked = false;
     cancelWindowMotion();
@@ -1849,7 +1910,7 @@
       wireDock(e);
       document.addEventListener('keydown', ev => {
         if (!S.open || S.docked || document.querySelector('.sl-slide-overlay:not(.is-leaving)')) return;
-        if (ev.key === 'Escape') { ev.preventDefault(); ev.stopImmediatePropagation(); close(); }
+        if (ev.key === 'Escape') { ev.preventDefault(); ev.stopImmediatePropagation(); if (ev.target === e.orb) cancelTurn(); else close(); }
         if (ev.key === 'Tab') {
           const buttons = [...e.overlay.querySelectorAll('button, textarea')].filter(el => el.getClientRects().length && !el.disabled);
           const first = buttons[0], last = buttons[buttons.length - 1];
@@ -1948,9 +2009,9 @@
   }
 
   root.SageVoice = {
-    open, close, toggle, isOpen, minimize, expand, requestFile, isMinimized: () => S.open && S.docked,
+    open, close, toggle, isOpen, minimize, expand, avoidMediaControls, requestFile, isMinimized: () => S.open && S.docked,
     sttSupported, recognitionMode: () => S.sttMode,
-    speak, interrupt, startListening, stopListening, sendVoiceText,
+    speak, interrupt, cancelTurn, startListening, stopListening, sendVoiceText,
     settings,
   };
 })(typeof self !== 'undefined' ? self : this);

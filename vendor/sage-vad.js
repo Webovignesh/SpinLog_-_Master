@@ -22,13 +22,32 @@ export function createSpeechDetector() {
   if (!handle || lib.fvad_set_mode(handle, 3) < 0 || lib.fvad_set_sample_rate(handle, 16000) < 0) throw new Error('vad-init');
   const pointer = lib.malloc(640);
   if (!pointer) { lib.fvad_free(handle); throw new Error('vad-memory'); }
+  let floor = 0.0015;
+  const coefficients = Array.from({length:80},(_,i)=>2*Math.cos(2*Math.PI*(i+1)/320));
+  function tonal(samples, energy) {
+    if (!energy) return false;
+    const powers = coefficients.map(c => {
+      let a=0,b=0;
+      for (const sample of samples) { const next=sample+c*a-b; b=a; a=next; }
+      return Math.max(0,a*a+b*b-c*a*b);
+    });
+    // A three-bin cluster holds almost all energy for a fan/alarm/single tone.
+    // Speech has multiple harmonics and changing formants. PCM is never altered.
+    let peak=0;
+    for(let i=0;i<powers.length;i++) peak=Math.max(peak,powers[i]+(powers[i-1]||0)+(powers[i+1]||0));
+    return 2*peak/(320*energy) > 0.94;
+  }
   return {
     process(samples) {
       if (samples.length !== 320) throw new Error('vad-frame');
       new Int16Array(lib.memory.buffer, pointer, 320).set(samples);
       const result = lib.fvad_process(handle, pointer, 320);
       if (result < 0) throw new Error('vad-process');
-      return result === 1;
+      let energy=0;
+      for(const sample of samples) energy+=sample*sample;
+      const rms=Math.sqrt(energy/320)/32768;
+      if(result !== 1) { floor=Math.max(0.0015,Math.min(0.025,floor*0.96+rms*0.04)); return false; }
+      return rms > Math.max(0.0025,floor*1.65) && !tonal(samples,energy);
     },
     close() { lib.free(pointer); lib.fvad_free(handle); },
   };

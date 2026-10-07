@@ -5,12 +5,12 @@
   const MODEL = 'gemini-3.5-transcribe-live'; // Dedicated speech recognition, never a reply voice.
   const WS = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
   const workletURL = document.currentScript?.src
-    ? new URL('sage-pcm-worklet.js?v=1.9.42', document.currentScript.src).href
-    : 'src/js/sage-pcm-worklet.js?v=1.9.42';
+    ? new URL('sage-pcm-worklet.js?v=1.9.43', document.currentScript.src).href
+    : 'src/js/sage-pcm-worklet.js?v=1.9.43';
   const prepared = new WeakMap();
   const detectorURL = document.currentScript?.src
-    ? new URL('../../vendor/sage-vad.js?v=1.9.42', document.currentScript.src).href
-    : '../../vendor/sage-vad.js?v=1.9.42';
+    ? new URL('../../vendor/sage-vad.js?v=1.9.43', document.currentScript.src).href
+    : '../../vendor/sage-vad.js?v=1.9.43';
   let detectorModule;
   async function hasSpeech(wav) {
     // Meter-only startup/fallback audio is provisional. Classify the complete
