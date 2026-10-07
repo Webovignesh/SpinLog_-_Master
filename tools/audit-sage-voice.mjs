@@ -103,7 +103,8 @@ function harness(options = {}) {
   class Worklet {
     constructor() { worklets.push(this);this.port={onmessage:null,postMessage:()=>{if(!options.noPCMFlush)this.port.onmessage?.({data:{flushed:true}});}}; }
     connect() {} disconnect() {this.disconnected=true;if(options.throwWorkletStop)throw new Error('capture node already closed');}
-    frame(rms=0.08,pcm=speechPCM.buffer.slice(speechPCM.byteOffset,speechPCM.byteOffset+speechPCM.byteLength),vad={}) {this.lastFrame={rms,pcm,...vad};this.port.onmessage?.({data:this.lastFrame});}
+    frame(rms=0.08,pcm=speechPCM.buffer.slice(speechPCM.byteOffset,speechPCM.byteOffset+speechPCM.byteLength),
+      vad={speechMs:rms>0?140:0,activeMs:rms>0?140:0}) {this.lastFrame={rms,pcm,...vad};this.port.onmessage?.({data:this.lastFrame});}
   }
   const storage = new Map(Object.entries(options.storage || {}));
   const root = { document, navigator: { onLine: true, mediaDevices: { getUserMedia: options.getUserMedia || (async () => newStream()) } },
@@ -128,6 +129,11 @@ function harness(options = {}) {
   };
   root.self = root;
   if (options.live) {root.WebSocket=Socket;root.AudioWorkletNode=Worklet;vm.runInNewContext(liveSource,root,{filename:'sage-transcription.js'});}
+  // Lifecycle mocks classify the decoded recording separately. The real
+  // bundled detector is exercised by audit-sage-pcm and Chromium tests.
+  if(root.SageTranscription)root.SageTranscription.hasSpeech=async blob=>{
+    options.checkedRecordings?.push(blob);return options.recordedSpeech!==false;
+  };
   vm.runInNewContext(toolsSource, root, { filename:'sage-tools.js' });
   vm.runInNewContext(source, root, { filename: 'sage-voice.js' });
   return { root, nodes, streams, recordings, recognition, asks, requests, decoded, storage, playback, contexts,sockets,worklets,analysers,animationFrames,
@@ -144,6 +150,131 @@ function harness(options = {}) {
     cleanup() { root.SageVoice.close(); timers.forEach(clearTimeout); }, newStream,
   };
 }
+
+test('cold-load mic noise cannot auto-process before the detector or upload silence',async()=>{
+  let ready;const checked=[];
+  const h=harness({live:true,loud:true,recordedSpeech:false,checkedRecordings:checked,
+    addModule:()=>new Promise(resolve=>{ready=resolve;})});
+  try{
+    await h.open();h.tick(100);h.tick(150);h.analysers[0].sample=128;h.tick(100);h.tick(650);
+    await delay(30);
+    assert.equal(h.recordings[0].state,'recording','wait for classification, not a meter-only endpoint');
+    assert.equal(h.nodes.get('sageVoiceState').textContent,'Starting audio…');
+    assert.equal(h.requests.length,0);
+    ready();await until(()=>h.worklets.length===1);
+    h.worklets[0].frame(0,undefined,{speechMs:0,activeMs:0});h.tick(100);h.tick(650);
+    await until(()=>h.recordings.length===2);
+    assert.equal(checked.length,1,'check complete prefix audio locally');
+    assert.equal(h.requests.length,0);assert.equal(h.history.length,0);assert.equal(h.asks.length,0);
+    assert.notEqual(h.nodes.get('sageVoiceState').textContent,'Processing');
+  }finally{h.cleanup();}
+});
+
+test('a real first word ending before a cold detector starts is kept once',async()=>{
+  let ready;const checked=[];
+  const h=harness({live:true,loud:true,checkedRecordings:checked,addModule:()=>new Promise(resolve=>{ready=resolve;})});
+  try{
+    await h.open();h.tick(100);h.tick(150);h.analysers[0].sample=128;h.tick(100);h.tick(650);
+    ready();await until(()=>h.worklets.length===1);
+    h.worklets[0].frame(0,undefined,{speechMs:0,activeMs:0});h.tick(100);h.tick(650);
+    await until(()=>h.recordings.length===2);
+    assert.equal(checked.length,1);assert.equal(h.decoded[0],'first-LAST');
+    assert.equal(h.asks.length,1);assert.equal(h.playback.length,1);
+  }finally{h.cleanup();}
+});
+
+test('a broken speech stream recovers with one complete request using the same speaker',async()=>{
+  const h=harness();const routes=[],bodies=[];
+  try{
+    await h.open();h.root.fetch=async(url,init)=>{
+      routes.push(url);bodies.push(JSON.parse(init.body));
+      if(url.includes(':streamGenerateContent'))throw new TypeError('stream disconnected');
+      return {ok:true,json:async()=>({candidates:[{finishReason:'STOP',content:{parts:[{inlineData:{mimeType:'audio/L16;rate=24000',data:speechPCM.toString('base64')}}]}}]})};
+    };
+    await h.root.SageVoice.sendVoiceText('hello');
+    assert.equal(h.playback.length,1,'a transient stream fault does not silently leave text only');
+    assert.equal(routes.length,2);assert.match(routes[1],/:generateContent$/);
+    assert.deepEqual(bodies[1],bodies[0]);assert.equal(h.history.length,2);assert.equal(h.recordings.length,2);
+  }finally{h.cleanup();}
+});
+
+test('complete WAV speech is decoded as audio, never as RIFF-header noise',async()=>{
+  const h=harness();const wav=Buffer.alloc(44+speechPCM.length);
+  wav.write('RIFF');wav.writeUInt32LE(wav.length-8,4);wav.write('WAVEfmt ',8);
+  wav.writeUInt32LE(16,16);wav.writeUInt16LE(1,20);wav.writeUInt16LE(1,22);
+  wav.writeUInt32LE(24000,24);wav.writeUInt32LE(48000,28);wav.writeUInt16LE(2,32);wav.writeUInt16LE(16,34);
+  wav.write('data',36);wav.writeUInt32LE(speechPCM.length,40);speechPCM.copy(wav,44);
+  try{
+    await h.open();h.root.fetch=async()=>({ok:true,json:async()=>({candidates:[{finishReason:'STOP',content:{parts:[{inlineData:{mimeType:'audio/wav',data:wav.toString('base64')}}]}}]})});
+    await h.root.SageVoice.sendVoiceText('hello');
+    assert.equal(h.playback.length,1);assert.equal(h.playback[0].buffer.samples.length,speechPCM.length/2);
+    assert.equal(h.playback[0].buffer.samples[0],0);
+  }finally{h.cleanup();}
+});
+
+test('audio failure remains visible when next-turn PCM readiness arrives',async()=>{
+  const h=harness({live:true,silentAudio:true});
+  try{
+    await h.open();await h.root.SageVoice.sendVoiceText('hello');await until(()=>h.worklets.length===2);
+    h.worklets[1].frame(0,undefined,{speechMs:0,activeMs:0});
+    assert.equal(h.nodes.get('sageVoiceState').textContent,'I’m listening');
+    assert.match(h.nodes.get('sageVoiceHint').textContent,/Audio is unavailable/);
+  }finally{h.cleanup();}
+});
+
+test('output resume can take longer than 350ms without dropping the spoken reply',async()=>{
+  const h=harness();
+  try{
+    await h.open();const ctx=h.contexts[0];ctx.state='suspended';
+    ctx.resume=()=>new Promise(resolve=>setTimeout(()=>{ctx.state='running';resolve();},450));
+    await h.root.SageVoice.sendVoiceText('hello');
+    assert.equal(h.playback.length,1);assert.equal(h.nodes.get('sageVoiceMic').getAttribute('aria-pressed'),'false');
+  }finally{h.cleanup();}
+});
+
+test('startup meter activity cannot authorize unsolicited Live words before classification',async()=>{
+  let ready;const h=harness({live:true,loud:true,recordedSpeech:false,addModule:()=>new Promise(resolve=>{ready=resolve;})});
+  try{
+    await h.open();await until(()=>h.sockets[0].sent.length);h.tick(100);h.tick(150);
+    h.sockets[0].message({serverContent:{inputTranscription:{text:'Hello'},turnComplete:true}});
+    await delay(200);assert.equal(h.nodes.get('sageVoiceCaption').innerHTML.includes('Hello'),false);
+    assert.equal(h.asks.length,0);assert.equal(h.requests.length,0);
+    ready();await until(()=>h.worklets.length===1);
+  }finally{h.cleanup();}
+});
+test('an unavailable streaming classifier uses verified full audio rather than unclassified Live captions',async()=>{
+  const h=harness({live:true,recordedSpeech:false});
+  try{
+    await h.open();await until(()=>h.worklets.length===1&&h.sockets[0].sent.length);
+    h.worklets[0].frame(.04,undefined,{speechMs:null,activeMs:100});h.tick(100);
+    h.worklets[0].frame(0,undefined,{speechMs:null,activeMs:0});h.tick(100);h.tick(650);
+    await until(()=>h.recordings.length===2);
+    assert.equal(h.sockets[0].sent.some(m=>m.realtimeInput?.audio),false);
+    assert.equal(h.requests.length,0);assert.equal(h.asks.length,0);
+  }finally{h.cleanup();}
+});
+test('a source that failed to start is repaired once instead of falsely marking audio as played',async()=>{
+  const h=harness();
+  try{
+    await h.open();const ctx=h.contexts[0],create=ctx.createBufferSource.bind(ctx);let first=true;
+    ctx.createBufferSource=()=>{
+      const source=create();if(first){first=false;source.start=()=>{throw new Error('output device was changing');};}return source;
+    };
+    await h.root.SageVoice.sendVoiceText('hello');
+    assert.equal(h.playback.length,1);assert.equal(h.requests.length,2);assert.match(h.requests[1].url,/:generateContent$/);
+    assert.equal(h.recordings.length,2);
+  }finally{h.cleanup();}
+});
+test('an output context interrupted during synthesis resumes before playback without another request',async()=>{
+  const h=harness();
+  try{
+    await h.open();const ctx=h.contexts[0],fetch=h.root.fetch;
+    ctx.resume=async()=>{ctx.state='running';};
+    h.root.fetch=async(...args)=>{const response=await fetch(...args);ctx.state='suspended';return response;};
+    await h.root.SageVoice.sendVoiceText('hello');
+    assert.equal(h.playback.length,1);assert.equal(h.requests.length,1);assert.equal(h.recordings.length,2);
+  }finally{h.cleanup();}
+});
 
 test('audio-first captures the final chunk, sends PCM WAV, stores both turns and resumes', async () => {
   const h = harness();
@@ -974,7 +1105,9 @@ test('a single short first word ends on silence, replies once and automatically 
   const h=harness({live:true,liveEnd:ws=>ws.message({serverContent:{inputTranscription:{text:'Hello'}}})});
   try {
     await h.open();await until(()=>h.worklets.length===1);
-    h.worklets[0].frame(.04);h.tick(100);h.worklets[0].frame(0);h.tick(100);
+    h.worklets[0].frame(.04,undefined,{speechMs:100,activeMs:100});h.tick(100);
+    h.worklets[0].frame(.04,undefined,{speechMs:60,activeMs:60});h.tick(100);
+    h.worklets[0].frame(0,undefined,{speechMs:0,activeMs:0});h.tick(100);
     assert.equal(h.nodes.get('sageVoiceOrb').getAttribute('data-speech-active'),'false');
     h.tick(650);assert.equal(h.recordings[0].state,'inactive');
     assert.equal(h.nodes.get('sageVoiceState').textContent,'Processing…');

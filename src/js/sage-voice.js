@@ -177,9 +177,9 @@
     return { samples, rate, audible, activeSamples };
   }
 
-  // One synthesis request per reply. Audio chunks arrive from ONE speaker
-  // performance, with the same selected English speaker for every reply.
-  async function streamReply(text, my) {
+  // Normal replies stream one speaker performance. A failed stream may use
+  // one complete-audio repair, before playback, from that same selected voice.
+  async function streamReply(text, my, complete = false) {
     const clean = speakable(text);
     if (!clean) throw new Error('no-audio');
     // SageAI repairs non-English answer prose before delivery. This final guard
@@ -208,12 +208,12 @@
         let offset = 0;
         for (const audio of pendingAudio) { samples.set(audio.samples, offset); offset += audio.samples.length; }
         pendingAudio.length = 0; pendingDuration = 0;
-        started = true;
-        playback.push(playSpeech({samples, rate:sampleRate}, my).catch(err => {
+        playback.push(playSpeech({samples, rate:sampleRate}, my, () => { started = true; }).catch(err => {
           playbackError = err; controller.abort(); stopPlayback(); return false;
         }));
       };
       const queue = inline => {
+        if (/^audio\/(?:wav|x-wav)(?:;|$)/i.test(inline.mimeType || '')) inline = wavSpeech(inline);
         const rate = Number((inline.mimeType || '').match(/rate=(\d+)/i)?.[1] || 24000);
         if (sampleRate && rate !== sampleRate) throw new Error('audio-format');
         sampleRate = rate;
@@ -238,7 +238,8 @@
           contents:[{role:'user',parts:[{text:clean,speech_metadata:{style:GEM_VOICE_STYLE}}]}],
           generationConfig:{responseModalities:['AUDIO'],speechConfig:{voiceConfig:{voice:S.voiceName}},responseFormat:{audio:{mimeType:'AUDIO_L16',sampleRate:24000}}},
         };
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`, {
+        const route = complete ? 'generateContent' : 'streamGenerateContent?alt=sse';
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:${route}`, {
           method:'POST',signal:controller.signal,headers:{'Content-Type':'application/json','x-goog-api-key':keys[attempt]},body:JSON.stringify(body),
         });
         if (!S.open || my !== voiceSession) return false;
@@ -293,7 +294,7 @@
         clearTimeout(timer);
         if (carry) throw new Error('incomplete-audio');
         flush();
-        if (!started || !audible) throw new Error('silent-audio');
+        if (!playback.length || !audible) throw new Error('silent-audio');
         const completed=(await Promise.all(playback)).every(Boolean);
         if(playbackError) throw playbackError;
         return completed;
@@ -334,7 +335,31 @@
     }
     return outputAnalyser;
   }
-  async function playSpeech(audio, my) {
+  function wavSpeech(inline) {
+    // Unary TTS can return a WAV container. Parse its chunks; never feed a
+    // RIFF header to the raw-PCM player or assume the header is always 44 bytes.
+    const raw = atob(inline.data), bytes = Uint8Array.from(raw,c=>c.charCodeAt(0));
+    const view = new DataView(bytes.buffer);
+    if (raw.length<44 || raw.slice(0,4)!=='RIFF' || raw.slice(8,12)!=='WAVE') throw new Error('audio-format');
+    let rate=0, pcm=null;
+    for(let at=12;at+8<=raw.length;) {
+      const name=raw.slice(at,at+4), length=view.getUint32(at+4,true), start=at+8;
+      if(start+length>raw.length) throw new Error('incomplete-audio');
+      if(name==='fmt ') {
+        if(length<16 || view.getUint16(start,true)!==1 || view.getUint16(start+2,true)!==1
+          || view.getUint16(start+14,true)!==16) throw new Error('audio-format');
+        rate=view.getUint32(start+4,true);
+      }
+      if(name==='data')pcm=raw.slice(start,start+length);
+      at=start+length+(length%2);
+    }
+    if(!rate || pcm===null)throw new Error('audio-format');
+    return {mimeType:`audio/L16;rate=${rate}`,data:btoa(pcm)};
+  }
+  async function playSpeech(audio, my, onStart = () => {}) {
+    // The output device may suspend/interrupt the shared context while the
+    // network is delivering audio. Resume it before scheduling these samples.
+    if (actx && actx.state !== 'running') await resumeOutput();
     if (!actx || actx.state !== 'running') throw new Error('play-blocked');
     if (!S.open || my !== voiceSession) return false;
     const buffer = actx.createBuffer(1, audio.samples.length, audio.rate);
@@ -366,6 +391,7 @@
         // Schedule now, never from the previous source's JS onended callback.
         // Contiguous chunks touch sample-for-sample without per-chunk fades.
         source.start(startAt);
+        onStart();
         S.ttsPinned = true;
         save(LS_TTS_MODEL, S.ttsModel);
         setMode('speaking');
@@ -385,19 +411,22 @@
     stopPlayback();
     if (cancelSpeech) { cancelSpeech(); cancelSpeech = null; }
   }
-  async function prepareSpeech(text, my) {
+  async function resumeOutput() {
     if (actx && actx.state !== 'running') {
       let timer;
       try {
-        await Promise.race([actx.resume(), new Promise(resolve => { timer = setTimeout(resolve, 350); })]);
+        await Promise.race([actx.resume(), new Promise(resolve => { timer = setTimeout(resolve, 2000); })]);
       } catch { /* A blocked browser still needs the existing orb gesture. */ }
       finally { clearTimeout(timer); }
     }
+  }
+  async function prepareSpeech(text, my, complete) {
+    if (actx && actx.state !== 'running') await resumeOutput();
     if (!S.open || my !== voiceSession) return false;
     if (!actx || actx.state !== 'running') throw new Error('play-blocked');
-    return streamReply(text, my);
+    return streamReply(text, my, complete);
   }
-  async function speak(text) {
+  async function speak(text, complete = false) {
     S.speaking = true;
     setMode('thinking', 'Preparing voice…');
     playbackNextAt = 0;
@@ -405,7 +434,7 @@
     let cancel;
     const interrupted = new Promise(resolve => { cancel = () => resolve(false); cancelSpeech = cancel; });
     try {
-      return await Promise.race([prepareSpeech(text, my), interrupted]);
+      return await Promise.race([prepareSpeech(text, my, complete), interrupted]);
     } finally {
       if (cancelSpeech === cancel) cancelSpeech = null;
       if (my === voiceSession) {
@@ -428,7 +457,7 @@
   let captureEpoch = 0;
   let openingMic = false;
   let sttController = null;
-  let recognitionNotice = '', recoveryEpisode = '';
+  let recognitionNotice = '', recoveryEpisode = '', replyAudioNotice = '';
   let nativeEnglishFallback = false, nativeRestUntil = 0;
   const sttCooldowns = new Map(); // key-specific; no background retry of old audio
   const sttModelRest = new Map(); // quota/access on one model must not block another
@@ -745,7 +774,7 @@
       take.live.bind({
         onText:(text, final) => {
           if (!current(owner) || capture !== take || take.cancelled || take.stopping) return;
-          if (!take.heard) return; // never turn idle noise into a command
+          if (!take.vadConfirmed) return; // never turn unclassified startup noise into a command
           take.previewText = text;
           paintCaption(text, !final);
           paintCaptureReadiness(take);
@@ -802,8 +831,9 @@
         take.pcmAt = Date.now();
         let speechStarted = false;
         if (!take.vadReady && Number.isFinite(frame.speechMs) && !take.previewText) {
-          // A startup click seen by the coarse meter must not survive the
-          // first real speech classification from a cold-loaded worklet.
+          // Coarse startup activity remains only a candidate. Check its full
+          // recorded prefix locally if the first classified frame is quiet.
+          take.prefixCandidate ||= take.heard;
           take.heard = false; take.loudAt = take.quietAt = 0;
         }
         take.vadReady = Number.isFinite(frame.speechMs);
@@ -817,8 +847,9 @@
         if (take.pcmSpeech && (take.voicedMs >= 120 || !take.vadReady && duration >= 80)) {
           speechStarted = !take.heard;
           take.heard = true; take.quietAt = 0;
+          if (take.vadReady) take.vadConfirmed = true;
         }
-        if (take.heard) {
+        if (take.vadConfirmed) {
           for (const pcm of take.preRoll) take.live?.push(pcm);
           take.preRoll = [];
           take.live?.push(frame.pcm);
@@ -873,17 +904,17 @@
           if (!take.loudAt) take.loudAt = now;
           if (!take.vadReady && now - take.loudAt >= 100 && !take.heard) {
             take.heard = true;
-            if (!take.previewText) setHint('I can hear you. No need to repeat — your words are on the way.');
+            if (!take.previewText) setHint('Your mic is recording while speech detection starts.');
           }
         } else {
           take.loudAt = 0;
-          if (take.heard) {
+          if (take.heard || take.prefixCandidate) {
             if (!take.quietAt) take.quietAt = now;
-            if (now - take.quietAt >= settings.pauseMs) finishGeminiListen(true);
+            if (now - take.quietAt >= settings.pauseMs && (take.pcmAt || take.pcmUnavailable)) finishGeminiListen(true);
           }
         }
         // Bytes alone are not speech: silence also produces compressed data.
-        if (!take.heard && (!take.loudAt || now-take.loudAt >= 1000) && now - take.started >= 15000) {
+        if (!take.heard && !take.prefixCandidate && (!take.loudAt || now-take.loudAt >= 1000) && now - take.started >= 15000) {
           // Bound the silent buffer, not the hands-free session. Discard it
           // locally and keep the same microphone stream enabled.
           keepRecognition(take.live); take.live = null;
@@ -927,7 +958,7 @@
     setMode(label === 'I’m listening' ? 'listening' : 'starting', label);
     const el = $('sageVoiceInstruction');
     if (el) el.textContent = instruction;
-    setHint(label === 'I’m listening' ? recognitionNotice || 'Pause to send, or tap the orb when you’re done.' : '');
+    setHint(replyAudioNotice || (label === 'I’m listening' ? recognitionNotice || 'Pause to send, or tap the orb when you’re done.' : ''));
   }
   function cancelGeminiListen() {
     const take = capture;
@@ -950,7 +981,7 @@
     const take = capture;
     if (!take || take.stopping || !take.recorder) return;
     if (!commit) { cancelGeminiListen(); return; }
-    if (take.vadReady && !take.heard && !take.previewText) {
+    if (take.vadReady && !take.heard && !take.prefixCandidate && !take.previewText) {
       // Tapping the orb or a recording deadline in silence is still silence.
       keepRecognition(take.live); take.live = null;
       cancelGeminiListen(); startListening(); return;
@@ -961,8 +992,7 @@
     clearTimeout(take.readyTimer);
     S.recording = false;
     S.transcribing = true;
-    setMode('transcribing');
-    setHint('');
+    if (take.vadConfirmed || take.previewText || !root.SageTranscription?.hasSpeech) { setMode('transcribing'); setHint(''); }
     // Flush the last PCM packet and finalize recognition alongside the
     // recorder. A slow recorder stop must not delay the speech endpoint.
     finalizeCapture(take);
@@ -981,6 +1011,13 @@
         if (await bounded(take.pcm?.stop(), 200, 'capture-timeout') === false) take.pcmBroken = true;
       } catch { take.pcmBroken = true; }
       if (take.pcmBroken) { take.live?.close(); take.live = null; }
+      if (!take.vadConfirmed) {
+        // No classified speech was sent to Live. Do not wait for an invented
+        // transcript or a server endpoint; verify the full recording locally.
+        if (take.live?.failure) retireRecognition(take.live);
+        else keepRecognition(take.live);
+        take.live = null;
+      }
       let live;
       try { live = take.liveGap || take.pcmBroken ? null : await bounded(take.live?.end(), 2500, 'timeout'); }
       catch { take.live?.close(); }
@@ -994,7 +1031,7 @@
     clearTimeout(take.stopTimer);
     S.recording = false;
     S.transcribing = true;
-    setMode('transcribing');
+    if (take.vadConfirmed || take.previewText || !root.SageTranscription?.hasSpeech) setMode('transcribing');
     const {native:nativeText,live:liveText} = await finalizeCapture(take);
     take.native?.cancel();
     if (take.cancelled || capture !== take || !current(take.owner)) { take.live?.close(); return; }
@@ -1018,7 +1055,7 @@
     // reconnects. Use the same complete audio, including its first syllable.
     const recording = {blob:new Blob(take.chunks, {type:take.recorder.mimeType || 'audio/webm'}),
       pcm:!take.liveGap && !take.pcmBroken && take.frames.length ? take.frames : null,
-      b64:null, previewText:take.previewText};
+      b64:null, previewText:take.previewText, verifySpeech:!take.vadConfirmed};
     take.chunks = [];
     take.frames = [];
     await transcribeRecording(recording, take.owner, take.epoch);
@@ -1032,6 +1069,17 @@
         const wav = recording.pcm ? pcmToWav(recording.pcm)
           : await bounded(recordingToWav(recording.blob), 4000, 'timeout');
         if (!current(owner) || epoch !== captureEpoch) return;
+        if (recording.verifySpeech && root.SageTranscription?.hasSpeech) {
+          let speech;
+          try { speech = await bounded(root.SageTranscription.hasSpeech(wav),2000,'vad-unavailable'); }
+          catch { throw new Error('vad-unavailable'); }
+          if (!current(owner) || epoch !== captureEpoch) return;
+          if (!speech) {
+            S.transcribing = false; paintCaption('',false);
+            startListening(); return; // no provider request, processing flash, or invented turn
+          }
+        }
+        setMode('transcribing'); setHint('');
         recording.b64 = await bounded(blobToBase64(wav), 1000, 'timeout');
         recording.pcm = null;
       }
@@ -1057,7 +1105,7 @@
       nativeEnglishFallback = !!(root.SpeechRecognition || root.webkitSpeechRecognition);
       if (nativeEnglishFallback) { liveDisabled = true; releaseWarmRecognition(); }
       const episode = 'recognition'; // one announcement until a real turn succeeds
-      const blocked = /^(?:quota|no-key|stt-auth|stt-access|stt-model)$/.test(err.message);
+      const blocked = /^(?:quota|no-key|stt-auth|stt-access|stt-model|vad-unavailable)$/.test(err.message);
       if (blocked) {
         // A service limit is not something the user said. Switch input quietly,
         // retain the exact error in the hint, and never synthesize a quota loop.
@@ -1089,6 +1137,9 @@
     if (code === 'no-key' || code === 'stt-auth') return 'Recognition key was rejected. Check your Gemini key in settings.';
     if (code === 'stt-access') return 'Recognition access was denied. Check API/key restrictions in settings.';
     if (code === 'stt-model') return 'No supported recognition model was available. Check model access in settings.';
+    if (code === 'vad-unavailable') return nativeEnglishFallback
+      ? 'Speech detection could not start. English recognition is connecting; your microphone stays ready.'
+      : 'Speech detection could not start. Check your connection; your microphone stays ready.';
     if (code === 'timeout' || err.name === 'AbortError') return 'Recognition timed out. I’m listening again — please repeat.';
     if (code === 'network' || /^stt-5/.test(code)) return 'Recognition could not reach the service. Check your connection; I’m listening again.';
     return 'I couldn’t read that clearly. I’m listening again — please repeat.';
@@ -1407,11 +1458,14 @@
   }
   async function deliverReply(text, owner) {
     S.lastSaid = text;
+    replyAudioNotice = '';
     warmRecognition(); // connect the next turn while this reply plays
     let failure;
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const completed = await speak(text);
+        // A stream can fail independently of synthesis. Before any audio has
+        // played, recover once with a complete response from the same voice.
+        const completed = await speak(text, attempt > 0);
         if (!current(owner)) return;
         S.lastSaid = null;
         S.busy = false;
@@ -1428,8 +1482,8 @@
       } catch (err) {
         if (!current(owner)) return;
         failure = err;
-        const transient = err.name === 'TypeError' || err.name === 'AbortError'
-          || /^(?:tts-5\d\d|tts-408|silent-audio|incomplete-audio|tts-stream|timeout)$/.test(err.message);
+        const transient = err.name === 'TypeError' || err.name === 'AbortError' || err.name === 'SyntaxError'
+          || /^(?:tts-5\d\d|tts-408|silent-audio|incomplete-audio|tts-stream|timeout|play-failed)$/.test(err.message);
         if (attempt || err.audioStarted || !transient || S.backgrounded) break;
         const token = voiceSession;
         setMode('thinking', 'Restoring audio…');
@@ -1446,9 +1500,10 @@
     }
     if (!current(owner)) return;
     S.busy = false;
+    replyAudioNotice = audioProblem(failure);
     if (failure?.message === 'play-blocked') {
       S.resumeAfterReply = !S.muted;
-      pauseListening(audioProblem(failure));
+      pauseListening(replyAudioNotice);
     } else {
       // A persistent service outage must not create endless retries or a
       // disconnected-looking call. Resume the existing hands-free session.
@@ -1456,7 +1511,7 @@
       S.resumeAfterReply = false;
       setMode('idle');
       if (!S.muted && !S.backgrounded) await startListening();
-      if (current(owner)) setHint(audioProblem(failure));
+      if (current(owner)) setHint(replyAudioNotice);
     }
   }
 
@@ -1495,6 +1550,7 @@
     if (S.busy) return;
     const owner = S.session;
     S.busy = true;
+    replyAudioNotice = '';
     S.finalText = '';
     S.speechSeen = false;
     stopListening();
@@ -1677,7 +1733,7 @@
     const storedModel = load(LS_TTS_MODEL, '');
     S.ttsPinned = TTS_MODELS.includes(storedModel);
     S.ttsModel = TTS_MODELS.includes(storedModel) ? storedModel : TTS_MODELS[0];
-    sttRoute = null; recognitionNotice = ''; recoveryEpisode = '';
+    sttRoute = null; recognitionNotice = ''; recoveryEpisode = ''; replyAudioNotice = '';
     S.session++;
     S.muted = false;
     S.resumeAfterReply = false;

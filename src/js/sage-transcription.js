@@ -5,9 +5,33 @@
   const MODEL = 'gemini-3.5-transcribe-live'; // Dedicated speech recognition, never a reply voice.
   const WS = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
   const workletURL = document.currentScript?.src
-    ? new URL('sage-pcm-worklet.js?v=1.9.40', document.currentScript.src).href
-    : 'src/js/sage-pcm-worklet.js?v=1.9.40';
+    ? new URL('sage-pcm-worklet.js?v=1.9.41', document.currentScript.src).href
+    : 'src/js/sage-pcm-worklet.js?v=1.9.41';
   const prepared = new WeakMap();
+  const detectorURL = document.currentScript?.src
+    ? new URL('../../vendor/sage-vad.js?v=1.9.41', document.currentScript.src).href
+    : '../../vendor/sage-vad.js?v=1.9.41';
+  let detectorModule;
+  async function hasSpeech(wav) {
+    // Meter-only startup/fallback audio is provisional. Classify the complete
+    // recording locally before uploading it, retaining genuine first words.
+    const bytes = await wav.arrayBuffer(), view = new DataView(bytes);
+    if (bytes.byteLength < 44 || view.getUint32(24,true) !== 16000) throw new Error('vad-unavailable');
+    detectorModule ||= import(detectorURL).catch(err => { detectorModule = null; throw err; });
+    const {createSpeechDetector} = await detectorModule;
+    const vad = createSpeechDetector();
+    try {
+      let run = 0;
+      for (let offset=44; offset+640<=bytes.byteLength; offset+=640) {
+        const frame = new Int16Array(320); let energy = 0;
+        for (let i=0;i<320;i++) { frame[i]=view.getInt16(offset+i*2,true); energy+=(frame[i]/32768)**2; }
+        const speech = vad.process(frame) && Math.sqrt(energy/320) > 0.003;
+        run = speech ? run+20 : 0;
+        if (run>=120) return true;
+      }
+      return false;
+    } finally { vad.close(); }
+  }
   function joinText(committed, incoming, snapshot = false) {
     if (!committed) return incoming;
     if (!incoming) return committed;
@@ -229,5 +253,5 @@
       },
     };
   }
-  root.SageTranscription = {prepare,connect,attach,MODEL};
+  root.SageTranscription = {prepare,connect,attach,hasSpeech,MODEL};
 })(typeof self !== 'undefined' ? self : this);
