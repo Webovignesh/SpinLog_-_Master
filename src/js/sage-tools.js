@@ -519,6 +519,21 @@
 
     /* ── Doing things in the app ──────────────────────────────────── */
     {
+      name:'show_record',
+      description:'Reveal and highlight an actual service record, archive item or document. First look it up with the read/search tools and use its exact id (document label for documents). In voice mode show the relevant record while answering a factual question. action edit opens the existing service/media editor only when explicitly requested. Never discard an open draft or confirmation. Does not save or delete.',
+      parameters:{type:'object',properties:{kind:{...STRING,enum:['service','media','document']},id:STRING,action:{...STRING,enum:['show','edit']}},required:['kind','id']},
+    },
+    {
+      name:'click_page_control',
+      description:'Click a visible site button explicitly requested in this turn. Inspect the live page first, then use its opaque control handle. Re-inspect after navigation/dialog changes. Existing handlers own the action; a click alone does not prove a save. Credentials, file pickers and deletion confirmations are unavailable here.',
+      parameters:{type:'object',properties:{control:STRING},required:['control']},
+    },
+    {
+      name:'scroll_page',
+      description:'Scroll the visible page or current dialog when asked. Optionally use a current visible control handle as the scroll target. Keeps the voice call minimized and running.',
+      parameters:{type:'object',properties:{direction:{...STRING,enum:['up','down','left','right','top','bottom']},target:STRING},required:['direction']},
+    },
+    {
       name:'inspect_page_controls',
       description:'Read the actual current page and visible form fields, dropdown labels/options and values. Use before filling details or selecting a dropdown. Credentials and file inputs are excluded. Never invent a field identifier, option or saved result.',
       parameters:{type:'object',properties:{}},
@@ -671,7 +686,7 @@
       pageControls:root.SagePageControls?.inspect() || {ok:false,error:'Page controls are loading.'},
       controls:TOOLS.map(tool=>({name:tool.name,description:tool.description})),
       pages:['home','service','docs','sage'],
-      rules:'UI actions require an explicit current request. Deletions require the app confirmation. File contents must be opened with read tools, never inferred from names.'}),
+      rules:'UI actions require a current request; in voice mode a factual answer may reveal its verified related record. Deletions require the app confirmation. File contents must be opened with read tools, never inferred from names.'}),
     read_media: (app, a) => app.readMedia(a),
 
     // ── Writing ──
@@ -697,6 +712,9 @@
     delete_park_entry: (app, a) => app.deleteParkEntry(a),
 
     // ── Getting around ──
+    show_record: (app,a,context) => app.showRecord({...a,isCancelled:context?.isCancelled}),
+    click_page_control: (_app,a) => root.SagePageControls?.click(a) || {ok:false,error:'Page controls are still loading.'},
+    scroll_page: (_app,a) => root.SagePageControls?.scroll(a) || {ok:false,error:'Page controls are still loading.'},
     inspect_page_controls: () => root.SagePageControls?.inspect() || {ok:false,error:'Page controls are still loading.'},
     fill_page_fields: (_app,a) => root.SagePageControls?.fill(a) || {ok:false,error:'Page controls are still loading.'},
     open_page_form: (_app,a) => root.SagePageControls?.openForm(a) || {ok:false,error:'Page controls are still loading.'},
@@ -1155,7 +1173,12 @@
   }
   function uiReply(intent, result) {
     if (!result?.ok) return result?.error || 'That action could not finish. Try again.';
-    if (intent.name === 'fill_page_fields') return `${result.changed.map(field => `${field.label}: ${field.value}`).join(', ')}. Filled in for review.`;
+    if (intent.name === 'click_page_control') return `Activated ${result.activated}.`;
+    if (intent.name === 'scroll_page') return `Scrolling ${intent.direction}.`;
+    if (intent.name === 'fill_page_fields') {
+      const draft=result.changed.some(field=>['serviceEntryForm','serviceEditModal','docAddModal','historicNotesModal','coverEditModal','parkHistoryModal'].includes(field.form));
+      return `${result.changed.map(field => `${field.label}: ${field.checked === undefined ? field.value : field.checked ? 'on' : 'off'}`).join(', ')}. ${draft ? 'Filled in for review.' : 'Controls updated.'}`;
+    }
     if (intent.name === 'open_page_form') return `${intent.form === 'service_entry' ? 'Service' : 'Document'} form is open. Tell me the details to fill in.`;
     if (intent.name === 'activate_page_control') return {show_filters:'Filters are open.',hide_filters:'Filters are hidden.',clear_filters:'Filters are cleared.',next_results:'The next results page is open.',previous_results:'The previous results page is open.',open_search:'Search is ready. What should I find?',close_search:'Search results are closed.',close_form:'The form is closed.'}[intent.action];
     if (intent.name === 'control_voice') {
@@ -1172,8 +1195,8 @@
     // Split only an explicit next command. Ordinary "and" in notes or a
     // document name is data, not permission to perform another action.
     const text = directRequest(raw);
-    if (!/^(?:(?:hey )?sage[, ]+|bro\s+|please\s+|(?:can|could|would) you\s+)*(?:open|go|take|switch|show|hide|close|stop|end|hang|back|next|previous|clear|set|fill|enter|change|select|choose|minimi[sz]e|expand|restore|maximize|search|upload|attach)\b/i.test(text)) return [text];
-    const parts = [], separator = /\s*(;\s*|,?\s+(?:and then|then|and)\s+)(?=(?:please\s+)?(?:open|go to|take me to|switch to|show|hide|close|stop|end|hang up|back|next|previous|clear|set|fill|enter|change|select|choose|minimi[sz]e|expand|restore|maximize|search|upload|attach)\b)/gi;
+    if (!/^(?:(?:hey )?sage[, ]+|bro\s+|please\s+|(?:can|could|would) you\s+)*(?:open|go|take|switch|show|hide|close|stop|end|hang|back|next|previous|clear|set|fill|enter|change|select|choose|minimi[sz]e|expand|restore|maximize|search|upload|attach|click|press|tap|scroll|slide|move|type)\b/i.test(text)) return [text];
+    const parts = [], separator = /\s*(;\s*|,?\s+(?:and then|then|and)\s+)(?=(?:please\s+)?(?:open|go to|take me to|switch to|show|hide|close|stop|end|hang up|back|next|previous|clear|set|fill|enter|change|select|choose|minimi[sz]e|expand|restore|maximize|search|upload|attach|click|press|tap|scroll|slide|move|type)\b)/gi;
     let from = 0;
     for (const match of text.matchAll(separator)) {
       const before = text.slice(from,match.index), value = before.match(/^(?:please\s+)?(?:set|fill|enter|change)\s+.+?\s+(?:to|with|as)\s+(.+)$/i)?.[1];
@@ -1199,8 +1222,20 @@
     if (!requests.length || !requests.every(text => uiIntent(text) || root.SagePageControls?.canHandle?.(text) || root.SagePageControls?.intent?.(text))) return null;
     return requests;
   }
+  function relatedPresentationAllowed(context) {
+    const text=String(context?.userText || '');
+    return context?.voice===true && !/\b(?:don't|do not|never)\b/i.test(text)
+      && /\b(?:what|which|when|where|how|tell|find|show|compare|costliest|priciest|most expensive|highest cost)\b/i.test(text);
+  }
   function uiAllowed(name, args, context) {
-    if (['fill_page_fields','open_page_form','activate_page_control'].includes(name)) {
+    if (name === 'show_record') {
+      const text=String(context?.userText || '');
+      const known=context?.relatedRecords?.has(`${args?.kind}:${args?.id}`);
+      if (!known || /\b(?:don't|do not|never)\b/i.test(text)) return false;
+      const explicit=/^(?:(?:hey )?sage[, ]+)?(?:please\s+)?(?:(?:can|could|would) you\s+)?(?:please\s+)?(?:show|open|find|highlight|edit|change|update)\b/i.test(directRequest(text));
+      return args?.action === 'edit' ? explicit && /\b(?:edit|change|update)\b/i.test(text) : explicit || relatedPresentationAllowed(context);
+    }
+    if (['fill_page_fields','open_page_form','activate_page_control','click_page_control','scroll_page'].includes(name)) {
       return uiRequests(context?.userText).some(request => {
         const exact = uiIntent(request) || root.SagePageControls?.intent?.(request);
         if (exact) {
@@ -1210,9 +1245,11 @@
         // Negation inside an explicitly requested field value is content:
         // "set notes to don't forget the helmet" remains a valid draft.
         const text = request.split(/\s+(?:to|with|as)\s+/i)[0];
-        if (!/^(?:(?:hey )?sage[, ]+)?(?:please\s+)?(?:(?:can|could|would) you\s+)?(?:please\s+)?(?:fill|select|set|choose|change|type|enter|put|filter|use|update|open|close|show|hide|clear|next|previous|search)\b/iu.test(text)
+        if (!/^(?:(?:hey )?sage[, ]+)?(?:please\s+)?(?:(?:can|could|would) you\s+)?(?:please\s+)?(?:fill|select|set|choose|change|type|enter|put|filter|use|update|open|close|show|hide|clear|next|previous|search|click|press|tap|scroll|slide|move)\b/iu.test(text)
           || /\b(?:don't|do not|never|not|how|why|what|earlier|said|say)\b/iu.test(text)) return false;
-        if (name === 'fill_page_fields') return /\b(?:fill|select|set|choose|change|type|enter|put|filter|use|update|search)\b/iu.test(text);
+        if (name === 'click_page_control') return /\b(?:click|press|tap)\b/iu.test(text);
+        if (name === 'scroll_page') return /\bscroll\b/iu.test(text);
+        if (name === 'fill_page_fields') return /\b(?:fill|select|set|choose|change|type|enter|put|filter|use|update|search|slide|move)\b/iu.test(text);
         if (name === 'open_page_form') return /\b(?:form|entry|upload|add)\b/iu.test(request);
         return /\b(?:filter|search|results)\b/iu.test(request) && args?.action !== 'close_form';
       });
@@ -1237,6 +1274,9 @@
 
   /** Human phrase for the status line under the chat, so actions are visible. */
   const DOING = {
+    show_record:'showing the record I’m talking about',
+    click_page_control:'using the requested button',
+    scroll_page:'scrolling your page',
     inspect_page_controls:'checking the visible fields and dropdowns',
     fill_page_fields:'filling the requested fields',
     open_page_form:'opening your form',
@@ -1387,8 +1427,34 @@
     }
 
     try {
-      const result = await handler(app, args || {});
+      if (context?.isCancelled?.()) return {ok:false,error:'This turn was cancelled.'};
+      // A mod question must not be answered from a showroom-only filter.
+      const question=String(context?.userText || '');
+      const costliestQuestion=/\b(?:costliest|priciest|most expensive|highest cost)\b/i.test(question);
+      const modQuestion=/\b(?:mods?|modifications?|upgrades?|updates?)\b/i.test(question)
+        && !/\b(?:service|showroom|3rd party|including|compare|versus|vs)\b/i.test(question);
+      const result = await handler(app, name==='list_services' && costliestQuestion && modQuestion ? {...args,type:'Mods/Updates'} : args || {}, context);
       if (!result || typeof result !== 'object') return { ok: false, error: 'That control gave no answer.' };
+      if (context?.isCancelled?.()) return {ok:false,error:'This turn was cancelled.'};
+      if (result.ok && context) {
+        context.relatedRecords ||= new Set();
+        const remember=(kind,id)=>{if(id!==undefined && id!==null)context.relatedRecords.add(`${kind}:${id}`);};
+        if (name==='list_services') {
+          for (const record of [...(result.records || []),...(result.mostExpensive?.everything?.records || []),...(result.mostExpensive?.modsAndUpdates?.records || [])]) remember('service',record.id);
+        } else if(name==='list_media') for(const record of result.media || [])remember('media',record.id);
+        else if(name==='list_documents') for(const record of result.documents || [])remember('document',record.document);
+        else if(name==='search') for(const record of result.results || [])remember({service:'service',archive:'media',document:'document'}[record.where],record.id ?? record.document);
+        // Deterministic presentation of an aggregate winner, including records
+        // beyond the returned page. The read stays successful if UI is blocked.
+        if (name==='list_services' && context.voice===true && !/\b(?:don't|do not|never)\b/i.test(context.userText || '')
+          && costliestQuestion && app.showRecord) {
+          const winner=(modQuestion ? result.mostExpensive?.modsAndUpdates : result.mostExpensive?.everything)?.records?.[0];
+          if(winner) {
+            try { result.presentation=await app.showRecord({kind:'service',id:String(winner.id),isCancelled:context.isCancelled}); }
+            catch { result.presentation={ok:false,error:'The record could not be displayed. The read result is still valid.'}; }
+          }
+        }
+      }
       console.log(`[SpinLog] 🔧 Sage used ${name}:`, result.ok ? 'ok' : result.error, args || {});
       return result;
     } catch (err) {

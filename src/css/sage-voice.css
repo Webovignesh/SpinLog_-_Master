@@ -112,3 +112,13 @@
 .is-docked .sage-voice-state::before { content:''; display:inline-block; width:5px; height:5px; margin-right:6px; border-radius:50%; background:#ffc18f; vertical-align:1px; }
 .is-docked[data-voice-mode="listening"] .sage-voice-state::before { background:#9fd8b4; }
 .is-docked :is(.sage-voice-window-controls,.sage-voice-instruction,.sage-voice-bars,.sage-voice-captions,.sage-voice-activity,.sage-voice-controls,.sage-voice-hint,.sage-voice-file) { display:none!important; }
+
+/* Keep the answer's record visible while Sage speaks from the corner. */
+.sage-focus-target {
+  outline: 2px solid var(--accent, #b99368);
+  outline-offset: -2px;
+  background: color-mix(in srgb, var(--accent, #b99368) 15%, transparent) !important;
+  scroll-margin-block: 120px;
+  border-radius: 8px;
+}
+.sage-focus-target > td { background: transparent; }

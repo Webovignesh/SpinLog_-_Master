@@ -50,6 +50,60 @@ test('voice and settings work before data loads, and only accept whitelisted con
 function services(rows) {
   return appMethod('listServices','getCover',{serviceEntries:rows,okISO:s=>typeof s==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(s)});
 }
+test('voice costliest-mod answer reveals the actual winner beyond the list limit and retains tied facts',async()=>{
+  const h=harness(),shown=[];
+  h.root.dkApp.listServices=services([{id:1,date:'2026-10-07',type:'Mods/Updates',cost:50},
+    {id:2,date:'2020-01-01',type:'Mods/Updates',cost:9000,notes:'Exhaust'},
+    {id:3,date:'2021-01-01',type:'Mods/Updates',cost:9000,notes:'Suspension'},
+    {id:4,date:'2026-01-01',type:'Showroom',cost:18000}]);
+  h.root.dkApp.showRecord=async a=>{shown.push(a);return {ok:true,highlighted:true};};
+  const context={voice:true,userText:'What is my costliest mod?',relatedRecords:new Set()};
+  const result=await h.run('list_services',{limit:1,type:'Showroom'},context);
+  assert.equal(result.records.length,1);assert.equal(result.mostExpensive.modsAndUpdates.cost,9000);
+  assert.equal(result.mostExpensive.modsAndUpdates.records.length,2);assert.equal(shown.length,1);
+  assert.equal(shown[0].kind,'service');assert.ok(['2','3'].includes(shown[0].id));
+  assert.equal(result.presentation.highlighted,true);
+  assert.equal((await h.run('show_record',{kind:'service',id:'2'},context)).ok,true);
+  assert.equal((await h.run('show_record',{kind:'service',id:'999'},context)).ok,false);
+  assert.equal((await h.run('show_record',{kind:'service',id:'2',action:'edit'},context)).ok,false);
+});
+test('related record presentation is scoped to this voice question and preserves facts when blocked',async()=>{
+  const h=harness();let shown=0;
+  h.root.dkApp.listServices=services([{id:1,date:'2026-01-01',type:'Mods/Updates',cost:500}]);
+  h.root.dkApp.showRecord=async()=>{shown++;return {ok:false,error:'Close the draft first.'};};
+  const context={voice:true,userText:'Which is my costliest mod?'};
+  const result=await h.run('list_services',{},context);
+  assert.equal(result.ok,true);assert.equal(result.presentation.ok,false);assert.equal(result.mostExpensive.modsAndUpdates.cost,500);
+  await h.run('list_services',{}, {voice:false,userText:'Which is my costliest mod?'});
+  await h.run('list_services',{}, {voice:true,userText:"Don't show my costliest mod"});
+  assert.equal(shown,1);
+  assert.equal((await h.run('show_record',{kind:'service',id:'1'},{...context,userText:'hello'})).ok,false);
+  assert.equal((await h.run('show_record',{kind:'service',id:'1'}, {...context,isCancelled:()=>true})).ok,false);
+  assert.equal(shown,1);
+});
+test('cancelled read never moves the page after its network response',async()=>{
+  const h=harness();let cancelled=false,shown=0;
+  h.root.dkApp.listServices=async()=>{cancelled=true;return {ok:true,records:[{id:1}],mostExpensive:{everything:{records:[{id:1}]}}};};
+  h.root.dkApp.showRecord=async()=>{shown++;return {ok:true};};
+  assert.equal((await h.run('list_services',{}, {voice:true,userText:'what is my costliest service',isCancelled:()=>cancelled})).ok,false);
+  assert.equal(shown,0);
+});
+test('a showroom versus mods comparison does not silently narrow the read to mods',async()=>{
+  const h=harness();h.root.dkApp.listServices=services([{id:1,date:'2026-01-01',type:'Mods/Updates',cost:500},
+    {id:2,date:'2026-01-02',type:'Showroom',cost:900}]);
+  const result=await h.run('list_services',{}, {voice:true,userText:'Compare my showroom spending versus mods'});
+  assert.equal(result.records.length,2);assert.equal(result.totals.everything,1400);
+});
+test('record reveal awaits render, highlights the exact row and never claims a missing record',async()=>{
+  let reveal,highlighted;
+  const row={};const window={SagePageControls:{inspect:()=>({dialog:null}),highlight:async el=>{highlighted=el;return {ok:true};}},
+    dkShowServiceRecord:()=>new Promise(resolve=>{reveal=resolve;})};
+  const show=appMethod('showRecord','navigateHistory',{window,serviceEntries:[{id:9}],CSS:{escape:String},document:{querySelector:()=>row}});
+  const app={showRecord:show,goToSection:async()=>({ok:true})};
+  const pending=app.showRecord({kind:'service',id:'9'});await new Promise(setImmediate);
+  assert.equal(highlighted,undefined);reveal(true);assert.equal((await pending).highlighted,true);assert.equal(highlighted,row);
+  assert.equal((await app.showRecord({kind:'service',id:'123'})).ok,false);
+});
 test('costliest update spans every record, preserves ties and stays separate from total spending',async()=>{
   const rows=Array.from({length:55},(_,i)=>({id:i,date:'2026-10-01',type:'Mods/Updates',cost:100,notes:'Small update'}));
   rows.push({id:90,date:'2020-01-01',type:'Mods/Updates',cost:'9000',notes:'Exhaust'},

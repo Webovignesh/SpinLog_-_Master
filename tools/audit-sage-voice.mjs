@@ -16,13 +16,67 @@ async function until(check) {
   for (let i = 0; i < 150; i++) { if (check()) return; await delay(10); }
   assert.ok(check(), 'timed out waiting for voice state');
 }
+
+test('natural breathing window owns cutoff and four turns follow the complete loop without idle flashes',async()=>{
+  const h=harness({live:true,holdPlayback:true,storage:{sage_voice_pause:null},liveEnd:ws=>ws.message({serverContent:{turnComplete:true}})});
+  try {
+    h.phases.length=0;await h.open();await until(()=>h.worklets.length===1);
+    for(let turn=0;turn<4;turn++) {
+      const mic=h.worklets.at(-1),recorder=h.recordings.at(-1);
+      mic.frame(0);await until(()=>h.nodes.get('sageVoiceState').textContent==='Listening…');
+      mic.frame();h.tick(100);
+      h.sockets[0].message({serverContent:{inputTranscription:{text:`Turn ${turn}`},generationComplete:true}});
+      await delay(220);
+      assert.equal(recorder.state,'recording','server final cannot cut off local speech');
+      mic.frame(0);h.tick(100);h.tick(700);
+      assert.equal(h.asks.length,turn,'a short sentence pause is breathing room');
+      mic.frame();h.tick(100); // speech resumes, so the pause starts again
+      mic.frame(0);h.tick(100);h.tick(899);
+      assert.equal(recorder.state,'recording');h.tick(1);
+      await until(()=>h.playback.length===turn+1);
+      assert.equal(recorder.state,'inactive');assert.equal(h.recordings.length,turn+1,'mic stays off throughout playback');
+      assert.equal(h.nodes.get('sageVoiceState').textContent,'Replying…');
+      h.playback.at(-1).end();await until(()=>h.worklets.length===turn+2);
+      h.worklets.at(-1).frame(0);await until(()=>h.nodes.get('sageVoiceState').textContent==='Listening…');
+    }
+    const phases=h.phases.filter((phase,i)=>phase!==h.phases[i-1]);
+    assert.deepEqual(phases,['Connecting…','Listening…',...Array.from({length:4},()=>['Processing…','Replying…','Connecting…','Listening…']).flat()]);
+    assert.equal(h.asks.length,4);assert.equal(h.streams.length,1);
+  } finally {h.cleanup();}
+});
+
+test('native recognition disconnect cannot bypass the local breathing pause',async()=>{
+  const h=harness({live:true,noKey:true,storage:{sage_voice_pause:null}});
+  try {h.root.SageAI.getKeys=()=>[{id:'test',key:'configured-but-resting'}];
+    await h.open();await until(()=>h.worklets.length===1&&h.recognition.length===1);
+    h.worklets[0].frame();h.recognition[0].result('Tell me about my bike');h.recognition[0].onend();
+    await delay(40);assert.equal(h.recordings[0].state,'recording');assert.equal(h.asks.length,0);
+    h.worklets[0].frame(0);h.tick(100);h.tick(899);assert.equal(h.asks.length,0);
+    h.tick(1);await until(()=>h.asks.length===1);assert.equal(h.recordings[0].state,'inactive');
+  }finally{h.cleanup();}
+});
+test('native reconnect preserves a sentence resumed within the breathing window',async()=>{
+  const h=harness({live:true,noKey:true,storage:{sage_voice_pause:null}});
+  try {h.root.SageAI.getKeys=()=>[{id:'test',key:'configured-but-resting'}];
+    await h.open();await until(()=>h.worklets.length===1&&h.recognition.length===1);
+    const mic=h.worklets[0],native=h.recognition[0];
+    mic.frame();native.result('Tell me about');native.onend();mic.frame(0);h.tick(100);h.tick(300);
+    await until(()=>native.starts===2);assert.equal(h.asks.length,0);
+    mic.frame();h.tick(100);native.result('my exhaust');
+    assert.match(h.nodes.get('sageVoiceCaption').innerHTML,/Tell me about my exhaust/);
+    mic.frame(0);h.tick(100);h.tick(900);await until(()=>h.asks.length===1);
+    assert.deepEqual(h.asks,['Tell me about my exhaust']);
+  }finally{h.cleanup();}
+});
 function harness(options = {}) {
   const timers = new Set(), intervals = new Map(), nodes = new Map(), streams = [], recordings = [], recognition = [];
   const asks = [], requests = [], decoded = [], playback = [], contexts = [];
   const sockets = [], worklets = [], analysers = [], animationFrames = new Map();
-  let history = [], now = 100000;
+  let history = [], now = 100000; const phases=[];
   class Element {
     constructor(id = '') { this.id = id; this.children = []; this.events = {}; this.attrs = {}; this.hidden = false; this.value = ''; this.type = ''; this.isConnected = true; this.style = { setProperty(k,v) { this[k]=v; }, removeProperty(k) { delete this[k]; } }; this.classList = { add() {}, remove() {}, toggle() {} }; }
+    set textContent(value) {this.text=String(value);if(this.id==='sageVoiceState')phases.push(this.text);}
+    get textContent() {return this.text || '';}
     addEventListener(name, fn) { (this.events[name] ||= []).push(fn); }
     emit(name) { this.events[name]?.forEach(fn => fn({ preventDefault() {}, stopPropagation() {}, target: this })); }
     setAttribute(k,v) { this.attrs[k] = v; }
@@ -106,7 +160,7 @@ function harness(options = {}) {
     frame(rms=0.08,pcm=speechPCM.buffer.slice(speechPCM.byteOffset,speechPCM.byteOffset+speechPCM.byteLength),
       vad={speechMs:rms>0?140:0,activeMs:rms>0?140:0}) {this.lastFrame={rms,pcm,...vad};this.port.onmessage?.({data:this.lastFrame});}
   }
-  const storage = new Map(Object.entries(options.storage || {}));
+  const storage = new Map(Object.entries({sage_voice_pause:'quick',...options.storage}));
   const root = { document, navigator: { onLine: true, mediaDevices: { getUserMedia: options.getUserMedia || (async () => newStream()) } },
     SpeechRecognition: Recognition, MediaRecorder: Recorder, AudioContext, OfflineAudioContext, Audio, FileReader,
     Blob, DataView, ArrayBuffer, Uint8Array, Float32Array, AbortController, TextDecoder, URL: { createObjectURL: () => 'blob:test', revokeObjectURL() {} },
@@ -136,7 +190,7 @@ function harness(options = {}) {
   };
   vm.runInNewContext(toolsSource, root, { filename:'sage-tools.js' });
   vm.runInNewContext(source, root, { filename: 'sage-voice.js' });
-  return { root, nodes, streams, recordings, recognition, asks, requests, decoded, storage, playback, contexts,sockets,worklets,analysers,animationFrames,
+  return { root, nodes, streams, recordings, recognition, asks, requests, decoded, storage, playback, contexts,sockets,worklets,analysers,animationFrames,phases,
     get history() { return history; },
     tick(ms) { now += ms;
       // A running worklet emits packets during silence too. Advancing the
@@ -159,7 +213,7 @@ test('cold-load mic noise cannot auto-process before the detector or upload sile
     await h.open();h.tick(100);h.tick(150);h.analysers[0].sample=128;h.tick(100);h.tick(650);
     await delay(30);
     assert.equal(h.recordings[0].state,'recording','wait for classification, not a meter-only endpoint');
-    assert.equal(h.nodes.get('sageVoiceState').textContent,'Starting audio…');
+    assert.equal(h.nodes.get('sageVoiceState').textContent,'Connecting…');
     assert.equal(h.requests.length,0);
     ready();await until(()=>h.worklets.length===1);
     h.worklets[0].frame(0,undefined,{speechMs:0,activeMs:0});h.tick(100);h.tick(650);
@@ -217,7 +271,7 @@ test('audio failure remains visible when next-turn PCM readiness arrives',async(
   try{
     await h.open();await h.root.SageVoice.sendVoiceText('hello');await until(()=>h.worklets.length===2);
     h.worklets[1].frame(0,undefined,{speechMs:0,activeMs:0});
-    assert.equal(h.nodes.get('sageVoiceState').textContent,'I’m listening');
+    assert.equal(h.nodes.get('sageVoiceState').textContent,'Listening…');
     assert.match(h.nodes.get('sageVoiceHint').textContent,/Audio is unavailable/);
   }finally{h.cleanup();}
 });
@@ -441,7 +495,7 @@ test('interrupt aborts pending speech audio and immediately resumes listening', 
     await speaking;
     await until(()=>h.recordings.length===2);
     assert.equal(signal.aborted,true);
-    assert.equal(h.nodes.get('sageVoiceState').textContent,'I’m listening');
+    assert.equal(h.nodes.get('sageVoiceState').textContent,'Listening…');
   } finally { h.cleanup(); }
 });
 
@@ -452,7 +506,7 @@ test('microphone stays stopped until the audio source actually ends', async () =
     await h.open();
     const reply = h.root.SageVoice.sendVoiceText('play the reply');
     await until(()=>h.playback.length===1);
-    assert.equal(h.nodes.get('sageVoiceState').textContent,'Speaking');
+    assert.equal(h.nodes.get('sageVoiceState').textContent,'Replying…');
     assert.equal(h.recordings.length,1);
     assert.equal(h.recordings[0].state,'inactive');
     await delay(40);
@@ -511,11 +565,12 @@ test('missing Gemini key pauses explicitly without switching recognizers', async
 });
 
 
-test('audio recognition and a 650ms pause are defaults; careful preferences remain available', async () => {
-  const h=harness();
+test('audio recognition and a 900ms breathing pause are defaults; quick and patient remain available', async () => {
+  const h=harness({storage:{sage_voice_pause:null}});
   const careful=harness({storage:{sage_voice_speed:'careful',sage_voice_pause:'patient'}});
   try {
-    assert.equal(h.root.SageVoice.settings.pauseMs,650);
+    assert.equal(h.root.SageVoice.settings.pauseMs,900);
+    assert.equal(harness().root.SageVoice.settings.pauseMs,650);
     await h.open(); await h.finish();
     assert.match(h.requests[0].url,/gemini-3.5-flash:generateContent/);
     assert.equal(careful.root.SageVoice.settings.pauseMs,1200);
@@ -747,10 +802,10 @@ test('cold opening reuses one gesture-created context and waits for recorder rea
     h.root.SageVoice.open();
     assert.equal(h.contexts.length,1,'audio context is created before the permission promise resolves');
     assert.equal(h.recognition.length,0,'browser recognition is never started');
-    assert.equal(h.nodes.get('sageVoiceState').textContent,'Opening microphone…');
+    assert.equal(h.nodes.get('sageVoiceState').textContent,'Connecting…');
     allow(h.newStream());await until(()=>h.recordings.length===1);
     assert.equal(h.contexts.length,1,'meter shares the unlocked context');
-    assert.equal(h.nodes.get('sageVoiceState').textContent,'I’m listening');
+    assert.equal(h.nodes.get('sageVoiceState').textContent,'Listening…');
   }finally{h.cleanup();}
 });
 test('speech end detection works without animation frames and hands off within one polling tick',async()=>{
@@ -840,13 +895,13 @@ test('transient HTTP failures retry the same speaker once, without another brain
 });
 test('closing during automatic audio recovery cancels the retry',async()=>{
   const h=harness({silentAudio:true});try{await h.open();const pending=h.root.SageVoice.sendVoiceText('hello');
-    await until(()=>h.nodes.get('sageVoiceState').textContent==='Restoring audio…');h.root.SageVoice.close();await pending;
+    await until(()=>h.requests.length===1);await delay(20);h.root.SageVoice.close();await pending;
     assert.equal(h.requests.length,1);assert.equal(h.playback.length,0);assert.equal(h.recordings.length,1);
   }finally{h.cleanup();}
 });
 test('backgrounding during retry does not leave a busy call when returning',async()=>{
   const h=harness({silentAudio:true});try{await h.open();const pending=h.root.SageVoice.sendVoiceText('hello');
-    await until(()=>h.nodes.get('sageVoiceState').textContent==='Restoring audio…');
+    await until(()=>h.nodes.get('sageVoiceState').textContent==='Processing…');
     h.root.document.hidden=true;h.root.document.events.visibilitychange.forEach(fn=>fn());await pending;
     h.root.document.hidden=false;h.root.document.events.visibilitychange.forEach(fn=>fn());
     await until(()=>h.recordings.length===2);assert.equal(h.requests.length,1);
@@ -915,7 +970,7 @@ test('first PCM words are buffered through delayed Live setup and committed once
     assert.match(h.nodes.get('sageVoiceInstruction').textContent,/First words are kept/);
     assert.equal(ws.sent.filter(m=>m.realtimeInput?.audio).length,0);
     ws.message({setupComplete:{}});await until(()=>ws.sent.some(m=>m.realtimeInput?.audio));
-    await until(()=>h.nodes.get('sageVoiceState').textContent==='I’m listening');
+    await until(()=>h.nodes.get('sageVoiceState').textContent==='Listening…');
     assert.equal(Buffer.from(ws.sent.find(m=>m.realtimeInput?.audio).realtimeInput.audio.data,'base64').equals(speechPCM),true);
     ws.message({serverContent:{inputTranscription:{text:'Hello, how are you?'}}});
     await until(()=>h.nodes.get('sageVoiceCaption').innerHTML.includes('Hello'));
@@ -929,10 +984,10 @@ test('first PCM words are buffered through delayed Live setup and committed once
 test('slow first worklet startup visibly waits and submits the whole recording once',async()=>{
   let ready;const h=harness({live:true,loud:true,addModule:()=>new Promise(resolve=>{ready=resolve;})});
   try {await h.open();
-    assert.equal(h.nodes.get('sageVoiceState').textContent,'Starting audio…');
+    assert.equal(h.nodes.get('sageVoiceState').textContent,'Connecting…');
     assert.match(h.nodes.get('sageVoiceInstruction').textContent,/mic is recording/);
     h.tick(200);ready();await until(()=>h.worklets.length===1);
-    h.worklets[0].frame();await until(()=>h.nodes.get('sageVoiceState').textContent==='I’m listening');
+    h.worklets[0].frame();await until(()=>h.nodes.get('sageVoiceState').textContent==='Listening…');
     assert.match(h.nodes.get('sageVoiceInstruction').textContent,/after your pause/);
     await h.finish();await until(()=>h.recordings.length===2);
     assert.equal(h.decoded[0],'first-LAST','late live capture never replaces the complete recording');
@@ -941,7 +996,7 @@ test('slow first worklet startup visibly waits and submits the whole recording o
 });
 test('a never-ready worklet falls back visibly instead of keeping startup indefinitely',async()=>{
   const h=harness({live:true,fastTimeouts:true,addModule:()=>new Promise(()=>{})});
-  try {await h.open();await until(()=>h.nodes.get('sageVoiceState').textContent==='I’m listening');
+  try {await h.open();await until(()=>h.nodes.get('sageVoiceState').textContent==='Listening…');
     assert.match(h.nodes.get('sageVoiceInstruction').textContent,/after your pause/);
     await h.finish();await until(()=>h.asks.length===1);
     assert.equal(h.decoded[0],'first-LAST');assert.equal(h.asks.length,1);
@@ -965,6 +1020,7 @@ test('server endpoint finishes a soft first utterance even under constant backgr
   try{await h.open();await until(()=>h.worklets.length===1);
     h.worklets[0].frame(.03);h.tick(100);h.tick(150);
     h.sockets[0].message({serverContent:{inputTranscription:{text:'சொல்லு டா'},generationComplete:true}});
+    h.worklets[0].frame(.03,undefined,{speechMs:0,activeMs:0});h.tick(100);h.tick(650);
     await until(()=>h.recordings.length===2);assert.deepEqual(h.asks,['சொல்லு டா']);assert.equal(h.root.SageVoice.isOpen(),true);
   }finally{h.cleanup();}
 });
@@ -999,6 +1055,7 @@ test('late committed words rearm the server endpoint rather than leaving the rec
     ws.message({serverContent:{inputTranscription:{text:'சொல்லு'},generationComplete:true}});
     await delay(80);ws.message({serverContent:{inputTranscription:{text:' டா'}}});
     await delay(30);ws.message({serverContent:{turnComplete:true}});
+    h.worklets[0].frame(.03,undefined,{speechMs:0,activeMs:0});h.tick(100);h.tick(650);
     await until(()=>h.recordings.length===2);assert.deepEqual(h.asks,['சொல்லு டா']);
   }finally{h.cleanup();}
 });
@@ -1085,11 +1142,11 @@ test('old Live captions and endpoint messages cannot affect the next call after 
 });
 test('opening status waits for microphone permission; old browser/review preferences cannot restore removed UI',async()=>{
   let allow;const h=harness({live:true,storage:{sage_voice_recognition:'browser',sage_voice_review:'true'},getUserMedia:()=>new Promise(resolve=>{allow=resolve;})});
-  try{h.root.SageVoice.open();assert.equal(h.nodes.get('sageVoiceState').textContent,'Opening microphone…');
+  try{h.root.SageVoice.open();assert.equal(h.nodes.get('sageVoiceState').textContent,'Connecting…');
     assert.equal(h.recognition.length,0);assert.equal(h.nodes.has('sageVoiceReview'),false);assert.equal(h.nodes.has('sageVoiceMethod'),false);
     allow(h.newStream());await until(()=>h.recordings.length===1 && h.worklets.length===1);
-    assert.equal(h.nodes.get('sageVoiceState').textContent,'Starting audio…');
-    h.worklets[0].frame(0);await until(()=>h.nodes.get('sageVoiceState').textContent==='I’m listening');
+    assert.equal(h.nodes.get('sageVoiceState').textContent,'Connecting…');
+    h.worklets[0].frame(0);await until(()=>h.nodes.get('sageVoiceState').textContent==='Listening…');
   }finally{h.cleanup();}
 });
 test('explicit bare close voice works locally and greetings/negations keep the room open',async()=>{
@@ -1130,7 +1187,7 @@ test('cold audio startup during silence keeps the fast Live path once ready',asy
     liveEnd:ws=>ws.message({serverContent:{inputTranscription:{text:'First words'}}})});
   try {
     await h.open();h.tick(200);ready();await until(()=>h.worklets.length===1);
-    h.worklets[0].frame();await until(()=>h.nodes.get('sageVoiceState').textContent==='I’m listening');
+    h.worklets[0].frame();await until(()=>h.nodes.get('sageVoiceState').textContent==='Listening…');
     assert.match(h.nodes.get('sageVoiceInstruction').textContent,/Pause when/);
     h.nodes.get('sageVoiceOrb').emit('click');await until(()=>h.recordings.length===2);
     assert.deepEqual(h.asks,['First words']);assert.equal(h.decoded.length,0);
@@ -1210,7 +1267,7 @@ test('uncertain English fallback words ask again without sending a guessed write
 test('a never-started English recognizer has bounded readiness and cannot remain Connecting forever',async()=>{
   const h=harness({transcribe:async()=>sttError(429),hangNative:true,fastTimeouts:true});
   try {await h.open();await h.finish();await until(()=>h.recordings.length===2);
-    await until(()=>h.nodes.get('sageVoiceState').textContent==='Recognition unavailable');
+    await until(()=>h.nodes.get('sageVoiceState').textContent==='Listening…');
     assert.equal(h.root.SageVoice.isOpen(),true);assert.equal(h.requests.filter(r=>!r.body.generationConfig.responseModalities).length,2);
   }finally{h.cleanup();}
 });
@@ -1388,7 +1445,8 @@ test('a browser restart without onstart is bounded just like the first startup',
   try {await h.open();await h.finish();await until(()=>h.recordings.length===2);
     const native=h.recognition.at(-1);native.start=()=>{native.starts++;};
     native.onerror?.({error:'no-speech'});native.onend?.();
-    await until(()=>h.nodes.get('sageVoiceState').textContent==='Recognition unavailable');
+    await until(()=>native.starts===2);
+    await until(()=>h.nodes.get('sageVoiceState').textContent==='Listening…');
     assert.equal(native.starts,2);assert.equal(h.root.SageVoice.isOpen(),true);
   }finally{h.cleanup();}
 });
@@ -1428,6 +1486,6 @@ test('a browser service error cannot start an automatic recognition-error loop',
     const rec=h.recognition.at(-1);rec.onerror?.({error:'network'});rec.onend?.();await delay(180);
     assert.equal(rec.starts,1);assert.equal(h.recordings.length,2);
     assert.equal(h.playback.length,0);assert.equal(h.root.SageVoice.isOpen(),true);
-    assert.match(h.nodes.get('sageVoiceState').textContent,/Recognition unavailable/);
+    assert.match(h.nodes.get('sageVoiceState').textContent,/Listening…/);
   }finally{h.cleanup();}
 });

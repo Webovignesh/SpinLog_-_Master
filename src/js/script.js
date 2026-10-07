@@ -4540,17 +4540,17 @@ window._delHistoricUpload = async function(id, fileName, btn) {
      * existing — record twenty of twenty-four is not in the DOM at all on page one — and
      * the symptom is identical: the poll times out and nothing happens.
      *
-     * @returns {boolean} False when there is no such record, so the caller can tell
+     * @returns {Promise<boolean>} False when there is no such record, so the caller can tell
      *   "not on this page" from "not in the database".
      */
-    window.dkShowServiceRecord = function showServiceRecord(id) {
+    window.dkShowServiceRecord = async function showServiceRecord(id) {
       clearServiceFilters();
       // Filters are cleared, so the filtered list IS serviceEntries and an index into
       // one is an index into the other.
       const index = serviceEntries.findIndex(entry => String(entry.id) === String(id));
       if (index < 0) return false;
       servicePager().showIndex(index);
-      renderServiceTable();
+      await renderServiceTable();
       return true;
     };
 
@@ -6229,6 +6229,46 @@ async function getBillFileUrl(fileName) {
         if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
       return { ok: true, opened: section };
+    },
+
+    async showRecord({kind,id,action='show',isCancelled=()=>false}) {
+      if (!['service','media','document'].includes(kind) || !['show','edit'].includes(action)) return {ok:false,error:'Unknown record type or action.'};
+      if (isCancelled()) return {ok:false,error:'Showing the record was cancelled.'};
+      if (window.SagePageControls?.inspect().dialog) return {ok:false,error:'Close the current form or dialog before showing another record.'};
+      if (kind === 'document' && action === 'edit') return {ok:false,error:'Use the document update tools to edit its notes or details.'};
+      const record = kind === 'service' ? serviceEntries.find(r=>String(r.id)===String(id)) : null;
+      if (kind === 'service' && !record) return {ok:false,error:'That service record no longer exists.'};
+      const result = await this.goToSection({section:kind==='service'?'service':'docs'});
+      if (!result.ok || isCancelled()) return {ok:false,error:'Showing the record was cancelled or navigation failed.'};
+      window.SageVoice?.minimize?.();
+      let target;
+      if (kind === 'service') {
+        if (!await window.dkShowServiceRecord?.(id)) return {ok:false,error:'That service record could not be revealed.'};
+        if (isCancelled()) return {ok:false,error:'Showing the record was cancelled.'};
+        target = document.querySelector(`.service-record-row[data-record-id="${CSS.escape(String(id))}"]`);
+        if (action === 'edit') {
+          openServiceEditor(record);
+          const page=window.SagePageControls?.inspect();
+          if (page?.dialog !== 'serviceEditModal') return {ok:false,error:'The service editor could not open.'};
+          return {ok:true,opened:'service_editor',id,fields:page.fields,saved:false};
+        }
+      } else if (kind === 'document') target = document.querySelector(`.doc-card[data-type="${CSS.escape(String(id))}"]`);
+      else {
+        const rows = [...document.querySelectorAll('#mediaRecordTable tbody tr[data-media-id]')];
+        target = rows.find(el=>el.dataset.mediaId===String(id));
+        if (target) {
+          document.getElementById('docsHistoryClearFilters')?.click();
+          window.dkDocsPager?.reveal?.(target);
+          if (action === 'edit') {
+            if (!window._editHistoricMedia) return {ok:false,error:'The media editor is unavailable.'};
+            window._editHistoricMedia(Number(id));
+            if (window.SagePageControls?.inspect().dialog !== 'historicNotesModal') return {ok:false,error:'The media editor could not open.'};
+            return {ok:true,opened:'media_editor',id,saved:false};
+          }
+        }
+      }
+      const shown = await window.SagePageControls?.highlight(target,isCancelled);
+      return shown?.ok ? {ok:true,opened:kind==='service'?'service':'docs',kind,id,highlighted:true} : shown || {ok:false,error:'The record is unavailable on this page.'};
     },
 
     async navigateHistory({ direction }) {
