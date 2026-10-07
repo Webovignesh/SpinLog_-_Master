@@ -21,7 +21,7 @@ const server=http.createServer(async(req,res)=>{
   if(!file.startsWith(root+path.sep)){res.writeHead(403).end();return;}
   try{let data=await readFile(file);
     if(rel==='index.html')data=data.toString().replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace('</body>',
-      '<script src="src/js/sage-transcription.js?v=1.9.43"></script><script src="src/js/sage-voice.js?v=1.9.43"></script></body>');
+      '<script src="src/js/sage-transcription.js?v=1.9.44"></script><script src="src/js/sage-voice.js?v=1.9.44"></script></body>');
     res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.css':'text/css'})[path.extname(file)]||'application/octet-stream');res.end(data);
   }catch{res.writeHead(404).end();}
 });
@@ -98,6 +98,12 @@ try{
   await page.waitForTimeout(1000);
   assert.deepEqual(await page.evaluate(()=>({asks:asks.length,requests:requests.length,packets:ears[0].packets.length})),
     {asks:0,requests:0,packets:0},'cold boot silence never starts recognition processing or replies');
+  const quietPhases=await page.evaluate(()=>readiness.length);
+  await page.waitForTimeout(15500);
+  assert.equal(await page.evaluate(()=>document.getElementById('sageVoiceState').textContent),'Listening…');
+  assert.equal(await page.evaluate(()=>ears.length),1,'silent recorder rollover does not reconnect recognition');
+  assert.equal(await page.evaluate(()=>micOpens),1);
+  assert.equal(await page.evaluate(start=>readiness.slice(start).some(mode=>mode==='Connecting…'||mode==='Processing…'),quietPhases),false,'silence stays visibly Listening');
   await page.evaluate(()=>{autoMic=true;testMicGain.gain.value=1;});
   await page.waitForFunction(()=>asks.length>=5&&document.getElementById('sageVoiceState').textContent==='Listening…',{},{timeout:30000});
   await page.waitForFunction(()=>ears[0]?.byTurn[5]?.length>=6);
