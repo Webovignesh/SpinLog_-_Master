@@ -287,3 +287,37 @@ test('form controls reject greetings, negated edits, explanations and historical
   assert.equal(writes,0);
   assert.equal((await h.run('fill_page_fields',{fields:[{field:'serviceType',value:'Showroom'}]},{userText:'select Showroom'})).ok,true);assert.equal(writes,1);
 });
+
+test('opening a file requires a current explicit request and a real read proof; play needs a play request',async()=>{
+ const h=harness();let opened=0;
+ h.root.dkApp.openStoredFile=async()=>{opened++;return {ok:true};};
+ const context={userText:'open my license',voice:true,relatedRecords:new Set(['document:Driving License'])};
+ assert.equal((await h.run('open_stored_file',{kind:'document',id:'Driving License',action:'open'},context)).ok,true);
+ for(const userText of ['hello','do not open my license','what did you open earlier?','say open my license'])assert.equal((await h.run('open_stored_file',{kind:'document',id:'Driving License'}, {...context,userText})).ok,false);
+ assert.equal((await h.run('open_stored_file',{kind:'document',id:'unknown'},context)).ok,false);
+ assert.equal((await h.run('open_stored_file',{kind:'document',id:'Driving License',action:'play'},context)).ok,false);
+ assert.equal((await h.run('open_stored_file',{kind:'document',id:'Driving License'},{...context,isCancelled:()=>true})).ok,false);
+ assert.equal(opened,1);
+});
+test('pause cannot turn into play or close and discussion never controls the player',async()=>{
+ const h=harness();let actions=[];h.root.dkApp.controlMediaPlayer=async a=>{actions.push(a.action);return {ok:true};};
+ assert.equal((await h.run('control_media_player',{action:'pause'},{userText:'pause video'})).ok,true);
+ for(const userText of ['why did you play the video?','do not pause','hello','pause video'])assert.equal((await h.run('control_media_player',{action:'play'},{userText})).ok,false);
+ assert.deepEqual(actions,['pause']);
+});
+test('latest file commands select the requested kind before pagination and open instead of reading it',async()=>{
+ const h=harness();let listed,opened;
+ h.root.dkApp.listMedia=async args=>{listed=args;return {ok:true,media:[{id:90,kind:'video',fileName:'Ride.mp4'}]};};
+ h.root.dkApp.openStoredFile=async args=>{opened=args;return {ok:true,playing:true};};
+ const result=await h.root.SageTools.handleFileRequest({userText:'Play the last saved archive video.',voice:true,relatedRecords:new Set()});
+ assert.equal(listed.kind,'video');assert.equal(opened.id,'90');assert.equal(opened.action,'play');assert.equal(result.text,'Playing Ride.mp4.');
+});
+test('driver license aliases open the actual document and report a missing file truthfully',async()=>{
+ const h=harness();let opened;
+ h.root.dkApp.listDocuments=async()=>({ok:true,documents:[{document:'Driving License',onFile:true}]});
+ h.root.dkApp.openStoredFile=async args=>{opened=args;return {ok:true};};
+ let result=await h.root.SageTools.handleFileRequest({userText:"Open my driver's license.",relatedRecords:new Set()});
+ assert.equal(opened.kind,'document');assert.equal(opened.id,'Driving License');assert.equal(result.text,'Opened Driving License.');
+ h.root.dkApp.openStoredFile=async()=>({ok:false,error:'File link unavailable.'});
+ result=await h.root.SageTools.handleFileRequest({userText:'view my licence',relatedRecords:new Set()});assert.equal(result.text,'File link unavailable.');
+});

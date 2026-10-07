@@ -18,7 +18,7 @@
 .sage-voice-orb[data-speech-active="true"] .sage-voice-aura { background:#ffb47a32; }
 .sage-voice-close { flex:none; width:42px; height:42px; display:grid; place-items:center; border:1px solid #ffffff13; border-radius:50%; background:transparent; color:#b5b7c0; cursor:pointer; }
 .sage-voice-stage { display:flex; flex-direction:column; align-items:center; justify-content:center; flex:0 0 auto; height:clamp(220px,30dvh,300px); gap:0; padding:12px 0 6px; }
-.sage-voice-orb { --sage-voice-level:0; position:relative; width:clamp(140px,20dvh,190px); height:clamp(140px,20dvh,190px); padding:0; flex:none; border:0; border-radius:50%; background:transparent; box-shadow:none; cursor:pointer; -webkit-tap-highlight-color:transparent; }
+.sage-voice-orb { --sage-voice-level:0; position:relative; width:clamp(140px,20dvh,190px); height:clamp(140px,20dvh,190px); padding:0; flex:none; border:0; border-radius:50%; background:transparent; box-shadow:none; cursor:pointer; touch-action:none; user-select:none; -webkit-touch-callout:none; -webkit-tap-highlight-color:transparent; }
 .sage-voice-aura { position:absolute; inset:6%; border-radius:50%; background:#ffb47a18; filter:blur(30px); transform:scale(calc(1.1 + var(--sage-voice-level) * .15)); }
 .sage-voice-core { position:absolute; display:block; inset:10%; overflow:hidden; border:0; border-radius:50%; background:#ffe4ca; box-shadow:inset 0 0 18px #ffffffa0,0 0 44px #ffb07012; transform:translate(var(--sage-voice-x,0px),var(--sage-voice-y,0px)) rotate(var(--sage-voice-tilt,0deg)) scale(calc(1 + var(--sage-voice-level) * .18)); transition:transform .08s ease-out; animation:none; isolation:isolate; }
 .sage-voice-cloud { position:absolute; inset:-45%; background:radial-gradient(ellipse at 20% 25%,#fffdf5 0,transparent 42%),radial-gradient(ellipse at 70% 25%,#ffd4b4 0,transparent 44%),radial-gradient(ellipse at 65% 70%,#fb650b 0,transparent 45%),radial-gradient(ellipse at 20% 65%,#5d2313 0,transparent 44%),#ffbf88; filter:blur(12px); animation:sageFluid 12s linear infinite; }
@@ -122,3 +122,6 @@
   border-radius: 8px;
 }
 .sage-focus-target > td { background: transparent; }
+
+/* The ongoing call remains reachable above the full-screen file viewer. */
+.docs-player-lock .sage-voice-overlay.is-docked { z-index:100010; }

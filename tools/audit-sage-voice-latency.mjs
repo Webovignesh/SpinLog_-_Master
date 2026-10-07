@@ -303,3 +303,19 @@ test('a non-English provider reply is repaired once without rerunning a successf
     assert.equal(writes,1);assert.equal(h.requests.length,3);assert.equal(h.requests[2].body.tools,undefined);
   }finally{h.cleanup();}
 });
+
+test('cancelling a pending voice model request aborts it and frees the next voice request',async()=>{
+ let firstSignal;
+ const h=harness(async(_url,init,n)=>{
+  if(n!==1)return answer('Fresh answer');
+  firstSignal=init.signal;
+  return new Promise((_,reject)=>init.signal.addEventListener('abort',()=>reject(new DOMException('Cancelled','AbortError')),{once:true}));
+ });
+ try {
+  const controller=new AbortController();
+  const first=h.AI.askSage('What is my service cost?',{voice:true,tools:false,signal:controller.signal,isCancelled:()=>controller.signal.aborted});
+  await until(()=>firstSignal);controller.abort();
+  const result=await first;assert.equal(result.ok,false);assert.equal(firstSignal.aborted,true);
+  const next=await h.AI.askSage('How are you?',{voice:true,tools:false});assert.equal(next.text,'Fresh answer');assert.equal(h.requests.length,2);
+ }finally{h.cleanup();}
+});

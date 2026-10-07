@@ -78,7 +78,7 @@ function harness(options = {}) {
     set textContent(value) {this.text=String(value);if(this.id==='sageVoiceState')phases.push(this.text);}
     get textContent() {return this.text || '';}
     addEventListener(name, fn) { (this.events[name] ||= []).push(fn); }
-    emit(name) { this.events[name]?.forEach(fn => fn({ preventDefault() {}, stopPropagation() {}, target: this })); }
+    emit(name,extra={}) { this.events[name]?.forEach(fn => fn({ preventDefault() {}, stopPropagation() {}, target: this,currentTarget:this,...extra })); }
     setAttribute(k,v) { this.attrs[k] = v; }
     getAttribute(k) { return this.attrs[k]; }
     set innerHTML(v) { this.html = v; this.children = []; }
@@ -1488,4 +1488,53 @@ test('a browser service error cannot start an automatic recognition-error loop',
     assert.equal(h.playback.length,0);assert.equal(h.root.SageVoice.isOpen(),true);
     assert.match(h.nodes.get('sageVoiceState').textContent,/Listening…/);
   }finally{h.cleanup();}
+});
+
+
+test('holding the orb cancels thinking immediately, keeps the call and ignores its stale answer',async()=>{
+  let finish,signal,cancelled;
+  const h=harness({live:true,askSage:(_text,opts)=>{signal=opts.signal;cancelled=opts.isCancelled;return new Promise(resolve=>{finish=resolve;});}});
+  try {
+    await h.open();await until(()=>h.worklets.length===1);
+    const pending=h.root.SageVoice.sendVoiceText('Show my service history');await until(()=>finish);
+    const orb=h.nodes.get('sageVoiceOrb');orb.emit('pointerdown',{button:0,pointerId:1,clientX:20,clientY:20});
+    await until(()=>h.worklets.length===2);
+    assert.equal(signal.aborted,true);assert.equal(cancelled(),true);assert.equal(h.root.SageVoice.isOpen(),true);
+    h.worklets.at(-1).frame(0);await until(()=>h.nodes.get('sageVoiceState').textContent==='Listening…');
+    orb.emit('pointerup',{pointerId:1});orb.emit('click');
+    assert.equal(h.recordings.at(-1).state,'recording','release does not commit a silent take');
+    finish({ok:true,text:'Stale answer'});await pending;
+    assert.equal(h.playback.length,0);assert.equal(h.streams.length,1);assert.equal(h.history.filter(t=>t.role==='sage').length,0);
+  }finally{h.cleanup();}
+});
+test('short orb press and a moved hold never cancel a processing turn',async()=>{
+  let finish,signal;const h=harness({askSage:(_text,opts)=>{signal=opts.signal;return new Promise(resolve=>{finish=resolve;});}});
+  try {
+    await h.open();const pending=h.root.SageVoice.sendVoiceText('hello');await until(()=>finish);
+    const orb=h.nodes.get('sageVoiceOrb');
+    orb.emit('pointerdown',{button:0,pointerId:1,clientX:20,clientY:20});orb.emit('pointerup',{pointerId:1});
+    orb.emit('pointerdown',{button:0,pointerId:2,clientX:20,clientY:20});orb.emit('pointermove',{pointerId:2,clientX:40,clientY:20});
+    await delay(600);assert.equal(signal.aborted,false);
+    finish({ok:true,text:'Okay'});await pending;
+  }finally{h.cleanup();}
+});
+test('native words guessed during locally rejected background noise never run a command',async()=>{
+  const h=harness({live:true,noKey:true});
+  try {
+    h.root.SageAI.getKeys=()=>[{id:'test',key:'configured-but-resting'}];await h.open();await until(()=>h.worklets.length===1&&h.recognition.length===1);
+    h.worklets[0].frame(.08,undefined,{speechMs:0,activeMs:100});h.recognition[0].result('hello viky');
+    h.tick(100);h.tick(1000);assert.equal(h.asks.length,0);assert.equal(h.recordings[0].state,'recording');
+    assert.doesNotMatch(h.nodes.get('sageVoiceCaption').innerHTML,/hello/i);
+  }finally{h.cleanup();}
+});
+
+test('browser-only noise hypotheses are validated locally before any brain/provider request',async()=>{
+ const h=harness({live:true,noKey:true,recordedSpeech:false,addModule:async()=>{throw new Error('Worklet unavailable');}});
+ try{
+  h.root.SageAI.getKeys=()=>[{id:'test',key:'resting'}];await h.open();await until(()=>h.recognition.length===1);
+  await until(()=>h.nodes.get('sageVoiceState').textContent==='Listening…');
+  h.recognition[0].result('hello viky');h.nodes.get('sageVoiceOrb').emit('click');
+  await until(()=>h.recordings.length===2);
+  assert.equal(h.asks.length,0);assert.equal(h.requests.length,0);assert.equal(h.history.length,0);
+ }finally{h.cleanup();}
 });
