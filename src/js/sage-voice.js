@@ -856,6 +856,9 @@
           paintCaptureReadiness(take); return;
         }
         take.frames.push(frame.pcm);
+        if(!take.heard && !take.prefixCandidate) {
+          while(take.frames.reduce((n,pcm)=>n+pcm.byteLength,0)>19200 && take.frames.length>1) take.frames.shift();
+        }
         take.pcmLevel = frame.rms;
         take.pcmAt = Date.now();
         let speechStarted = false;
@@ -866,14 +869,18 @@
           take.heard = false; take.loudAt = take.quietAt = 0;
         }
         take.vadReady = Number.isFinite(frame.speechMs);
-        take.pcmSpeech = take.vadReady ? frame.speechMs > 0 && frame.activeMs > 0
-          : frame.rms > Math.max(0.005, noiseFloor * 1.6);
         const duration = frame.pcm.byteLength / 32;
-        if (take.pcmSpeech) take.voicedMs += take.vadReady ? Math.min(frame.speechMs, frame.activeMs) : duration;
-        else take.voicedMs = 0;
+        take.pcmSpeech = take.vadReady ? frame.speechMs >= Math.min(30,duration*.3) && frame.activeMs > 0
+          : frame.rms > Math.max(0.005, noiseFloor * 1.6);
+        take.speechWindow ||= [];
+        take.speechWindow.push({duration,voiced:take.vadReady ? Math.min(frame.speechMs,frame.activeMs,duration) : take.pcmSpeech ? duration : 0});
+        while(take.speechWindow.length>1 && take.speechWindow.reduce((n,f)=>n+f.duration,0)>400) take.speechWindow.shift();
+        while(take.speechWindow.length>1 && take.speechWindow[0].voiced===0) take.speechWindow.shift();
+        take.voicedMs=take.speechWindow.reduce((n,f)=>n+f.voiced,0);
+        const speechDensity=take.voicedMs/take.speechWindow.reduce((n,f)=>n+f.duration,0);
         // Real speech, not volume alone. Keep a half-second prefix so this
         // confirmation never clips the first syllable or requires a repeat.
-        if (take.pcmSpeech && (take.voicedMs >= 120 || !take.vadReady && duration >= 80)) {
+        if (take.pcmSpeech && (take.voicedMs >= 120 && speechDensity>=.4 || !take.vadReady && duration >= 80)) {
           speechStarted = !take.heard;
           take.heard = true; take.quietAt = 0;
           if (take.vadReady) take.vadConfirmed = true;
@@ -945,11 +952,26 @@
         }
         // Bytes alone are not speech: silence also produces compressed data.
         if (!take.heard && !take.prefixCandidate && (!take.loudAt || now-take.loudAt >= 1000) && now - take.started >= 15000) {
-          // Bound the silent buffer, not the hands-free session. Discard it
-          // locally and keep the same microphone stream enabled.
-          keepRecognition(take.live); take.live = null;
-          cancelGeminiListen();
-          startListening();
+          if(take.vadReady && !take.pcmUnavailable && take.pcmAt && now-take.pcmAt<500) {
+            // Keep the live worklet, VAD, transcript route and Listening state.
+            // Replace only the compressed recorder; PCM owns any word that
+            // starts during its short rollover. Old final data cannot leak in.
+            try {
+              const next=new MediaRecorder(stream,mime ? {mimeType:mime}:undefined);
+              const previous=take.recorder;
+              previous.onstop=null; previous.ondataavailable=null; previous.onerror=null;
+              try {previous.stop();} catch { /* already stopped */ }
+              take.chunks=[];
+              take.recorder=next;
+              next.ondataavailable=event=>{if(capture===take && !take.cancelled && take.recorder===next && event.data?.size)take.chunks.push(event.data);};
+              next.onstop=()=>completeCapture(take);
+              next.onerror=()=>{if(capture===take)pauseListening('Recording failed. Tap the mic to retry.');};
+              next.start(100); take.started=now;
+            } catch { pauseListening('Could not renew the recording. Tap the mic to retry.'); }
+          } else {
+            keepRecognition(take.live); take.live = null;
+            cancelGeminiListen(); startListening();
+          }
         } else if (now - take.started >= 45000) finishGeminiListen(true);
       }, 100);
       return true;

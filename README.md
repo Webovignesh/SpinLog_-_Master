@@ -1141,3 +1141,9 @@ Explicit saved-file commands open the actual in-app viewer instead of merely rea
 The shared speech detector filters concentrated background tones and learns non-speech noise; browser recognition cannot bypass local speech validation. Holding the orb for 550 ms cancels pending recognition, the active model request and queued speech, then resumes the same microphone. Dragging and short taps retain their existing behavior.
 
 See [implementation and validation](docs/sage-media-noise-hold-fix.md).
+
+## Stable Sage listening — v1.9.44
+
+Silent buffer renewal now rotates only MediaRecorder, keeping the worklet, microphone, speech detector, Live connection and visible Listening state active. Sparse background VAD hits cannot accumulate into an utterance; a 400 ms window requires at least 120 ms of speech and 40% speech density. Leading silence is excluded, so quiet first words can still qualify. The complete fallback retains the same first-word prefix sent to Live.
+
+See [reproduced failures and validation](docs/sage-stable-listening-fix.md).

@@ -1538,3 +1538,39 @@ test('browser-only noise hypotheses are validated locally before any brain/provi
   assert.equal(h.asks.length,0);assert.equal(h.requests.length,0);assert.equal(h.history.length,0);
  }finally{h.cleanup();}
 });
+
+test('sparse background VAD hits cannot accumulate into Processing and speech remains available',async()=>{
+ const h=harness({live:true});
+ try{
+  await h.open();await until(()=>h.worklets.length===1);const mic=h.worklets[0];mic.frame(0);
+  await until(()=>h.nodes.get('sageVoiceState').textContent==='Listening…');h.phases.length=0;
+  for(let i=0;i<20;i++){mic.frame(.04,new ArrayBuffer(3200),{speechMs:20,activeMs:100});h.tick(100);}
+  mic.frame(0);h.tick(100);h.tick(1000);assert.equal(h.recordings[0].state,'recording');assert.equal(h.asks.length,0);
+  assert.ok(!h.phases.includes('Processing…'));
+  mic.frame();h.tick(100);h.sockets[0].message({serverContent:{inputTranscription:{text:'Hello there'},generationComplete:true}});
+  mic.frame(0);h.tick(100);h.tick(650);await until(()=>h.asks.length===1);assert.deepEqual(h.asks,['Hello there']);
+ }finally{h.cleanup();}
+});
+test('a minute of silence rolls recorder buffers without reconnecting, processing or losing the next word',async()=>{
+ const h=harness({live:true});
+ try{
+  await h.open();await until(()=>h.worklets.length===1);const mic=h.worklets[0];mic.frame(0);await until(()=>h.nodes.get('sageVoiceState').textContent==='Listening…');h.phases.length=0;
+  for(let i=0;i<4;i++){h.tick(15000);await delay(10);}
+  assert.equal(h.worklets.length,1);assert.equal(h.sockets.length,1);assert.equal(h.streams.length,1);
+  assert.equal(h.recordings.length,5);assert.deepEqual(h.phases,[]);assert.equal(h.asks.length,0);
+  mic.frame();h.tick(100);h.sockets[0].message({serverContent:{inputTranscription:{text:'First word after waiting'},generationComplete:true}});
+  mic.frame(0);h.tick(100);h.tick(650);await until(()=>h.asks.length===1);assert.deepEqual(h.asks,['First word after waiting']);
+ }finally{h.cleanup();}
+});
+
+test('quiet fragmented onset survives leading silence without requiring a second utterance',async()=>{
+ const h=harness({live:true});
+ try{
+  await h.open();await until(()=>h.worklets.length===1);const mic=h.worklets[0];
+  for(let i=0;i<3;i++){mic.frame(0,new ArrayBuffer(3200));h.tick(100);}
+  for(let i=0;i<2;i++){mic.frame(.004,new ArrayBuffer(3200),{speechMs:60,activeMs:60});h.tick(100);}
+  h.sockets[0].message({serverContent:{inputTranscription:{text:'Hello'},generationComplete:true}});
+  await until(()=>/Hello/.test(h.nodes.get('sageVoiceCaption').innerHTML));
+  mic.frame(0);h.tick(100);h.tick(650);await until(()=>h.asks.length===1);assert.deepEqual(h.asks,['Hello']);
+ }finally{h.cleanup();}
+});
