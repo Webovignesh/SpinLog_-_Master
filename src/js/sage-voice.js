@@ -846,7 +846,7 @@
         // A stalled worklet must not strand startup. MediaRecorder already
         // owns the complete utterance; switch this turn to that recording.
         abandonPartialPCM();
-      }, 1500);
+      }, 8000);
       root.SageTranscription?.attach(stream, actx, frame => {
         if (capture !== take || take.cancelled) return;
         if (frame.failed) {
@@ -947,13 +947,17 @@
           take.loudAt = 0;
           if (take.heard || take.prefixCandidate) {
             if (!take.quietAt) take.quietAt = now;
-            if (now - take.quietAt >= settings.pauseMs && (take.pcmAt || take.pcmUnavailable)) finishGeminiListen(true);
+            if (now - take.quietAt >= settings.pauseMs && take.readyForSpeech) {
+              if(take.prefixCandidate && !take.heard && !take.previewText && take.vadReady && root.SageTranscription?.hasSpeech) checkColdPrefix(take);
+              else finishGeminiListen(true);
+            }
           }
         }
         // Bytes alone are not speech: silence also produces compressed data.
         if (!take.heard && !take.prefixCandidate && (!take.loudAt || now-take.loudAt >= 1000) && now - take.started >= 15000) {
-          if(take.vadReady && !take.pcmUnavailable && take.pcmAt && now-take.pcmAt<500) {
-            // Keep the live worklet, VAD, transcript route and Listening state.
+          if(take.micStarted && take.recorder?.state === 'recording') {
+            // Keep the microphone and readiness state, including recorded fallback.
+            // Keep the live worklet, VAD and transcript route when available.
             // Replace only the compressed recorder; PCM owns any word that
             // starts during its short rollover. Old final data cannot leak in.
             try {
@@ -969,8 +973,7 @@
               next.start(100); take.started=now;
             } catch { pauseListening('Could not renew the recording. Tap the mic to retry.'); }
           } else {
-            keepRecognition(take.live); take.live = null;
-            cancelGeminiListen(); startListening();
+            pauseListening('Recording stopped. Tap the mic to retry.');
           }
         } else if (now - take.started >= 45000) finishGeminiListen(true);
       }, 100);
@@ -990,19 +993,20 @@
     if (take.micStarted) {
       if (!take.pcmAt && !take.pcmUnavailable) {
         label = 'Starting audio…';
-        instruction = 'Your mic is recording while audio starts.';
+        instruction = 'Warming up audio. Wait for Listening before speaking.';
       } else if (take.native && !take.nativeReady && !take.nativeFailed && !take.nativeEnded) {
         label = 'Connecting recognition…'; instruction = 'Your microphone is recording while English recognition connects.';
       } else if (take.nativeFailed && recognitionNotice) {
         label = 'I’m listening'; instruction = 'Recorded recognition is ready. Your microphone stays open.';
       } else if (take.live && !take.liveReady && !take.previewText) {
         label = 'Connecting…';
-        instruction = 'Your mic is ready. First words are kept while captions connect.';
+        instruction = 'Connecting recognition. Wait for Listening before speaking.';
       } else {
         label = 'I’m listening';
         instruction = take.live || take.native ? 'Speak naturally in English. Pause when you’re done.' : 'Speak in English. Captions appear after your pause.';
       }
     }
+    take.readyForSpeech = label === 'I’m listening';
     // Audio frames arrive every 100ms. Only update when readiness changes so
     // screen readers do not keep announcing the same status during speech.
     if (take.readyLabel === label && take.readyInstruction === instruction) return;
@@ -1029,10 +1033,35 @@
     take.preRoll = [];
     try { if (take.recorder && take.recorder.state !== 'inactive') take.recorder.stop(); } catch { /* already stopped */ }
   }
+  function checkColdPrefix(take) {
+    if(take.prefixChecking) return;
+    take.prefixChecking=true;
+    const valid=()=>capture===take && current(take.owner) && !take.cancelled && !take.stopping;
+    (async()=>{
+      try {
+        const snapshot=new Blob(take.chunks,{type:take.recorder.mimeType || 'audio/webm'});
+        const wav=await bounded(recordingToWav(snapshot),4000,'timeout');
+        const speech=await bounded(root.SageTranscription.hasSpeech(wav),2000,'vad-unavailable');
+        if(!valid() || take.heard || take.previewText) return;
+        if(!speech) {
+          // Startup volume was just noise. Stay on the same active recorder,
+          // worklet and recognition connection without Processing/reconnect.
+          take.prefixCandidate=false; take.prefixSpeech=false; take.quietAt=0;
+          setHint('Ready. Speak naturally.'); return;
+        }
+        take.heard=true;take.vadConfirmed=true;take.liveGap=true;
+        take.live?.close();take.live=null;
+        finishGeminiListen(true);
+      } catch {
+        if(valid()) pauseListening('Audio warm-up could not finish. Tap the mic to retry.');
+      } finally { take.prefixChecking=false; }
+    })();
+  }
   function finishGeminiListen(commit) {
     const take = capture;
     if (!take || take.stopping || !take.recorder) return;
     if (!commit) { cancelGeminiListen(); return; }
+    if (!take.readyForSpeech) { setHint('Still connecting. Wait for Listening before speaking.'); return; }
     if (take.vadReady && !take.heard && !take.prefixCandidate && !take.previewText) {
       // Tapping the orb or a recording deadline in silence is still silence.
       keepRecognition(take.live); take.live = null;
@@ -1165,6 +1194,9 @@
       stopListening();
       S.recognitionFailed = false;
       recognitionNotice = recognitionProblem(err);
+      if(err.message==='vad-unavailable') {
+        S.busy=false; pauseListening('Speech detection could not start. Tap the mic to retry.'); return;
+      }
       // An unavailable API does not trap English conversation behind the same
       // provider. This recognizer is input only; TTS never uses browser voices.
       nativeEnglishFallback = !!(root.SpeechRecognition || root.webkitSpeechRecognition);
