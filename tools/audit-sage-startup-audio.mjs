@@ -15,7 +15,7 @@ const server=http.createServer(async(req,res)=>{
   if(!file.startsWith(root+path.sep)){res.writeHead(403).end();return;}
   try{let data=await readFile(file);
     if(rel==='index.html')data=data.toString().replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace('</body>',
-      '<script src="src/js/sage-transcription.js?v=1.9.44"></script><script src="src/js/sage-voice.js?v=1.9.44"></script></body>');
+      '<script src="src/js/sage-transcription.js?v=1.9.45"></script><script src="src/js/sage-voice.js?v=1.9.45"></script></body>');
     res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.css':'text/css'})[path.extname(file)]||'application/octet-stream');res.end(data);
   }catch{res.writeHead(404).end();}
 });
@@ -51,6 +51,10 @@ try{
           const binary=atob(fixture),raw=Uint8Array.from(binary,c=>c.charCodeAt(0)),view=new DataView(raw.buffer);
           for(let i=0;i<9600;i++)samples[i]=view.getInt16(i*2,true)/32768;
         }
+        // Keep producing genuine silence after the one-shot fixture ends, as an
+        // open hardware microphone does. An inactive graph emits no packets.
+        const silence=ctx.createOscillator(),gain=ctx.createGain();gain.gain.value=0;
+        silence.connect(gain);gain.connect(out);silence.start();
         const source=ctx.createBufferSource();source.buffer=input;source.connect(out);source.start();await ctx.resume();
         out.stream.getTracks()[0].onended=()=>{original.getTracks().forEach(t=>t.stop());ctx.close();};
         return out.stream;
@@ -91,7 +95,7 @@ try{
       assert.ok(!result.modes.includes('Processing…'),'no silent startup processing flash');
       assert.equal(result.state,'Listening…');
     }else{
-      await page.waitForFunction(()=>asks.length===1&&document.getElementById('sageVoiceState').textContent==='Listening…',null,{timeout:10000});
+      await page.waitForFunction(()=>asks.length===1&&document.getElementById('sageVoiceState').textContent==='Listening…',null,{timeout:20000});
       const result=await page.evaluate(()=>({requests,asks,history:historyRows.length,outputStarts,modes}));
       assert.deepEqual(result.asks,['Hello']);assert.equal(result.history,2);assert.equal(result.outputStarts,1,'actual audio is scheduled once');
       assert.equal(result.requests.length,3,'one STT request and bounded same-speaker speech recovery');

@@ -5,12 +5,12 @@
   const MODEL = 'gemini-3.5-transcribe-live'; // Dedicated speech recognition, never a reply voice.
   const WS = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
   const workletURL = document.currentScript?.src
-    ? new URL('sage-pcm-worklet.js?v=1.9.44', document.currentScript.src).href
-    : 'src/js/sage-pcm-worklet.js?v=1.9.44';
+    ? new URL('sage-pcm-worklet.js?v=1.9.45', document.currentScript.src).href
+    : 'src/js/sage-pcm-worklet.js?v=1.9.45';
   const prepared = new WeakMap();
   const detectorURL = document.currentScript?.src
-    ? new URL('../../vendor/sage-vad.js?v=1.9.44', document.currentScript.src).href
-    : '../../vendor/sage-vad.js?v=1.9.44';
+    ? new URL('../../vendor/sage-vad.js?v=1.9.45', document.currentScript.src).href
+    : '../../vendor/sage-vad.js?v=1.9.45';
   let detectorModule;
   async function hasSpeech(wav) {
     // Meter-only startup/fallback audio is provisional. Classify the complete
@@ -95,7 +95,7 @@
     try {
       if (!key || !root.WebSocket) throw new Error('unsupported');
       socket = new root.WebSocket(`${WS}?key=${encodeURIComponent(key)}`);
-      connectTimer = setTimeout(fail, 4000);
+      connectTimer = setTimeout(fail, 8000);
       socket.onopen = () => {
         if (closed) return;
         socket.send(JSON.stringify({setup:{

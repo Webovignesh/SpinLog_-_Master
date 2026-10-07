@@ -1147,3 +1147,10 @@ See [implementation and validation](docs/sage-media-noise-hold-fix.md).
 Silent buffer renewal now rotates only MediaRecorder, keeping the worklet, microphone, speech detector, Live connection and visible Listening state active. Sparse background VAD hits cannot accumulate into an utterance; a 400 ms window requires at least 120 ms of speech and 40% speech density. Leading silence is excluded, so quiet first words can still qualify. The complete fallback retains the same first-word prefix sent to Live.
 
 See [reproduced failures and validation](docs/sage-stable-listening-fix.md).
+
+
+## Sage readiness before listening — v1.9.45
+
+Cold audio and recognition setup now have up to eight seconds to initialize, with Connecting shown until capture and recognition are ready. This is a deadline, not an added delay. Automatic and manual submission wait for readiness. Startup volume candidates are checked locally without replacing healthy capture; silence in recorded fallback also rotates only the recorder. Detector errors explicitly pause instead of repeating startup.
+
+See [implementation and validation](docs/sage-ready-before-listening-fix.md).

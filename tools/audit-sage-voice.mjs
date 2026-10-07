@@ -217,7 +217,8 @@ test('cold-load mic noise cannot auto-process before the detector or upload sile
     assert.equal(h.requests.length,0);
     ready();await until(()=>h.worklets.length===1);
     h.worklets[0].frame(0,undefined,{speechMs:0,activeMs:0});h.tick(100);h.tick(650);
-    await until(()=>h.recordings.length===2);
+    await until(()=>checked.length===1);
+    assert.equal(h.recordings.length,1,'rejected warm-up noise stays on the original recorder');
     assert.equal(checked.length,1,'check complete prefix audio locally');
     assert.equal(h.requests.length,0);assert.equal(h.history.length,0);assert.equal(h.asks.length,0);
     assert.notEqual(h.nodes.get('sageVoiceState').textContent,'Processing');
@@ -232,7 +233,7 @@ test('a real first word ending before a cold detector starts is kept once',async
     ready();await until(()=>h.worklets.length===1);
     h.worklets[0].frame(0,undefined,{speechMs:0,activeMs:0});h.tick(100);h.tick(650);
     await until(()=>h.recordings.length===2);
-    assert.equal(checked.length,1);assert.equal(h.decoded[0],'first-LAST');
+    assert.equal(checked.length,1);assert.equal(h.decoded.at(-1),'first-LAST');
     assert.equal(h.asks.length,1);assert.equal(h.playback.length,1);
   }finally{h.cleanup();}
 });
@@ -604,12 +605,12 @@ for(const action of ['mute','close']) {
   test(`${action} during silent-buffer rollover prevents automatic reopening`,async()=>{
     const h=harness();
     try {
-      await h.open();h.tick(16000);
+      await h.open();h.tick(16000);const count=h.recordings.length;
       if(action==='mute') h.nodes.get('sageVoiceMic').emit('click');
       else h.root.SageVoice.close();
       await delay(30);
-      assert.equal(h.recordings.length,1);
-      assert.equal(h.recordings[0].state,'inactive');
+      assert.equal(h.recordings.length,count,'the silence rotation cannot reopen after mute or close');
+      assert.ok(h.recordings.every(r=>r.state==='inactive'));
       assert.equal(h.requests.length,0);
     } finally {h.cleanup();}
   });
@@ -967,7 +968,7 @@ test('first PCM words are buffered through delayed Live setup and committed once
     await h.open();await until(()=>h.worklets.length===1 && h.sockets[0].sent.length===1);
     const ws=h.sockets[0];h.worklets[0].frame();
     assert.equal(h.nodes.get('sageVoiceState').textContent,'Connecting…');
-    assert.match(h.nodes.get('sageVoiceInstruction').textContent,/First words are kept/);
+    assert.match(h.nodes.get('sageVoiceInstruction').textContent,/Wait for Listening/);
     assert.equal(ws.sent.filter(m=>m.realtimeInput?.audio).length,0);
     ws.message({setupComplete:{}});await until(()=>ws.sent.some(m=>m.realtimeInput?.audio));
     await until(()=>h.nodes.get('sageVoiceState').textContent==='Listening…');
@@ -985,7 +986,7 @@ test('slow first worklet startup visibly waits and submits the whole recording o
   let ready;const h=harness({live:true,loud:true,addModule:()=>new Promise(resolve=>{ready=resolve;})});
   try {await h.open();
     assert.equal(h.nodes.get('sageVoiceState').textContent,'Connecting…');
-    assert.match(h.nodes.get('sageVoiceInstruction').textContent,/mic is recording/);
+    assert.match(h.nodes.get('sageVoiceInstruction').textContent,/Warming up audio/);
     h.tick(200);ready();await until(()=>h.worklets.length===1);
     h.worklets[0].frame();await until(()=>h.nodes.get('sageVoiceState').textContent==='Listening…');
     assert.match(h.nodes.get('sageVoiceInstruction').textContent,/after your pause/);
@@ -1069,6 +1070,8 @@ test('waitingForInput expects more speech and does not end a still-speaking turn
 test('Live failure uses the same full recording and avoids another unavailable connection',async()=>{
   const h=harness({live:true});try{await h.open();await until(()=>h.worklets.length===1);
     h.sockets[0].message({error:{message:'Access unavailable'}});await delay(15);
+    h.worklets[0].onprocessorerror();
+    await until(()=>h.nodes.get('sageVoiceState').textContent==='Listening…');
     await h.finish();await until(()=>h.recordings.length===2);
     assert.equal(h.decoded[0],'first-LAST');assert.deepEqual(h.asks,['நேத்து petrol போட்டேன் bro']);
     assert.equal(h.sockets.length,1);assert.equal(h.root.SageVoice.isOpen(),true);
@@ -1572,5 +1575,54 @@ test('quiet fragmented onset survives leading silence without requiring a second
   h.sockets[0].message({serverContent:{inputTranscription:{text:'Hello'},generationComplete:true}});
   await until(()=>/Hello/.test(h.nodes.get('sageVoiceCaption').innerHTML));
   mic.frame(0);h.tick(100);h.tick(650);await until(()=>h.asks.length===1);assert.deepEqual(h.asks,['Hello']);
+ }finally{h.cleanup();}
+});
+
+test('slow audio warm-up remains Connecting past the old deadline without submitting startup noise',async()=>{
+ let ready;const checked=[];
+ const h=harness({live:true,loud:true,recordedSpeech:false,checkedRecordings:checked,addModule:()=>new Promise(resolve=>{ready=resolve;})});
+ try{
+  await h.open();h.tick(100);h.tick(200);h.analysers[0].sample=128;h.tick(100);h.tick(1000);
+  await delay(1800);h.tick(1000);
+  assert.equal(h.nodes.get('sageVoiceState').textContent,'Connecting…');assert.equal(h.recordings.length,1);assert.equal(h.requests.length,0);
+  h.nodes.get('sageVoiceOrb').emit('click');assert.equal(h.recordings[0].state,'recording');
+  assert.match(h.nodes.get('sageVoiceHint').textContent,/Wait for Listening/);
+  ready();await until(()=>h.worklets.length===1);const mic=h.worklets[0];mic.frame(0);h.tick(100);h.tick(650);
+  await until(()=>checked.length===1);assert.equal(h.recordings.length,1);assert.equal(h.nodes.get('sageVoiceState').textContent,'Listening…');
+  mic.frame();h.tick(100);h.sockets.at(-1).message({serverContent:{inputTranscription:{text:'Hello'},generationComplete:true}});
+  // A cold recorded-prefix gap intentionally uses full-audio STT, so the Live
+  // socket may be closed. Readiness and capture still stay on the original mic.
+  assert.equal(h.streams.length,1);
+ }finally{h.cleanup();}
+});
+test('speech cannot auto-submit while Live setup is Connecting; it submits once after ready',async()=>{
+ const h=harness({live:true,autoSetup:false,liveEnd:ws=>ws.message({serverContent:{inputTranscription:{text:'Hello'}}})});
+ try{
+  await h.open();await until(()=>h.worklets.length===1&&h.sockets[0].sent.length);const mic=h.worklets[0];
+  mic.frame();h.tick(100);mic.frame(0);h.tick(100);h.tick(1000);
+  assert.equal(h.recordings[0].state,'recording');assert.equal(h.nodes.get('sageVoiceState').textContent,'Connecting…');assert.equal(h.asks.length,0);
+  h.sockets[0].message({setupComplete:{}});await until(()=>h.nodes.get('sageVoiceState').textContent==='Listening…');
+  h.tick(100);await until(()=>h.asks.length===1);assert.deepEqual(h.asks,['Hello']);
+ }finally{h.cleanup();}
+});
+test('failed warm-up validation pauses explicitly instead of reconnecting in a loop',async()=>{
+ let ready;const h=harness({live:true,loud:true,addModule:()=>new Promise(resolve=>{ready=resolve;})});
+ try{
+  h.root.SageTranscription.hasSpeech=async()=>{throw new Error('Detector failed');};
+  await h.open();h.tick(100);h.tick(200);h.analysers[0].sample=128;h.tick(100);ready();await until(()=>h.worklets.length===1);
+  h.worklets[0].frame(0);h.tick(100);h.tick(650);await until(()=>h.nodes.get('sageVoiceMic').getAttribute('aria-pressed')==='true');
+  assert.match(h.nodes.get('sageVoiceHint').textContent,/warm-up could not finish/);h.tick(15000);await delay(20);
+  assert.equal(h.recordings.length,1);assert.equal(h.requests.length,0);assert.equal(h.root.SageVoice.isOpen(),true);
+ }finally{h.cleanup();}
+});
+
+
+test('recorded fallback silence keeps the same microphone and readiness instead of cycling startup',async()=>{
+ const h=harness({live:true});try{
+  await h.open();await until(()=>h.worklets.length===1);h.worklets[0].onprocessorerror();
+  await until(()=>h.nodes.get('sageVoiceState').textContent==='Listening…');h.phases.length=0;
+  for(let i=0;i<4;i++){h.tick(15000);await delay(10);}
+  assert.equal(h.streams.length,1);assert.equal(h.worklets.length,1);assert.equal(h.sockets.length,1);
+  assert.equal(h.recordings.length,5);assert.deepEqual(h.phases,[]);assert.equal(h.asks.length,0);
  }finally{h.cleanup();}
 });
