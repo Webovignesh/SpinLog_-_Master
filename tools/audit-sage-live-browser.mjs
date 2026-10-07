@@ -21,7 +21,7 @@ const server=http.createServer(async(req,res)=>{
   if(!file.startsWith(root+path.sep)){res.writeHead(403).end();return;}
   try{let data=await readFile(file);
     if(rel==='index.html')data=data.toString().replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace('</body>',
-      '<script src="src/js/sage-transcription.js?v=1.9.41"></script><script src="src/js/sage-voice.js?v=1.9.41"></script></body>');
+      '<script src="src/js/sage-transcription.js?v=1.9.42"></script><script src="src/js/sage-voice.js?v=1.9.42"></script></body>');
     res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.css':'text/css'})[path.extname(file)]||'application/octet-stream');res.end(data);
   }catch{res.writeHead(404).end();}
 });
@@ -55,6 +55,7 @@ try{
         if(value.realtimeInput?.audio){this.packets.push(value.realtimeInput.audio);
           (this.byTurn[this.turn] ||= []).push(value.realtimeInput.audio);this.turnPackets++;
           if(this.turnPackets===6 && this.turn<6){
+            if(this.turn<5)window.testMicGain.gain.value=0; // a real pause, not a provider shortcut
             this.message({serverContent:{interimInputTranscription:{text:this.turn%2?'tell me more':'hello there'}}});
             if(this.turn<5)setTimeout(()=>this.message({serverContent:{inputTranscription:{text:this.turn%2?'tell me more':'hello there'},generationComplete:true}}),50);
           }
@@ -81,27 +82,32 @@ try{
   await page.goto(base,{waitUntil:'domcontentloaded'});
   await page.evaluate(()=>{
     document.querySelectorAll('main section').forEach(s=>s.classList.toggle('active',s.id==='sage'));document.getElementById('sage').style.display='block';
-    window.readiness=[];window.visuals=[];
+    window.readiness=[];window.visuals=[];window.autoMic=false;window.startedTurn=0;
     const status=document.getElementById('sageVoiceState'),orb=document.getElementById('sageVoiceOrb');
-    new MutationObserver(()=>readiness.push(status.textContent)).observe(status,{childList:true});
+    new MutationObserver(()=>{
+      readiness.push(status.textContent);
+      if(autoMic && status.textContent==='Listening…' && ears[0].turn>startedTurn && ears[0].turn<7){
+        startedTurn=ears[0].turn;setTimeout(()=>{testMicGain.gain.value=1;},120);
+      }
+    }).observe(status,{childList:true});
     new MutationObserver(()=>visuals.push({mode:orb.dataset.voiceMode,level:Number(orb.style.getPropertyValue('--sage-voice-level')),
       transform:getComputedStyle(orb.querySelector('.sage-voice-core')).transform})).observe(orb,{attributes:true,attributeFilter:['style']});
   });
   await page.locator('#sageChatMic').click();
-  await page.waitForFunction(()=>document.getElementById('sageVoiceState').textContent==='I’m listening');
+  await page.waitForFunction(()=>document.getElementById('sageVoiceState').textContent==='Listening…');
   await page.waitForTimeout(1000);
   assert.deepEqual(await page.evaluate(()=>({asks:asks.length,requests:requests.length,packets:ears[0].packets.length})),
     {asks:0,requests:0,packets:0},'cold boot silence never starts recognition processing or replies');
-  await page.evaluate(()=>{testMicGain.gain.value=1;});
-  await page.waitForFunction(()=>asks.length>=5&&document.getElementById('sageVoiceState').textContent==='I’m listening',{},{timeout:15000});
+  await page.evaluate(()=>{autoMic=true;testMicGain.gain.value=1;});
+  await page.waitForFunction(()=>asks.length>=5&&document.getElementById('sageVoiceState').textContent==='Listening…',{},{timeout:30000});
   await page.waitForFunction(()=>ears[0]?.byTurn[5]?.length>=6);
   await page.locator('#sageVoiceOrb').click();
-  await page.waitForFunction(()=>asks.length===6&&document.getElementById('sageVoiceState').textContent==='I’m listening');
+  await page.waitForFunction(()=>asks.length===6&&document.getElementById('sageVoiceState').textContent==='Listening…');
   await page.waitForFunction(()=>ears[0]?.byTurn[6]?.length>=6);
   await page.locator('#sageVoiceOrb').click();
-  await page.waitForFunction(()=>asks.length===7&&document.getElementById('sageVoiceState').textContent==='I’m listening');
+  await page.waitForFunction(()=>asks.length===7&&document.getElementById('sageVoiceState').textContent==='Listening…');
   const result=await page.evaluate(()=>({asks,requests,ears:ears.map(e=>({sent:e.sent,packets:e.packets,byTurn:e.byTurn,readyState:e.readyState})),browserStarts,readiness,visuals}));
-  assert.ok(result.readiness.includes('Starting audio…'),'cold startup is visible before real PCM arrives');
+  assert.ok(result.readiness.includes('Connecting…'),'cold startup is visible before real PCM arrives');
   assert.ok(result.readiness.includes('Connecting…'),'live setup wait is visible while the first audio is buffered');
   assert.ok(result.visuals.some(v=>v.mode==='listening'&&v.level>.02),'real microphone samples animate the orb');
   assert.ok(result.visuals.some(v=>v.mode==='speaking'&&v.level>.02),'real reply playback animates the orb');

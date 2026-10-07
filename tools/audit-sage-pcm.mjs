@@ -34,6 +34,20 @@ const utterance=new Int16Array(fixtureBytes.buffer.slice(fixtureBytes.byteOffset
 // Run the production full-recording validator with its real WASM detector.
 // VM dynamic import alone is substituted to avoid Node's experimental VM flag.
 const earsSource=await readFile(new URL('../src/js/sage-transcription.js',import.meta.url),'utf8');
+test('offline cache contains the exact worklet and transitive speech-detector URLs',async()=>{
+  const worker=await readFile(new URL('../service-worker.js',import.meta.url),'utf8');
+  const rawWorklet=await readFile(new URL('../src/js/sage-pcm-worklet.js',import.meta.url),'utf8');
+  const cache=vm.runInNewContext(worker.match(/const PRECACHE = (\[[\s\S]*?\]);/)[1],{OFFLINE_URL:'index.html'});
+  const base='https://spinlog.test/src/js/sage-transcription.js';
+  const resolve=(value,from=base)=>{const url=new URL(value,from);return '.'+url.pathname+url.search;};
+  const worklet=earsSource.match(/new URL\('(sage-pcm-worklet[^']+)'/)[1];
+  const detector=earsSource.match(/new URL\('([^']+sage-vad[^']+)'/)[1];
+  const dependency=rawWorklet.match(/^import .* from '([^']+)'/m)[1];
+  assert.ok(cache.includes(resolve(worklet)),'capture module is available offline');
+  assert.ok(cache.includes(resolve(detector)),'full-recording detector is available offline');
+  assert.ok(cache.includes(resolve(dependency,new URL(worklet,base))),'worklet detector import survives an old-cache purge');
+  assert.equal(resolve(dependency,new URL(worklet,base)),resolve(detector),'both recognition paths use the same detector release');
+});
 const ears={document:{},self:null,createSpeechDetector,DataView,Int16Array};ears.self=ears;
 vm.runInNewContext(earsSource.replace('import(detectorURL)','Promise.resolve({createSpeechDetector:root.createSpeechDetector})'),ears);
 function wav(pcm) {

@@ -15,7 +15,7 @@ const server=http.createServer(async(req,res)=>{
   if(!file.startsWith(root+path.sep)){res.writeHead(403).end();return;}
   try{let data=await readFile(file);
     if(rel==='index.html')data=data.toString().replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace('</body>',
-      '<script src="src/js/sage-transcription.js?v=1.9.41"></script><script src="src/js/sage-voice.js?v=1.9.41"></script></body>');
+      '<script src="src/js/sage-transcription.js?v=1.9.42"></script><script src="src/js/sage-voice.js?v=1.9.42"></script></body>');
     res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.css':'text/css'})[path.extname(file)]||'application/octet-stream');res.end(data);
   }catch{res.writeHead(404).end();}
 });
@@ -89,19 +89,19 @@ try{
       const result=await page.evaluate(()=>({requests:requests.length,asks:asks.length,history:historyRows.length,modes,state:document.getElementById('sageVoiceState').textContent}));
       assert.deepEqual([result.requests,result.asks,result.history],[0,0,0],'startup noise is checked locally, never uploaded or answered');
       assert.ok(!result.modes.includes('Processing…'),'no silent startup processing flash');
-      assert.equal(result.state,'I’m listening');
+      assert.equal(result.state,'Listening…');
     }else{
-      await page.waitForFunction(()=>asks.length===1&&document.getElementById('sageVoiceState').textContent==='I’m listening',null,{timeout:10000});
+      await page.waitForFunction(()=>asks.length===1&&document.getElementById('sageVoiceState').textContent==='Listening…',null,{timeout:10000});
       const result=await page.evaluate(()=>({requests,asks,history:historyRows.length,outputStarts,modes}));
       assert.deepEqual(result.asks,['Hello']);assert.equal(result.history,2);assert.equal(result.outputStarts,1,'actual audio is scheduled once');
       assert.equal(result.requests.length,3,'one STT request and bounded same-speaker speech recovery');
-      assert.ok(result.modes.includes('Speaking'));
+      assert.ok(result.modes.includes('Replying…'));
       assert.match(result.requests[1].url,/:streamGenerateContent/);assert.match(result.requests[2].url,/:generateContent$/);
       assert.deepEqual(result.requests[2].body,result.requests[1].body);
       const recording=Buffer.from(result.requests[0].body.contents[0].parts[0].inlineData.data,'base64');
       assert.ok(recording.length>32000,'complete recording contains the first word before the worklet is ready');
       await page.evaluate(async()=>{failStream=false;interruptOutput=true;await SageVoice.sendVoiceText('Tell me more');});
-      await page.waitForFunction(()=>document.getElementById('sageVoiceState').textContent==='I’m listening');
+      await page.waitForFunction(()=>document.getElementById('sageVoiceState').textContent==='Listening…');
       assert.deepEqual(await page.evaluate(()=>[asks.length,historyRows.length,outputStarts,requests.length,audioContexts[0].state]),
         [2,4,2,4,'running'],'a real context suspended during synthesis resumes and plays without another API request');
     }

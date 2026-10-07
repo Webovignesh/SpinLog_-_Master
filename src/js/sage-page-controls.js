@@ -17,6 +17,20 @@
   ];
   const $ = id => document.getElementById(id);
   const modalClosers = {serviceEditModal:'serviceEditClose',docAddModal:'docAddClose',coverEditModal:'coverEditClose',historicNotesModal:'historicNotesCancel',parkHistoryModal:'parkHistoryClose',sageSettingsModal:null};
+  const ownedDialogs = new Set([...Object.keys(modalClosers),'docsPlayer']);
+  const handles = new WeakMap(), targets = new Map(); let nextHandle = 0;
+  function scope() {
+    const modal = activeModal();
+    return modal ? ownedDialogs.has(modal.id) ? modal : null : document.querySelector('main section.active');
+  }
+  function sensitive(el) {
+    return ['password','file'].includes(el.type) || /(?:password|apikey|keyinput|vaultpass|keyring|vault|credential)/i.test(el.id || '')
+      || !!el.closest('#sageVoiceOverlay,#sageKeyRing,#sageVaultPanel');
+  }
+  function handle(el) {
+    if (!handles.has(el)) handles.set(el,`control-${++nextHandle}`);
+    const id = handles.get(el); targets.set(id,el); return id;
+  }
   const normalize = value => String(value).trim().toLowerCase().replace(/\s+/g,' ');
   const aliases = {odo:['odometer','odo','odo (km)'],cost:['cost','amount'],date:['date','service date'],nextDue:['next due','next due date'],notes:['notes']};
   const named = (el,id,text) => [label(el,id),...(aliases[el.name] || [])].some(name => normalize(name) === normalize(text));
@@ -34,6 +48,10 @@
     for (const name of ['date','nextDue','odo','cost','notes']) {
       const el = document.querySelector(`#serviceEntryForm [name="${name}"]`);
       if (el) map.set(`serviceEntryForm.${name}`,el);
+    }
+    for (const el of scope()?.querySelectorAll?.('input,textarea,select') || []) {
+      if (sensitive(el) || el.type === 'hidden' || el.closest('#sageChatInput')) continue;
+      if (![...map.values()].includes(el)) map.set(el.id || handle(el),el);
     }
     return map;
   }
@@ -69,15 +87,80 @@
     return {field:id,label:label(el,id),type:options ? 'dropdown' : el.type || 'text',value:el.value,
       form:el.closest('form,[role="dialog"]')?.id || document.querySelector('main section.active')?.id,
       required:!!el.required,editable:editable(el),
+      ...(['checkbox','radio'].includes(el.type) ? {checked:!!el.checked} : {}),
       ...(options ? {options:options.map(({value,label}) => ({value,label}))} : {}),
       ...(el.min ? {min:el.min} : {}),...(el.max ? {max:el.max} : {}),
       ...(el.maxLength > 0 ? {maxLength:el.maxLength} : {})};
   }
   function inspect() {
     return {ok:true,section:document.querySelector('main section.active')?.id || null,
+      dialog:activeModal()?.id || null,
       fields:[...fields()].filter(([,el]) => visible(el)).map(([id,el]) => descriptor(id,el)),
       actions:availableActions(),
-      note:'These are the live visible controls. Form fields are drafts until saved through the existing data tools or form. Files must be chosen by the user. Never claim a draft was saved.'};
+      controls:controls(),scrollDirections:['up','down','left','right','top','bottom'],
+      note:'These are the live visible controls. Record forms are drafts until saved through the existing data tools or form; settings and filter handlers may apply immediately. Files must be chosen by the user. Never claim a draft was saved.'};
+  }
+  function controls() {
+    for (const [id,el] of targets) if (!el.isConnected) targets.delete(id);
+    const list = [];
+    for (const el of scope()?.querySelectorAll?.('button,a[href],[role="button"],input[type="checkbox"],input[type="radio"],input[type="range"]') || []) {
+      if (sensitive(el) || !visible(el) || el.disabled || el.getAttribute('aria-disabled') === 'true') continue;
+      if (el.tagName === 'A' && el.getAttribute('href') && !el.getAttribute('href').startsWith('#')) continue;
+      // Pickers and app confirmations keep their real gesture. Data tools own
+      // confirmed deletes and report actual persistence, rather than a click.
+      if (/confirm|hold|file|upload|key|vault|(?:pick|import)$/i.test(el.id || '') || el.closest('[data-confirmation]')) continue;
+      const text = (el.getAttribute('aria-label') || el.getAttribute('title') || el.textContent || '').trim().replace(/\s+/g,' ').slice(0,120);
+      if (text) list.push({control:handle(el),label:text,type:el.type || el.getAttribute('role') || 'button',
+        ...(el.type === 'range' ? {field:el.id || handle(el),value:el.value,min:el.min,max:el.max,step:el.step} : {})});
+    }
+    return list;
+  }
+  function painted() {
+    return new Promise(resolve=>{
+      const timer=root.setTimeout(resolve,180);
+      root.requestAnimationFrame(()=>root.requestAnimationFrame(()=>{root.clearTimeout(timer);resolve();}));
+    });
+  }
+  async function click({control} = {}) {
+    const listed = controls().find(c => c.control === control), el = targets.get(control);
+    if (!listed || !el?.isConnected || !visible(el) || el.disabled) return {ok:false,error:'That control is unavailable. Inspect the current page again.'};
+    const form = el.closest('form');
+    if (el.type === 'submit' && form?.checkValidity && !form.checkValidity()) return {ok:false,error:'Complete the required form fields first.'};
+    root.SageVoice?.minimize?.();
+    el.click();
+    await painted();
+    return {ok:true,activated:listed.label,submitted:el.type === 'submit',
+      note:'The existing control was activated. This alone does not confirm a saved record, upload or deletion.',page:inspect()};
+  }
+  function scroll({direction,target:control} = {}) {
+    if (!['up','down','left','right','top','bottom'].includes(direction)) return {ok:false,error:'Choose up, down, left, right, top or bottom.'};
+    if (!scope()) return {ok:false,error:'Finish the current confirmation or dialog first.'};
+    let node = control ? targets.get(control) : scope();
+    if (!node || control && !controls().some(c=>c.control===control)) return {ok:false,error:'Inspect the current page for a valid scroll target.'};
+    if (control && !visible(node)) return {ok:false,error:'That target is hidden.'};
+    while (node && node !== document.scrollingElement) {
+      const css = getComputedStyle(node);
+      if (/(auto|scroll)/.test(css.overflowY+css.overflowX) && (node.scrollHeight>node.clientHeight || node.scrollWidth>node.clientWidth)) break;
+      node = node.parentElement;
+    }
+    node ||= document.scrollingElement;
+    if (!node?.scrollTo) return {ok:false,error:'This page cannot scroll.'};
+    const top=node.scrollTop,left=node.scrollLeft,step=Math.max(160,(node.clientHeight || root.innerHeight)*.7);
+    const nextTop=direction==='top'?0:direction==='bottom'?node.scrollHeight:top+(direction==='down'?step:direction==='up'?-step:0);
+    const nextLeft=left+(direction==='right'?step:direction==='left'?-step:0);
+    root.SageVoice?.minimize?.();
+    node.scrollTo({top:nextTop,left:nextLeft,behavior:root.dkReduceMotion?.()?'auto':'smooth'});
+    return {ok:true,direction,requested:true,note:'Scroll requested on the visible page or dialog. At its boundary it may not move.'};
+  }
+  async function highlight(el, isCancelled = () => false) {
+    if (!el || !visible(el) || isCancelled()) return {ok:false,error:'The record is not visible.'};
+    root.SageVoice?.minimize?.();
+    await painted();
+    if (!el.isConnected || !visible(el) || isCancelled()) return {ok:false,error:'Showing the record was cancelled or the page changed.'};
+    document.querySelectorAll('.sage-focus-target').forEach(node=>node.classList.remove('sage-focus-target'));
+    el.classList.add('sage-focus-target');
+    el.scrollIntoView({behavior:root.dkReduceMotion?.()?'auto':'smooth',block:'center'});
+    return {ok:true,highlighted:true};
   }
   function actionTarget(action) {
     const section = document.querySelector('main section.active')?.id;
@@ -97,6 +180,10 @@
   }
   function validate(el,value) {
     if (typeof value !== 'string' || value.length > 2000) throw new Error('Use a string of at most 2000 characters.');
+    if (['checkbox','radio'].includes(el.type)) {
+      if (!['true','false'].includes(value)) throw new Error('Use true or false for this switch.');
+      return {value:el.value,checked:value==='true'};
+    }
     const options = choices(el);
     if (options) {
       const exact = options.find(option => option.value === value);
@@ -131,17 +218,18 @@
       if (!visible(item.el) || !editable(item.el)) {
         return {ok:false,error:`${item.id} became unavailable after an earlier change.`,changed,saved:false};
       }
-      if (customMenus[item.el.id]) item.option.click();
+      if (item.checked !== undefined) { if (item.el.checked !== item.checked) item.el.click(); }
+      else if (customMenus[item.el.id]) item.option.click();
       else {
         item.el.value = item.value;
         item.el.dispatchEvent(new Event('input',{bubbles:true}));
         item.el.dispatchEvent(new Event('change',{bubbles:true}));
       }
-      if (item.el.value !== item.value) return {ok:false,error:`${item.id} did not accept the value.`,changed,saved:false};
+      if (item.el.value !== item.value || item.checked !== undefined && item.el.checked !== item.checked) return {ok:false,error:`${item.id} did not accept the value.`,changed,saved:false};
       changed.push(descriptor(item.id,item.el));
     }
     root.SageVoice?.minimize?.();
-    return {ok:true,changed,saved:false,note:'The visible fields/dropdowns changed. Form details are filled for review, not submitted or saved.'};
+    return {ok:true,changed,saved:false,note:'The existing input/change handlers ran. Settings, switches and filters may apply immediately. Record forms remain drafts; no record was submitted.'};
   }
   async function openForm({form} = {}) {
     const section = {service_entry:'service',document_upload:'docs'}[form];
@@ -200,12 +288,16 @@
     if (intent(raw)) return true;
     const select = text.match(/^(?:select|choose)\s+(.+)$/i);
     if (select) return [...fields()].some(([,el]) => (choices(el) || []).some(choice => normalize(choice.label) === normalize(select[1]) || normalize(choice.value) === normalize(select[1])));
-    const set = text.match(/^(?:set|fill|enter|change)\s+(?:the )?(.+?)\s+(?:to|with|as)\s+(.+)$/i);
+    const set = text.match(/^(?:set|fill|enter|change|slide|move|type)\s+(?:the )?(.+?)\s+(?:to|with|as)\s+(.+)$/i);
     if (!set) return false;
     return [...fields()].some(([id,el]) => named(el,id,set[1]));
   }
   function intent(raw) {
     const text = commandText(raw);
+    const movement = text.match(/^scroll (?:the )?(?:page |site )?(up|down|left|right|(?:to (?:the )?)?top|(?:to (?:the )?)?bottom)$/i);
+    if (movement) return {name:'scroll_page',direction:movement[1].replace(/^to (?:the )?/i,'').toLowerCase()};
+    const press = text.match(/^(?:click|press|tap) (?:the )?(.+?)(?: button)?$/i);
+    if (press) { const matches=controls().filter(c=>normalize(c.label)===normalize(press[1]));if(matches.length===1)return {name:'click_page_control',control:matches[0].control}; }
     const form = text.match(/^open (?:the )?(service (?:entry )?form|(?:add )?document (?:upload )?form)$/i);
     if (form) return {name:'open_page_form',form:/^service/i.test(form[1]) ? 'service_entry' : 'document_upload'};
     const action = {'show filters':'show_filters','hide filters':'hide_filters','clear filters':'clear_filters','next results':'next_results','previous results':'previous_results','open search':'open_search','close search':'close_search','close form':'close_form','close the form':'close_form','close settings':'close_form'}[text.toLowerCase()];
@@ -218,13 +310,13 @@
       }
       if (matches.length === 1) return {name:'fill_page_fields',fields:matches};
     }
-    const set = text.match(/^(?:set|fill|enter|change)\s+(?:the )?(.+?)\s+(?:to|with|as)\s+(.+)$/i);
+    const set = text.match(/^(?:set|fill|enter|change|slide|move|type)\s+(?:the )?(.+?)\s+(?:to|with|as)\s+(.+)$/i);
     if (!set) return null;
     const matches = [...fields()].filter(([id,el]) => visible(el) && editable(el) && named(el,id,set[1]));
     if (matches.length !== 1) return null;
     const [id,el] = matches[0];
     const value = set[2].replace(/^(?:"([\s\S]*)"|'([\s\S]*)')$/,(_,double,single) => double ?? single);
-    try { return {name:'fill_page_fields',fields:[{field:id,value:validate(el,value).value}]}; } catch { return null; }
+    try { return {name:'fill_page_fields',fields:[{field:id,value:['checkbox','radio'].includes(el.type) ? value : validate(el,value).value}]}; } catch { return null; }
   }
-  root.SagePageControls = {inspect,fill,openForm,action,intent,canHandle};
+  root.SagePageControls = {inspect,fill,openForm,action,intent,canHandle,click,scroll,highlight};
 })(typeof self !== 'undefined' ? self : this);

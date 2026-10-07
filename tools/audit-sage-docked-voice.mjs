@@ -23,11 +23,20 @@ assert.ok(dateStart>=0 && dropdownEnd>dropdownStart && modsEnd>modsStart);
 const docStart=appSource.indexOf('function setupDocAddFlow()'),docEnd=appSource.indexOf('function describeExistingDocCard(',docStart);
 const typesStart=appSource.indexOf('const VEHICLE_TYPES = ['),typesEnd=appSource.indexOf('];',typesStart)+2;
 assert.ok(docStart>=0 && docEnd>docStart && typesStart>=0);
-const routerSource=`(function(){function ensureSectionData(){}; ${appSource.slice(routerStart,routerEnd)}
-  window.dkApp=({${appSource.slice(methodStart,methodEnd)}}); ${appSource.slice(hashStart,hashEnd)}
+const pagerStart=appSource.indexOf('window.dkPager = function'),pagerEnd=appSource.indexOf('\n};',pagerStart)+4;
+const serviceStart=appSource.indexOf('  let serviceEntries = []'),serviceEnd=appSource.indexOf('  // Load entries from Supabase',serviceStart);
+const listStart=appSource.indexOf('    async listServices('),listEnd=appSource.indexOf('    async getCover(',listStart);
+const editorStart=appSource.indexOf('  let svcEditing = null'),editorEnd=appSource.indexOf('  async function saveServiceEditor(',editorStart);
+assert.ok(pagerStart>=0&&serviceStart>=0&&editorStart>=0);
+const serviceSource=appSource.slice(serviceStart,serviceEnd).replace('let serviceEntries = []',`let serviceEntries = [...Array.from({length:55},(_,i)=>({id:i+1,date:'2026-10-01',type:'Mods/Updates',cost:100,odo:1000,notes:'Small update'})),{id:90,date:'2020-01-01',type:'Mods/Updates',cost:9000,odo:2000,notes:'Exhaust'}]`);
+const routerSource=`${appSource.slice(pagerStart,pagerEnd)} (function(){function ensureSectionData(){}; ${appSource.slice(routerStart,routerEnd)}
+  function postToSW(){};function okISO(s){return /^\\d{4}-\\d{2}-\\d{2}$/.test(s);}
+  ${serviceSource} ${appSource.slice(editorStart,editorEnd)}
+  window.dkApp=({${appSource.slice(listStart,listEnd)} ${appSource.slice(methodStart,methodEnd)}}); ${appSource.slice(hashStart,hashEnd)}
 ${appSource.slice(dateStart,dateEnd)} ${appSource.slice(dropdownStart,dropdownEnd)} ${appSource.slice(modsStart,modsEnd)}
   ${appSource.slice(typesStart,typesEnd)} ${appSource.slice(docStart,docEnd)}
-  setupDateUI(); setupServiceEntryTypeDropdown(); setupDocAddFlow();
+  setupDateUI(); setupServiceEntryTypeDropdown(); setupDocAddFlow();setupServiceHistoryFilters();renderServiceTable();
+  document.getElementById('serviceEditClose').onclick=closeServiceEditor;
 })(); ${appSource.slice(backStart,backEnd)}`;
 await mkdir(output,{recursive:true});
 const server=http.createServer(async(req,res)=>{
@@ -37,7 +46,7 @@ const server=http.createServer(async(req,res)=>{
   try {
     let data=await readFile(file);
     if(rel==='index.html')data=data.toString().replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace('</body>',
-      ['date-picker','sage-page-controls','sage-tools','sage-ai','sage-transcription','sage-voice'].map(n=>`<script src="src/js/${n}.js?v=1.9.41"></script>`).join('')+'<script src="/audit-router.js"></script></body>');
+      ['date-picker','sage-page-controls','sage-tools','sage-ai','sage-transcription','sage-voice'].map(n=>`<script src="src/js/${n}.js?v=1.9.42"></script>`).join('')+'<script src="/audit-router.js"></script></body>');
     res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.css':'text/css'})[path.extname(file)]||'application/octet-stream');res.end(data);
   }catch {res.writeHead(404).end();}
 });
@@ -64,7 +73,9 @@ try {
     };
     const pcm=new Int16Array(2400);for(let i=0;i<pcm.length;i++)pcm[i]=Math.sin(i/6)*5000;
     const data=btoa(String.fromCharCode(...new Uint8Array(pcm.buffer)));
-    window.fetch=async()=>{audioRequests++;return {ok:true,json:async()=>({candidates:[{content:{parts:[{inlineData:{data,mimeType:'audio/L16;rate=24000'}}]}}]})};};
+    const longPCM=new Int16Array(48000);for(let i=0;i<longPCM.length;i++)longPCM[i]=Math.sin(i/6)*5000;
+    const longData=btoa(String.fromCharCode(...new Uint8Array(longPCM.buffer)));
+    window.fetch=async()=>{audioRequests++;const sound=window.longReply?longData:data;window.longReply=false;return {ok:true,json:async()=>({candidates:[{content:{parts:[{inlineData:{data:sound,mimeType:'audio/L16;rate=24000'}}]}}]})};};
   });
   for(const [name,width,height] of [['desktop',1280,900],['mobile',390,844],['small',320,568]]) {
     await page.setViewportSize({width,height});await page.goto(base,{waitUntil:'domcontentloaded'});
@@ -72,7 +83,11 @@ try {
       const localAsk=SageAI.askSage;
       SageAI.availableKeys=()=>[{key:'test-only'}];
       SageAI.getKeys=SageAI.availableKeys;
-      SageAI.askSage=(text,opts)=>(SageTools.uiPlan(text)||SageTools.uiIntent(text)||SagePageControls.intent(text))?localAsk(text,opts):Promise.resolve({ok:true,text:'I’m here. Keep talking.'});
+      SageAI.askSage=async(text,opts)=>{
+        if(/costliest mod/i.test(text)){window.longReply=true;window.testRecordContext={userText:text,voice:true,isCancelled:opts.isCancelled};
+          window.testRecordRead=await SageTools.run('list_services',{limit:1},testRecordContext);
+          return {ok:true,text:'Your exhaust cost 9,000 rupees. That was your costliest mod.'};}
+        return (SageTools.uiPlan(text)||SageTools.uiIntent(text)||SagePageControls.intent(text))?localAsk(text,opts):Promise.resolve({ok:true,text:'I’m here. Keep talking.'});};
       window.SageUI={open(){document.getElementById('testSettings').hidden=false;},isOpen(){return !document.getElementById('testSettings').hidden;}};
       const button=document.createElement('button');button.id='testPageButton';button.textContent='Page action';
       button.style.cssText='position:fixed;left:20px;top:120px;z-index:1100';button.onclick=()=>{window.pageClicked=true;};document.body.append(button);
@@ -83,10 +98,54 @@ try {
       dkApp.goToSection({section:'sage'});
     });
     await page.locator('#sageChatMic').click();
-    await page.waitForFunction(()=>document.getElementById('sageVoiceState').textContent==='I’m listening');
+    await page.waitForFunction(()=>document.getElementById('sageVoiceState').textContent==='Listening…');
     const initial=await page.evaluate(()=>({captures:captureRequests,setup:ears.length}));
+    await page.evaluate(()=>SageVoice.sendVoiceText('open service'));
+    await page.evaluate(()=>{
+      const box=document.createElement('div');box.id='fixtureControls';
+      box.innerHTML='<button id="fixtureAction" type="button">Inspect totals</button><label>Volume<input id="fixtureVolume" type="range" min="0" max="1" step="0.1" value="0.5"></label><label>Use lights<input id="fixtureLights" type="checkbox"></label><label>Quick note<textarea></textarea></label>';
+      document.getElementById('service').append(box);
+      document.getElementById('fixtureAction').onclick=()=>{window.fixtureClicks=(window.fixtureClicks||0)+1;};
+      document.getElementById('fixtureVolume').onchange=()=>{window.fixtureChanged=true;};
+    });
+    const buttons=await page.evaluate(()=>SageAI.askSage('click Inspect totals then slide Volume to 0.7 then set Use lights to true then type Quick note to hello',{voice:true}));
+    assert.equal(buttons.calls.length,4);assert.ok(buttons.calls.every(c=>c.result.ok),JSON.stringify(buttons));
+    assert.equal(await page.evaluate(()=>fixtureClicks),1);assert.equal(await page.evaluate(()=>fixtureChanged),true);
+    assert.equal(await page.locator('#fixtureVolume').inputValue(),'0.7');assert.equal(await page.locator('#fixtureLights').isChecked(),true);
+    assert.equal(await page.locator('#fixtureControls textarea').inputValue(),'hello');
+    const stale=await page.evaluate(()=>{
+      const c=SagePageControls.inspect().controls.find(c=>c.label==='Inspect totals');document.getElementById('fixtureAction').hidden=true;
+      return SageTools.run('click_page_control',{control:c.control},{userText:'click Inspect totals'});
+    });assert.equal(stale.ok,false,'hidden or stale handles cannot click');
+    await page.evaluate(()=>SageAI.askSage('scroll to top',{voice:true}));await page.waitForTimeout(500);
+    const scrollBefore=await page.evaluate(()=>scrollY);await page.evaluate(()=>SageAI.askSage('scroll down',{voice:true}));
+    await page.waitForTimeout(500);assert.ok(await page.evaluate(()=>scrollY)>scrollBefore,'real page scrolling follows the voice command');
+    await page.evaluate(()=>{document.getElementById('serviceHistorySearch').value='not in this record';document.getElementById('serviceHistorySearch').dispatchEvent(new Event('input',{bubbles:true}));});
+    await page.waitForTimeout(200);
+    await page.evaluate(()=>{window.answerPromise=SageVoice.sendVoiceText('What is my costliest mod?');});
+    await page.waitForFunction(()=>document.getElementById('sageVoiceState').textContent==='Replying…');
+    assert.equal(await page.evaluate(()=>SageVoice.isMinimized()),true);
+    assert.equal(await page.locator('.sage-focus-target').getAttribute('data-record-id'),'90','winner beyond page one is revealed');
+    assert.equal(await page.locator('#serviceHistorySearch').inputValue(),'','a filter excluding the answer is cleared');
+    assert.equal(await page.evaluate(()=>testRecordRead.presentation.highlighted),true);
+    await page.waitForFunction(()=>{const r=document.querySelector('.sage-focus-target')?.getBoundingClientRect();return r && r.top<innerHeight && r.bottom>0;},null,{timeout:2500});
+    await page.waitForTimeout(700);
+    const highlight=await page.locator('.sage-focus-target').boundingBox();
+    assert.ok(highlight.y>=70 && highlight.y+highlight.height<=height,'the complete highlighted answer is visible below the header');
+    assert.equal(await page.locator('.sage-focus-target').evaluate(el=>getComputedStyle(el).outlineWidth),'2px');
+    await page.screenshot({path:path.join(output,`${name}-highlight.png`)});
+    await page.evaluate(()=>answerPromise);
+    assert.equal(await page.evaluate(()=>captureRequests),initial.captures,'answer presentation retains the same mic');
+    const edit=await page.evaluate(()=>SageTools.run('show_record',{kind:'service',id:'90',action:'edit'},{...testRecordContext,userText:'edit the exhaust record'}));
+    assert.equal(edit.opened,'service_editor');assert.equal(await page.locator('#serviceEditNotes').inputValue(),'Exhaust');
+    const blockedRecord=await page.evaluate(()=>SageTools.run('show_record',{kind:'service',id:'90'},{...testRecordContext,userText:'show the exhaust record'}));
+    assert.equal(blockedRecord.ok,false,'record presentation preserves open drafts');
+    await page.evaluate(()=>SageAI.askSage('close form',{voice:true}));
+    await page.evaluate(()=>document.getElementById('fixtureControls').remove());
+    await page.evaluate(()=>dkApp.goToSection({section:'sage'}));
+
     await page.evaluate(()=>SageVoice.sendVoiceText('service பேஜ் ஓபன் பண்ணு'));
-    await page.waitForFunction(()=>SageVoice.isMinimized() && document.getElementById('sageVoiceState').textContent==='I’m listening');
+    await page.waitForFunction(()=>SageVoice.isMinimized() && document.getElementById('sageVoiceState').textContent==='Listening…');
     assert.equal(await page.evaluate(()=>document.querySelector('main section.active').id),'service');
     assert.equal(await page.evaluate(()=>location.hash),'#service');
     assert.equal(await page.locator('#sageVoiceOverlay').getAttribute('role'),'region');
@@ -114,7 +173,7 @@ try {
     assert.ok(Math.abs(moved.width-144)<1 && Math.abs(moved.height-172)<1,'larger minimized orb and mode pill stay within the viewport');
     assert.equal(await page.locator('#sageVoiceOverlay button:visible').count(),1,'there is no minimized panel or extra control');
     assert.equal(await page.locator('#sageVoiceState').isVisible(),true,'mode pill is visible');
-    assert.equal(await page.locator('#sageVoiceState').textContent(),'I’m listening');
+    assert.equal(await page.locator('#sageVoiceState').textContent(),'Listening…');
     assert.equal(await page.locator('#sageVoiceOverlay').evaluate(el=>getComputedStyle(el).backdropFilter),'none','the dock does not blur the page');
     assert.equal(Math.round((await page.locator('#sageVoiceOrb').boundingBox()).width),136);
     for(const id of ['sageVoiceLines','sageVoiceEnd','sageVoiceCaption']) assert.equal(await page.locator('#'+id).isVisible(),false,id);
@@ -127,7 +186,7 @@ try {
     await page.evaluate(()=>SageVoice.sendVoiceText('expand voice mode'));
     assert.equal(await page.evaluate(()=>SageVoice.isMinimized()),false);
     await page.evaluate(()=>SageVoice.sendVoiceText('மினிமைஸ் பண்ணு'));
-    await page.waitForFunction(()=>SageVoice.isMinimized() && document.getElementById('sageVoiceState').textContent==='I’m listening');
+    await page.waitForFunction(()=>SageVoice.isMinimized() && document.getElementById('sageVoiceState').textContent==='Listening…');
     await page.evaluate(()=>SageVoice.sendVoiceText('open service form'));
     assert.equal(await page.evaluate(()=>document.querySelector('main section.active').id),'service');
     const compound=await page.evaluate(()=>SageAI.askSage('open service form and select Showroom and set cost to 450 then set notes to "do not forget service_bill_2.pdf"',{voice:true}));
@@ -212,7 +271,7 @@ try {
     for(let i=0;i<5;i++)await page.evaluate(i=>SageVoice.sendVoiceText(`Turn ${i}: சொல்லு டா`),i);
     assert.equal(await page.evaluate(()=>SageVoice.isMinimized()),true);
     assert.equal(await page.evaluate(()=>captureRequests),initial.captures,'six replies keep the same live microphone');
-    await page.waitForFunction(()=>document.getElementById('sageVoiceState').textContent==='I’m listening');
+    await page.waitForFunction(()=>document.getElementById('sageVoiceState').textContent==='Listening…');
     await page.setViewportSize({width:320,height:420});
     const resized=await page.locator('#sageVoiceOverlay').boundingBox();
     assert.ok(resized.x>=12 && resized.y>=12 && resized.x+resized.width<=309 && resized.y+resized.height<=409,'resizing keeps the orb in view');
@@ -226,7 +285,7 @@ try {
     assert.equal(await page.evaluate(()=>SageVoice.isOpen()),false);
     assert.equal(await page.evaluate(()=>ears.every(ws=>ws.readyState===3)),true,'close releases all Live sockets');
     await page.waitForFunction(()=>document.getElementById('sageVoiceOverlay').hidden);
-    console.log(`✓ ${name}: real router/Back, Tamil route/close, continuing call, drag/tap separation, keyboard, page/settings access, larger orb/status pill, real custom/native dropdowns and calendar fields, document draft/close, local Home correction, spoken minimize/expand, Back/Next, upload picker and repeated replies, flash-free close and resize bounds`);
+    console.log(`✓ ${name}: real router/Back, Tamil route/close, continuing call, drag/tap separation, keyboard, page/settings access, larger orb/status pill, live click/type/switch/slider/scroll controls, spoken off-page record highlight/editor, real custom/native dropdowns and calendar fields, document draft/close, local Home correction, spoken minimize/expand, Back/Next, upload picker and repeated replies, flash-free close and resize bounds`);
   }
   assert.deepEqual(errors,[]);console.log('✓ No page errors; provider speech quality is outside this simulated transport audit');
 }finally {await browser?.close();await new Promise(r=>server.close(r));}

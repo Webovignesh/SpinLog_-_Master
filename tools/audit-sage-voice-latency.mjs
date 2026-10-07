@@ -27,6 +27,22 @@ test('English hyphenation and filenames survive the common reply formatter',asyn
   try {assert.equal((await h.AI.askSage('Tell me the plan',{voice:true,tools:false})).text,text);}
   finally{h.cleanup();}
 });
+test('one voice tool context carries read proofs and cancellation across the model turn',async()=>{
+  const contexts=[];let shown=0;
+  const h=harness(async(_url,_init,n)=>n<3 ? {ok:true,json:async()=>({candidates:[{content:{parts:[{functionCall:{name:n===1?'list_services':'show_record',args:n===1?{}:{kind:'service',id:'7'}}}]},finishReason:'STOP'}]})} : answer('Your exhaust was the costliest mod.'));
+  try {
+    vm.runInNewContext(controlsSource,h.root);
+    const original=h.root.SageTools.run;
+    h.root.SageTools.run=(name,args,context)=>{contexts.push(context);return original(name,args,context);};
+    h.root.dkApp={listServices:async()=>({ok:true,records:[{id:7}],mostExpensive:{modsAndUpdates:{records:[{id:7}],cost:9000}}}),
+      showRecord:async()=>{shown++;return {ok:true,highlighted:true};}};
+    const isCancelled=()=>false;
+    const result=await h.AI.askSage('Which mod did I buy?',{voice:true,isCancelled});
+    assert.equal(result.ok,true);assert.equal(shown,1);assert.equal(contexts.length,2);
+    assert.equal(contexts[0],contexts[1]);assert.equal(contexts[1].voice,true);assert.equal(contexts[1].isCancelled,isCancelled);
+    assert.equal(contexts[1].relatedRecords.has('service:7'),true);
+  }finally{h.cleanup();}
+});
 test('explicit compound navigation runs in order locally, before quota and with actual results',async()=>{
   const h=harness(async()=>{throw new Error('No model request expected');});const opened=[];
   try {vm.runInNewContext(controlsSource,h.root);

@@ -53,9 +53,9 @@ try {
   await page.goto(base,{waitUntil:'domcontentloaded'});
   await page.evaluate(()=>{document.querySelectorAll('main section').forEach(s=>s.classList.toggle('active',s.id==='sage'));document.getElementById('sage').style.display='block';});
   await page.locator('#sageChatMic').click();
-  await page.waitForFunction(()=>document.getElementById('sageVoiceState').textContent==='I’m listening');
+  await page.waitForFunction(()=>document.getElementById('sageVoiceState').textContent==='Listening…');
   await page.waitForTimeout(800);await page.evaluate(()=>{testMicGain.gain.value=0;});await page.locator('#sageVoiceOrb').click();
-  await page.waitForFunction(()=>document.getElementById('sageVoiceLines').textContent.includes('say it again') && document.getElementById('sageVoiceState').textContent==='I’m listening');
+  await page.waitForFunction(()=>document.getElementById('sageVoiceLines').textContent.includes('say it again') && document.getElementById('sageVoiceState').textContent==='Listening…');
   const requests=await page.evaluate(()=>recordedRequests);
   assert.equal(requests.length,3,'one bounded server retry plus an alternative model');
   const wav=Buffer.from(requests[0].body.contents[0].parts[0].inlineData.data,'base64');
@@ -63,7 +63,7 @@ try {
   let peak=0;for(let i=44;i<wav.length;i+=2)peak=Math.max(peak,Math.abs(wav.readInt16LE(i)));assert.ok(peak>100,'recording contains real fake-device audio');
   await page.waitForTimeout(2200);
   assert.equal(await page.evaluate(()=>recordedRequests.length),3,'no reconnect/upload loop');
-  assert.equal(await page.locator('#sageVoiceState').textContent(),'I’m listening');
+  assert.equal(await page.locator('#sageVoiceState').textContent(),'Listening…');
   assert.equal(await page.locator('#sageVoiceSTTRetry').count(),0);
   for(const [width,height] of [[390,844],[320,568]]){
     await page.setViewportSize({width,height});
@@ -74,14 +74,14 @@ try {
   await mkdir('/tmp/sage-capture-preview',{recursive:true});await page.screenshot({path:'/tmp/sage-capture-preview/recovery.png'});
   await page.evaluate(()=>{failRecognition=false;testMicGain.gain.value=1;});
   await page.waitForTimeout(600);await page.evaluate(()=>{testMicGain.gain.value=0;});await page.locator('#sageVoiceOrb').click();
-  await page.waitForFunction(()=>replies.length===1 && document.getElementById('sageVoiceState').textContent==='I’m listening');
+  await page.waitForFunction(()=>replies.length===1 && document.getElementById('sageVoiceState').textContent==='Listening…');
   const retry=await page.evaluate(()=>recordedRequests[3]);assert.notEqual(retry.body.contents[0].parts[0].inlineData.data,requests[0].body.contents[0].parts[0].inlineData.data,'a new utterance uses fresh captured audio');
   for(let i=0;i<4;i++){
     await page.evaluate(()=>{testMicGain.gain.value=1;});
     await page.waitForTimeout(600);
     await page.evaluate(()=>{testMicGain.gain.value=0;});
     await page.locator('#sageVoiceOrb').click();
-    await page.waitForFunction(n=>replies.length===n && document.getElementById('sageVoiceState').textContent==='I’m listening',i+2);
+    await page.waitForFunction(n=>replies.length===n && document.getElementById('sageVoiceState').textContent==='Listening…',i+2);
   }
   await page.locator('#sageVoiceEnd').click();
   assert.deepEqual(errors,[]);

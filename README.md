@@ -1124,3 +1124,12 @@ using the same selected model and speaker. WAV decoding, interrupted output
 contexts and persistent audio-error hints are fixed. The
 [follow-up report](docs/sage-startup-audio-fix.md) records nine reproduced failures,
 176 passing deterministic tests and real Chromium recording/playback checks.
+
+
+## Sage voice loop and site controls — v1.9.42
+
+Voice readiness and playback now drive the visible Connecting → Listening → Processing → Replying loop. The default 900 ms pause leaves room to continue a sentence; server finals and browser recognition disconnects cannot cut it short. Replies retain the selected voice.
+
+Sage can operate visible buttons, fields, dropdowns, switches, sliders and scrolling, and reveal a verified record while speaking from the corner. Costliest-mod questions automatically highlight the actual winner across the full history, including records beyond pagination. Existing upload gestures, drafts and deletion confirmations remain enforced.
+
+See [behavior, controls and validation](docs/sage-loop-controls-fix.md).

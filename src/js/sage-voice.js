@@ -31,7 +31,7 @@
       return Number.isFinite(n) ? Math.min(1.3, Math.max(0.7, n)) : 1;
     },
     get recognition() { return 'gemini'; }, // migrate old browser preferences to audio
-    get pauseMs() { return load('sage_voice_pause', 'quick') === 'patient' ? 1200 : 650; },
+    get pauseMs() { const pause = load('sage_voice_pause', 'natural'); return pause === 'patient' ? 1200 : pause === 'quick' ? 650 : 900; },
   };
 
   // ── State ─────────────────────────────────────────────────────────────
@@ -605,6 +605,12 @@
     if (!canListen() || openingMic || S.recording) return false;
     return startGeminiListen();
   }
+  async function resumeListening(owner) {
+    if (!current(owner) || S.busy || S.speaking) return false;
+    if (S.muted) { setMode('idle','Microphone paused'); return false; }
+    if (S.backgrounded) { setMode('starting'); return false; }
+    return startListening();
+  }
   let warmEars = null;
   let liveDisabled = false;
   function warmRecognition() {
@@ -644,12 +650,13 @@
   function englishBrowserListener(take) {
     const Recognition = root.SpeechRecognition || root.webkitSpeechRecognition;
     if (!Recognition || Date.now() < nativeRestUntil) return null;
-    let recognizer, final = '', unclear = false, active = true, ending = false, resolveEnd, timer, startTimer, restartTimer;
+    let recognizer, final = '', prefix = '', prefixUnclear = false, unclear = false, active = true, ending = false, resolveEnd, timer, startTimer, restartTimer;
     const valid = () => active && capture === take && current(take.owner) && !take.cancelled;
     const result = () => final.trim() ? {transcript:final.trim(),unclear} : null;
     const finish = () => { clearTimeout(timer); resolveEnd?.(result()); resolveEnd = null; };
     const start = () => {
       take.nativeReady = false;
+      take.nativeEnded = false;
       clearTimeout(startTimer);
       startTimer = setTimeout(() => {
         if (!valid() || take.nativeReady || ending) return;
@@ -668,15 +675,15 @@
       recognizer.onresult = event => {
         if (!valid()) return;
         const committed = [], draft = [];
-        unclear = false;
+        unclear = prefixUnclear;
         for (const row of Array.from(event.results || [])) {
           if (!row[0]?.transcript) continue;
           (row.isFinal ? committed : draft).push(row[0].transcript.trim());
           if (row.isFinal && row[0].confidence > 0 && row[0].confidence < .5) unclear = true;
         }
-        final = committed.join(' ');
+        final = [prefix,...committed].filter(Boolean).join(' ');
         take.nativeDraft = !!draft.length;
-        const text = [...committed,...draft].join(' ');
+        const text = [prefix,...committed,...draft].filter(Boolean).join(' ');
         if (text) { take.heard = true; take.previewText = text; paintCaption(text,!!draft.length); }
         if (ending && final && !draft.length) {
           clearTimeout(timer); timer = setTimeout(finish,40);
@@ -697,14 +704,16 @@
         if (!ending) finish();
         if (!ending && !take.stopping) {
           if (take.nativeFailed) { paintCaptureReadiness(take); return; }
-          if (take.heard || final) finishGeminiListen(true);
-          else {
-            clearTimeout(startTimer);
-            restartTimer = setTimeout(() => {
-              if (!valid() || ending || take.stopping) return;
-              try { start(); } catch { take.nativeFailed = true; paintCaptureReadiness(take); }
-            }, 150);
-          }
+          // Browser disconnect is not a microphone endpoint. Reconnect while
+          // the local breathing timer runs, preserving committed words if he
+          // continues the sentence. A cancelled/finished take never restarts.
+          take.nativeEnded = true;
+          clearTimeout(startTimer); clearTimeout(restartTimer);
+          restartTimer = setTimeout(() => {
+            if (!valid() || ending || take.stopping) return;
+            prefix = final; prefixUnclear = unclear;
+            try { start(); } catch { take.nativeFailed = true; paintCaptureReadiness(take); }
+          }, 150);
         }
       };
       start();
@@ -781,7 +790,10 @@
           // Caption arrival is networking, not renewed microphone activity.
         },
         onBoundary:() => {
-          if (current(owner) && capture === take && !take.stopping && take.heard && take.previewText) finishGeminiListen(true);
+          // Server finals can arrive mid-sentence. They never bypass the
+          // microphone's breathing window, or cut off renewed local speech.
+          if (current(owner) && capture === take && !take.stopping && take.heard && take.previewText
+            && take.quietAt && Date.now()-take.quietAt >= settings.pauseMs) finishGeminiListen(true);
         },
       });
     }
@@ -939,10 +951,10 @@
       if (!take.pcmAt && !take.pcmUnavailable) {
         label = 'Starting audio…';
         instruction = 'Your mic is recording while audio starts.';
-      } else if (take.native && !take.nativeReady && !take.nativeFailed) {
+      } else if (take.native && !take.nativeReady && !take.nativeFailed && !take.nativeEnded) {
         label = 'Connecting recognition…'; instruction = 'Your microphone is recording while English recognition connects.';
       } else if (take.nativeFailed && recognitionNotice) {
-        label = 'Recognition unavailable'; instruction = 'Microphone is ready. Check your speech service or key in settings.';
+        label = 'I’m listening'; instruction = 'Recorded recognition is ready. Your microphone stays open.';
       } else if (take.live && !take.liveReady && !take.previewText) {
         label = 'Connecting…';
         instruction = 'Your mic is ready. First words are kept while captions connect.';
@@ -1341,14 +1353,15 @@
     const e = els();
     if (e.overlay) e.overlay.setAttribute('data-voice-mode', mode);
     if (e.orb) e.orb.setAttribute('data-voice-mode', mode);
-    const label = custom || {
+    const phase = {
       idle: 'Tap the mic to talk',
-      starting: 'Getting ready…',
+      starting: 'Connecting…',
       transcribing: 'Processing…',
-      listening: 'I’m listening',
-      thinking: 'Thinking…',
-      speaking: 'Speaking',
-    }[mode] || 'Voice';
+      listening: 'Listening…',
+      thinking: 'Processing…',
+      speaking: 'Replying…',
+    }[mode];
+    const label = mode === 'idle' ? custom || phase : phase || custom || 'Connecting…';
     if (e.state) e.state.textContent = label;
     if (!S.recording) e.orb?.setAttribute('data-speech-active', 'false');
     const instruction = $('sageVoiceInstruction');
@@ -1475,9 +1488,8 @@
           meterStream?.getTracks().forEach(t => { t.enabled = true; });
           paintMic();
         }
-        setMode('idle');
         setHint(S.muted ? 'Mic off. Tap the mic when you’re ready.' : '');
-        if (!S.muted) startListening();
+        await resumeListening(owner);
         return completed;
       } catch (err) {
         if (!current(owner)) return;
@@ -1509,8 +1521,7 @@
       // disconnected-looking call. Resume the existing hands-free session.
       S.lastSaid = null;
       S.resumeAfterReply = false;
-      setMode('idle');
-      if (!S.muted && !S.backgrounded) await startListening();
+      await resumeListening(owner);
       if (current(owner)) setHint(replyAudioNotice);
     }
   }
@@ -1595,8 +1606,7 @@
       const line = voiceProblem(result?.reason, result?.retryInMs);
       setActivity(null);
       S.busy = false;
-      setMode('idle');
-      if (!S.muted) await startListening();
+      await resumeListening(owner);
       if (current(owner)) setHint(line);
       return;
     }
@@ -1863,7 +1873,7 @@
         if (S.speaking || S.mode === 'speaking') {
           S.lastSaid = null; // the cut-off line is abandoned, not retried
           stopAllAudio();
-          if (!S.busy && !S.muted) { setMode('listening'); startListening(); }
+          if (!S.busy && !S.muted) startListening();
           return;
         }
         if (S.busy || S.transcribing || S.recognitionFailed) return;
@@ -1904,7 +1914,7 @@
       } catch { setHint('Use the upload button on the page to choose your file.'); }
     });
     const preferences = [
-      ['sageVoicePause', 'sage_voice_pause', load('sage_voice_pause', 'quick')],
+      ['sageVoicePause', 'sage_voice_pause', load('sage_voice_pause', 'natural')],
     ];
     preferences.forEach(([id, key, value]) => {
       const input = $(id);
