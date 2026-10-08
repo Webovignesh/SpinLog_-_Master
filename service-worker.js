@@ -4,7 +4,7 @@
 // Version segment matches <meta name="version"> in index.html. That meta is what the
 // screen shows; this is what is actually cached. If they disagree, the number on the
 // home chip is a lie about which build is running.
-const CACHE_NAME = 'spinlog-cache-v1.9.47-voice39';
+const CACHE_NAME = 'spinlog-cache-v1.9.48-controls01';
 const OFFLINE_URL = 'index.html';
 
 // The scheduler is shared with the page so foreground and background agree on
@@ -20,7 +20,7 @@ const PRECACHE = [
   './src/css/styles.css?v=1.9.47',
   './src/css/home.css?v=1.9.47',
   './src/css/sage-voice.css?v=1.9.47',
-  './src/js/script.js?v=1.9.47',
+  './src/js/script.js?v=1.9.48',
   './src/js/cloud-store.js',
   './src/js/sage-confirm.js',
   './src/js/date-picker.js',
@@ -31,9 +31,9 @@ const PRECACHE = [
   './src/js/bill-merge.js',
   './src/js/sage-scheduler.js?v=1.9.47',
   './src/js/sage-memory.js?v=1.9.47',
-  './src/js/sage-tools.js?v=1.9.47',
-  './src/js/sage-page-controls.js?v=1.9.47',
-  './src/js/sage-ai.js?v=1.9.47',
+  './src/js/sage-tools.js?v=1.9.48',
+  './src/js/sage-page-controls.js?v=1.9.48',
+  './src/js/sage-ai.js?v=1.9.48',
   './src/js/sage-keyvault.js',
   './src/js/sage-autofill.js',
   './src/js/sage-ui.js?v=1.9.47',

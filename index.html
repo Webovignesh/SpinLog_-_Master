@@ -13,7 +13,7 @@
        needs no JS change. Keep the version segment of CACHE_NAME in service-worker.js
        in step with this — that file cannot read a meta tag, and a mismatch means the
        number on screen is not the number that is actually cached. -->
-  <meta name="version" content="1.9.47"/>
+  <meta name="version" content="1.9.48"/>
   <title>SpinLog</title>
   <!-- Not decoration. This is what an install prompt, a shared link and a
        browser's own history entry show underneath the title, and without it they
@@ -2118,16 +2118,16 @@
       <!-- Her hands: the controls she can actually operate. Declarations only,
            so load order against script.js does not matter — window.dkApp is
            looked up when a control is used, not when this file runs. -->
-      <script src="src/js/sage-tools.js?v=1.9.47"></script>
+      <script src="src/js/sage-tools.js?v=1.9.48"></script>
       <!-- Gemini key + model. Loaded before notifications.js so her voice is
            available to the first notification of the session. -->
-      <script src="src/js/sage-ai.js?v=1.9.47"></script>
+      <script src="src/js/sage-ai.js?v=1.9.48"></script>
       <!-- Encrypted cloud backup of the key ring. After sage-ai.js, which owns
            the ring it reads and writes. -->
       <script src="src/js/sage-keyvault.js"></script>
       <script src="src/js/notifications.js?v=1.9.47"></script>
-      <script src="src/js/script.js?v=1.9.47"></script>
-      <script src="src/js/sage-page-controls.js?v=1.9.47"></script>
+      <script src="src/js/script.js?v=1.9.48"></script>
+      <script src="src/js/sage-page-controls.js?v=1.9.48"></script>
       <!-- Sage filling in the service form and the document fields. After
            script.js so the forms and the data snapshot exist first. -->
       <script src="src/js/sage-autofill.js"></script>
