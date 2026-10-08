@@ -603,7 +603,7 @@
   function startInterruptMonitor() {
     if (!settings.interruption || !S.open || S.muted || S.backgrounded || interruptMonitor
       || !root.SageTranscription?.attach || !(S.busy || S.transcribing || S.speaking)) return;
-    const monitor={owner:S.session,frames:[],voicedMs:0,cancelled:false,pcm:null};
+    const monitor={owner:S.session,frames:[],speechWindow:[],voicedMs:0,quietMs:0,armed:false,cancelled:false,pcm:null};
     interruptMonitor=monitor;
     const valid=()=>interruptMonitor===monitor && current(monitor.owner) && !monitor.cancelled
       && settings.interruption && !S.muted && !S.backgrounded;
@@ -616,17 +616,35 @@
         if(!valid()) return;
         if(frame.failed || !Number.isFinite(frame.speechMs)) { stopInterruptMonitor(); return; }
         monitor.lastAt=Date.now();
-        paintInterruptReady(true);
         const duration=frame.pcm.byteLength/32;
         const echo=echoScore(frame.pcm,frame.endTime) >= .78;
-        const speech=!echo && frame.speechMs>=Math.min(40,duration*.5) && frame.rms>Math.max(.004,noiseFloor*1.6);
+        const threshold=Math.max(.004,noiseFloor*1.6);
+        const voiced=!echo && frame.rms>threshold ? Math.min(duration,frame.speechMs,frame.activeMs ?? duration) : 0;
+        // A submission may be followed by trailing speech, a VAD hangover or
+        // buffered packets from the old utterance. None is a new interruption.
+        // First observe 240 ms without user speech, then require a fresh onset.
+        if(!monitor.armed) {
+          const quiet=echo || frame.rms<=threshold || frame.speechMs<duration*.1;
+          monitor.quietMs=quiet ? monitor.quietMs+duration : 0;
+          monitor.armed=monitor.quietMs>=240;
+          monitor.voicedMs=0;monitor.frames=[];monitor.speechWindow=[];
+          paintInterruptReady(monitor.armed);
+          if(monitor.armed)captureEvent('interruption-ready');
+          return;
+        }
+        paintInterruptReady(true);
         // Never carry the assistant's echo into the next utterance. Keep up to
         // 600 ms of non-echo prefix locally; no audio is sent while she replies.
         if(echo) monitor.frames=[];
         else monitor.frames.push(frame);
         while(monitor.frames.reduce((n,f)=>n+f.pcm.byteLength,0)>19200 && monitor.frames.length>1)monitor.frames.shift();
-        monitor.voicedMs=speech ? monitor.voicedMs+Math.min(duration,frame.speechMs) : 0;
-        if(monitor.voicedMs<180 || !monitor.pcm || !(S.busy || S.transcribing || S.speaking)) return;
+        // Natural syllables have small gaps. Measure recent speech density,
+        // rather than forcing every transport packet to be fully voiced.
+        monitor.speechWindow.push({duration,voiced});
+        while(monitor.speechWindow.length>1 && monitor.speechWindow.reduce((n,f)=>n+f.duration,0)>400)monitor.speechWindow.shift();
+        monitor.voicedMs=monitor.speechWindow.reduce((n,f)=>n+f.voiced,0);
+        const density=monitor.voicedMs/monitor.speechWindow.reduce((n,f)=>n+f.duration,0);
+        if(!voiced || monitor.voicedMs<180 || density<.6 || !monitor.pcm || !(S.busy || S.transcribing || S.speaking)) return;
         const seed={pcm:monitor.pcm,frames:monitor.frames.slice()};
         captureEvent('spoken-interruption');
         cancelTurn(seed);
@@ -1814,6 +1832,7 @@
         // played, recover once with a complete response from the same voice.
         const completed = await speak(text, attempt > 0);
         if (!current(owner)) return;
+        if(completed!==true)throw new Error('play-failed');
         S.lastSaid = null;
         S.busy = false;
         if (S.resumeAfterReply) {
@@ -2323,9 +2342,9 @@
     speak, interrupt, cancelTurn, startListening, stopListening, sendVoiceText,
     settings,
     // Local only: no transcript, name, audio, URLs, API key or request body.
-    diagnostics: () => ({version:'1.9.47',mode:S.mode,open:S.open,muted:S.muted,
+    diagnostics: () => ({version:'1.9.49',mode:S.mode,open:S.open,muted:S.muted,
       recording:S.recording,audio:actx?.state || 'unavailable',route:S.sttMode,
-      interruption:!!interruptMonitor?.pcm,longCommands:settings.longCommands,
+      interruption:!!interruptMonitor?.pcm,interruptionArmed:!!interruptMonitor?.armed,longCommands:settings.longCommands,
       capture:capture ? {ready:!!capture.readyForSpeech,pcm:!!capture.pcmAt,classified:!!capture.vadConfirmed,
         recorder:capture.recorder?.state || 'unavailable',prefixCheck:!!capture.prefixChecking,
         live:!!capture.live?.available,fullRecording:!!capture.liveGap} : null,
