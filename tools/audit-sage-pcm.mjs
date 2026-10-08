@@ -57,7 +57,7 @@ function wav(pcm) {
   bytes.write('data',36);bytes.writeUInt32LE(pcm.length*2,40);pcm.forEach((n,i)=>bytes.writeInt16LE(n,44+i*2));
   return new Blob([bytes],{type:'audio/wav'});
 }
-for(const scale of [1,.15])test(`complete recorder validation retains a cold-start first word at amplitude ${scale}`,async()=>{
+for(const scale of [1,.15,.06])test(`complete recorder validation retains a cold-start first word at amplitude ${scale}`,async()=>{
   const prefix=Int16Array.from(utterance.subarray(0,9600),n=>n*scale),full=new Int16Array(32000);
   full.set(prefix,1600); // word precedes late worklet attachment; trailing audio is silent
   assert.equal(await ears.SageTranscription.hasSpeech(wav(full)),true);
@@ -73,7 +73,7 @@ function classify(pcm) {
   p.port.onmessage({data:'flush'});p.port.onmessage({data:'close'});
   return packets.filter(m=>m.pcm);
 }
-for(const scale of [1,.15])test(`bundled WebRTC VAD detects English speech at amplitude ${scale} with a first-word prefix`,()=>{
+for(const scale of [1,.15,.06])test(`bundled WebRTC VAD detects English speech at amplitude ${scale} with a first-word prefix`,()=>{
   const packets=classify(Int16Array.from(utterance,n=>n*scale));
   assert.ok(packets.reduce((n,p)=>n+p.speechMs,0)>700,'real speech is recognized, including soft speech');
   let run=0;const first=packets.findIndex(p=>{run=p.speechMs?run+p.speechMs:0;return run>=120;});

@@ -242,6 +242,7 @@
         const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:${route}`, {
           method:'POST',signal:controller.signal,headers:{'Content-Type':'application/json','x-goog-api-key':keys[attempt]},body:JSON.stringify(body),
         });
+        captureEvent('reply-response',{status:res.status || 200,model,complete});
         if (!S.open || my !== voiceSession) return false;
         // Another key may have access to this same speaker/model. Retry that
         // route first, preserving the established sound on reopening.
@@ -380,11 +381,21 @@
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        actx?.removeEventListener?.('statechange',recoverOutput);
         source.onended = null;
         try { source.disconnect(); } catch { /* released */ }
         playbackSources.delete(source);
         error ? reject(error) : resolve(played);
       };
+      let restoring = false;
+      const recoverOutput = async () => {
+        if(settled || restoring || actx?.state === 'running') return;
+        restoring=true; captureEvent('reply-audio-interrupted');
+        await resumeOutput();
+        restoring=false;
+        if(!settled && actx?.state !== 'running') finish(false,new Error('play-blocked'));
+      };
+      actx?.addEventListener?.('statechange',recoverOutput);
       playbackSources.set(source, finish);
       source.onended = () => finish(true);
       try {
@@ -489,6 +500,15 @@
   let meterLevel = 0;
   let noiseFloor = 0.004;
   let micPending = null;
+  const captureEvents = [];
+  function diagnosticCode(error) {
+    const code=error?.code || error?.message || '';
+    return /^[a-z][a-z0-9-]{0,40}$/.test(code) ? code : error?.name || 'unavailable';
+  }
+  function captureEvent(event, detail = {}) {
+    captureEvents.push({at:Date.now(),event,...detail});
+    if(captureEvents.length>80) captureEvents.shift();
+  }
 
   function current(owner) { return S.open && owner === S.session; }
   function canListen() {
@@ -505,6 +525,7 @@
     return messages[S.lastMicErr] || 'Could not open the microphone. Tap the mic to retry.';
   }
   function pauseListening(message) {
+    captureEvent('paused',{reason:message});
     stopListening();
     S.muted = true;
     meterStream?.getTracks().forEach(t => { t.enabled = false; });
@@ -513,6 +534,13 @@
     paintMic();
   }
   async function startMeter() {
+    // Returning the existing stream used to skip context recovery after a
+    // browser interruption. The recorder could run while VAD/meter were dead.
+    if (actx?.state === 'suspended' || actx?.state === 'interrupted') {
+      captureEvent('resuming-audio');
+      try { await bounded(actx.resume(),2000,'audio-paused'); } catch { throw new Error('audio-paused'); }
+      if(actx.state !== 'running') throw new Error('audio-paused');
+    }
     if (meterStream && meterStream.getTracks().some(t => t.readyState === 'live')) return meterStream;
     if (micPending) return micPending;
     const owner = S.session;
@@ -774,6 +802,7 @@
     const owner = S.session;
     const epoch = ++captureEpoch;
     openingMic = true;
+    captureEvent('capture-start');
     setMode('starting', 'Opening microphone…');
     const take = { recorder:null, chunks:[], frames:[], preRoll:[], owner, epoch, heard:false, loudAt:0, voicedMs:0,
       quietAt:0, previewText:'', started:Date.now(), timer:null, stopping:false, cancelled:false,
@@ -790,6 +819,7 @@
         if (!current(owner) || capture !== take || take.cancelled || take.stopping) return;
         ready &&= !!take.live?.available;
         take.liveReady = ready;
+        captureEvent('recognition-ready',{ready,code:ready ? null : take.live?.failure?.message || 'live-unavailable'});
         if (!ready) {
           retireRecognition(take.live); take.live = null;
         }
@@ -824,7 +854,7 @@
       recorder.ondataavailable = event => {
         if (!take.cancelled && event.data?.size) take.chunks.push(event.data);
       };
-      recorder.onstop = () => completeCapture(take);
+      recorder.onstop = () => recorderStopped(take,recorder);
       recorder.onerror = () => {
         if (current(owner) && capture === take) pauseListening('Recording failed. Tap the mic to retry.');
       };
@@ -850,11 +880,13 @@
       root.SageTranscription?.attach(stream, actx, frame => {
         if (capture !== take || take.cancelled) return;
         if (frame.failed) {
+          captureEvent('processor-failed');
           take.pcmBroken = true; take.pcmUnavailable = true;
           take.live?.close(); take.live = null;
           liveDisabled = true; releaseWarmRecognition();
           paintCaptureReadiness(take); return;
         }
+        if(!take.pcmAt) captureEvent('first-audio-frame');
         take.frames.push(frame.pcm);
         if(!take.heard && !take.prefixCandidate) {
           while(take.frames.reduce((n,pcm)=>n+pcm.byteLength,0)>19200 && take.frames.length>1) take.frames.shift();
@@ -865,7 +897,7 @@
         if (!take.vadReady && Number.isFinite(frame.speechMs) && !take.previewText) {
           // Coarse startup activity remains only a candidate. Check its full
           // recorded prefix locally if the first classified frame is quiet.
-          take.prefixCandidate ||= take.heard || !!(take.prefixSpeech && take.nativeCaption);
+          take.prefixCandidate ||= take.heard || !!take.prefixSpeech;
           take.heard = false; take.loudAt = take.quietAt = 0;
         }
         take.vadReady = Number.isFinite(frame.speechMs);
@@ -880,8 +912,10 @@
         const speechDensity=take.voicedMs/take.speechWindow.reduce((n,f)=>n+f.duration,0);
         // Real speech, not volume alone. Keep a half-second prefix so this
         // confirmation never clips the first syllable or requires a repeat.
-        if (take.pcmSpeech && (take.voicedMs >= 120 && speechDensity>=.4 || !take.vadReady && duration >= 80)) {
+        if (take.pcmSpeech && (take.voicedMs >= 120 && speechDensity>=.4
+          || take.voicedMs >= 80 && speechDensity>=.8 || !take.vadReady && duration >= 80)) {
           speechStarted = !take.heard;
+          if(speechStarted) captureEvent('speech-start',{rms:Math.round(frame.rms*10000)/10000,voicedMs:take.voicedMs});
           take.heard = true; take.quietAt = 0;
           if (take.vadReady) take.vadConfirmed = true;
           if (take.vadConfirmed && take.nativeCaption && !take.previewText) { take.previewText=take.nativeCaption; paintCaption(take.nativeCaption,take.nativeDraft); }
@@ -903,7 +937,8 @@
         // Only use the full recording if speech could have preceded PCM.
         // A cold module load during silence need not disable live captions.
         take.liveGap ||= Date.now() - pcmStarted > 120 && (take.prefixSpeech || !meterAnalyser);
-        if (take.liveGap) { take.live?.close(); take.live = null; }
+        // A meter prefix may be fan noise. Keep the transport available until
+        // local validation settles it; full recorded audio still owns a gap.
         if (!handle) {
           take.pcmUnavailable = true;
           take.live?.close(); take.live = null; liveDisabled = true; releaseWarmRecognition();
@@ -920,6 +955,26 @@
       take.timer = setInterval(() => {
         if (capture !== take || take.stopping) return;
         const now = Date.now();
+        if(actx && actx.state !== 'running') {
+          take.readyForSpeech=false;
+          if(!take.audioRecovery) {
+            captureEvent('capture-audio-interrupted');
+            setMode('starting');setHint('Restoring browser audio. Wait for Listening.');
+            take.audioRecovery=bounded(Promise.resolve().then(()=>actx.resume()),2000,'audio-paused').then(()=>{
+              if(capture!==take || take.cancelled || take.stopping) return;
+              if(actx.state !== 'running') throw new Error('audio-paused');
+              take.pcmAt=0;take.readyLabel=null;paintCaptureReadiness(take);
+              clearTimeout(take.readyTimer);
+              take.readyTimer=setTimeout(()=>{
+                if(capture===take && !take.cancelled && !take.stopping && !take.pcmAt && !take.pcmUnavailable)
+                  pauseListening('Microphone audio did not resume. Tap the mic to retry.');
+              },2000);
+            }).catch(()=>{
+              if(capture===take && !take.cancelled) pauseListening('Browser audio is paused. Tap the mic to enable audio and retry.');
+            }).finally(()=>{take.audioRecovery=null;});
+          }
+          return;
+        }
         // A node can stall without firing processorerror. Its earlier packets
         // are not a complete recording. Keep the MediaRecorder's full turn.
         if (take.pcmAt && now - take.pcmAt > 500 && !take.pcmUnavailable) abandonPartialPCM();
@@ -968,7 +1023,7 @@
               take.chunks=[];
               take.recorder=next;
               next.ondataavailable=event=>{if(capture===take && !take.cancelled && take.recorder===next && event.data?.size)take.chunks.push(event.data);};
-              next.onstop=()=>completeCapture(take);
+              next.onstop=()=>recorderStopped(take,next);
               next.onerror=()=>{if(capture===take)pauseListening('Recording failed. Tap the mic to retry.');};
               next.start(100); take.started=now;
             } catch { pauseListening('Could not renew the recording. Tap the mic to retry.'); }
@@ -980,6 +1035,9 @@
       return true;
     } catch (err) {
       if (current(owner) && epoch === captureEpoch) {
+        if(err.message==='audio-paused') {
+          pauseListening('Browser audio is paused. Tap the mic to enable audio and retry.'); return false;
+        }
         S.lastMicErr = err.message === 'mic-timeout' ? err.message : err.name;
         pauseListening(micProblem());
       }
@@ -991,7 +1049,9 @@
     let label = 'Opening microphone…';
     let instruction = 'Allow microphone access to get started.';
     if (take.micStarted) {
-      if (!take.pcmAt && !take.pcmUnavailable) {
+      if (actx && actx.state !== 'running') {
+        label='Starting audio…';instruction='Restoring browser audio. Wait for Listening.';
+      } else if (!take.pcmAt && !take.pcmUnavailable) {
         label = 'Starting audio…';
         instruction = 'Warming up audio. Wait for Listening before speaking.';
       } else if (take.native && !take.nativeReady && !take.nativeFailed && !take.nativeEnded) {
@@ -1011,10 +1071,18 @@
     // screen readers do not keep announcing the same status during speech.
     if (take.readyLabel === label && take.readyInstruction === instruction) return;
     take.readyLabel = label; take.readyInstruction = instruction;
+    captureEvent('readiness',{label,route:S.sttMode,audio:actx?.state || 'unavailable'});
     setMode(label === 'I’m listening' ? 'listening' : 'starting', label);
     const el = $('sageVoiceInstruction');
     if (el) el.textContent = instruction;
     setHint(replyAudioNotice || (label === 'I’m listening' ? recognitionNotice || 'Pause to send, or tap the orb when you’re done.' : ''));
+  }
+  function recorderStopped(take,recorder) {
+    if(capture !== take || take.cancelled || !current(take.owner) || take.recorder !== recorder) return;
+    if(!take.stopping) {
+      pauseListening('Microphone recording stopped unexpectedly. Tap the mic to retry.'); return;
+    }
+    completeCapture(take);
   }
   function cancelGeminiListen() {
     const take = capture;
@@ -1047,6 +1115,7 @@
           // Startup volume was just noise. Stay on the same active recorder,
           // worklet and recognition connection without Processing/reconnect.
           take.prefixCandidate=false; take.prefixSpeech=false; take.quietAt=0;
+          take.liveGap=false;
           setHint('Ready. Speak naturally.'); return;
         }
         take.heard=true;take.vadConfirmed=true;take.liveGap=true;
@@ -1061,7 +1130,7 @@
     const take = capture;
     if (!take || take.stopping || !take.recorder) return;
     if (!commit) { cancelGeminiListen(); return; }
-    if (!take.readyForSpeech) { setHint('Still connecting. Wait for Listening before speaking.'); return; }
+    if (!take.readyForSpeech || actx?.state !== 'running') { setHint('Still connecting. Wait for Listening before speaking.'); return; }
     if (take.vadReady && !take.heard && !take.prefixCandidate && !take.previewText) {
       // Tapping the orb or a recording deadline in silence is still silence.
       keepRecognition(take.live); take.live = null;
@@ -1069,6 +1138,7 @@
     }
     // Only the settled, authoritative transcript may execute a close command.
     take.stopping = true;
+    captureEvent('speech-end',{classified:!!take.vadConfirmed,caption:!!take.previewText,route:S.sttMode});
     clearInterval(take.timer);
     clearTimeout(take.readyTimer);
     S.recording = false;
@@ -1179,6 +1249,7 @@
       }
       if (!current(owner) || epoch !== captureEpoch) return;
       const result = await transcribeWithGemini(recording.b64, owner);
+      captureEvent('transcript-ready',{empty:!result.transcript?.trim(),unclear:!!result.unclear});
       if (!current(owner) || epoch !== captureEpoch) return;
       recognitionNotice = '';
       recoveryEpisode = '';
@@ -1434,6 +1505,7 @@
   // Overlay: live caption + ephemeral lines
   // ════════════════════════════════════════════════════════════════════
   function setMode(mode, custom) {
+    if(S.mode !== mode) captureEvent('phase',{mode});
     S.mode = mode;
     const e = els();
     if (e.overlay) e.overlay.setAttribute('data-voice-mode', mode);
@@ -1579,6 +1651,7 @@
       } catch (err) {
         if (!current(owner)) return;
         failure = err;
+        captureEvent('reply-failed',{code:diagnosticCode(err),started:!!err.audioStarted});
         const transient = err.name === 'TypeError' || err.name === 'AbortError' || err.name === 'SyntaxError'
           || /^(?:tts-5\d\d|tts-408|silent-audio|incomplete-audio|tts-stream|timeout|play-failed)$/.test(err.message);
         if (attempt || err.audioStarted || !transient || S.backgrounded) break;
@@ -2067,5 +2140,12 @@
     sttSupported, recognitionMode: () => S.sttMode,
     speak, interrupt, cancelTurn, startListening, stopListening, sendVoiceText,
     settings,
+    // Local only: no transcript, name, audio, URLs, API key or request body.
+    diagnostics: () => ({version:'1.9.46',mode:S.mode,open:S.open,muted:S.muted,
+      recording:S.recording,audio:actx?.state || 'unavailable',route:S.sttMode,
+      capture:capture ? {ready:!!capture.readyForSpeech,pcm:!!capture.pcmAt,classified:!!capture.vadConfirmed,
+        recorder:capture.recorder?.state || 'unavailable',prefixCheck:!!capture.prefixChecking,
+        live:!!capture.live?.available,fullRecording:!!capture.liveGap} : null,
+      events:captureEvents.map(event=>({...event}))}),
   };
 })(typeof self !== 'undefined' ? self : this);
