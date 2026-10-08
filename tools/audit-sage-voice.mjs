@@ -117,6 +117,10 @@ function harness(options = {}) {
     currentTime = 0;
     constructor() { contexts.push(this); }
     state = options.audioBlocked ? 'suspended' : 'running';
+    events = {};
+    addEventListener(name,fn) { (this.events[name] ||= new Set()).add(fn); }
+    removeEventListener(name,fn) { this.events[name]?.delete(fn); }
+    emitState() { this.events.statechange?.forEach(fn=>fn()); }
     audioWorklet = {addModule:options.addModule || (async()=>{})};
     destination = {};
     resume() { return Promise.resolve(); }
@@ -199,7 +203,7 @@ function harness(options = {}) {
       if(!options.stallPCM && ms>250 && node?.lastFrame && (node.lastFrame.rms===0 || node.lastFrame.speechMs===0) && !node.disconnected)node.port.onmessage?.({data:node.lastFrame});
       [...intervals.values()].forEach(fn => fn()); },
     animate() { const frames=[...animationFrames.values()];animationFrames.clear();frames.forEach(fn=>fn()); },
-    async open() { root.SageVoice.open(); await until(() => recordings.length || (options.storage?.sage_voice_recognition === 'browser' && recognition.length)); },
+    async open() { root.SageVoice.open(); await until(() => recordings.length || nodes.get('sageVoiceState').textContent==='Microphone paused' || (options.storage?.sage_voice_recognition === 'browser' && recognition.length)); },
     async finish() { nodes.get('sageVoiceOrb').emit('click'); await until(() => requests.some(r => !r.body.generationConfig.responseModalities)); },
     cleanup() { root.SageVoice.close(); timers.forEach(clearTimeout); }, newStream,
   };
@@ -522,7 +526,7 @@ for (const [name,option] of [['silent PCM','silentAudio'],['empty PCM','emptyAud
     const h = harness({[option]:true});
     try {
       await h.open(); await h.root.SageVoice.sendVoiceText('test failed playback');
-      assert.equal(h.recordings.length,option==='audioBlocked'?1:2);
+      assert.equal(h.recordings.length,option==='audioBlocked'?0:2);
       assert.equal(h.playback.length,0);
       assert.equal(h.nodes.has('sageVoiceReplay'),false);
       assert.equal(h.nodes.get('sageVoiceMic').getAttribute('aria-pressed'),option==='audioBlocked'?'true':'false');
@@ -989,7 +993,7 @@ test('slow first worklet startup visibly waits and submits the whole recording o
     assert.match(h.nodes.get('sageVoiceInstruction').textContent,/Warming up audio/);
     h.tick(200);ready();await until(()=>h.worklets.length===1);
     h.worklets[0].frame();await until(()=>h.nodes.get('sageVoiceState').textContent==='Listening…');
-    assert.match(h.nodes.get('sageVoiceInstruction').textContent,/after your pause/);
+    assert.match(h.nodes.get('sageVoiceInstruction').textContent,/Pause|after your pause/);
     await h.finish();await until(()=>h.recordings.length===2);
     assert.equal(h.decoded[0],'first-LAST','late live capture never replaces the complete recording');
     assert.equal(h.asks.length,1);assert.equal(h.requests.filter(r=>!r.body.generationConfig.responseModalities).length,1);
@@ -998,7 +1002,7 @@ test('slow first worklet startup visibly waits and submits the whole recording o
 test('a never-ready worklet falls back visibly instead of keeping startup indefinitely',async()=>{
   const h=harness({live:true,fastTimeouts:true,addModule:()=>new Promise(()=>{})});
   try {await h.open();await until(()=>h.nodes.get('sageVoiceState').textContent==='Listening…');
-    assert.match(h.nodes.get('sageVoiceInstruction').textContent,/after your pause/);
+    assert.match(h.nodes.get('sageVoiceInstruction').textContent,/Pause|after your pause/);
     await h.finish();await until(()=>h.asks.length===1);
     assert.equal(h.decoded[0],'first-LAST');assert.equal(h.asks.length,1);
   }finally{h.cleanup();}
@@ -1590,8 +1594,8 @@ test('slow audio warm-up remains Connecting past the old deadline without submit
   ready();await until(()=>h.worklets.length===1);const mic=h.worklets[0];mic.frame(0);h.tick(100);h.tick(650);
   await until(()=>checked.length===1);assert.equal(h.recordings.length,1);assert.equal(h.nodes.get('sageVoiceState').textContent,'Listening…');
   mic.frame();h.tick(100);h.sockets.at(-1).message({serverContent:{inputTranscription:{text:'Hello'},generationComplete:true}});
-  // A cold recorded-prefix gap intentionally uses full-audio STT, so the Live
-  // socket may be closed. Readiness and capture still stay on the original mic.
+  await until(()=>/Hello/.test(h.nodes.get('sageVoiceCaption').innerHTML));
+  assert.equal(h.sockets.at(-1).readyState,1,'rejected cold noise does not disable live captions');
   assert.equal(h.streams.length,1);
  }finally{h.cleanup();}
 });
@@ -1624,5 +1628,106 @@ test('recorded fallback silence keeps the same microphone and readiness instead 
   for(let i=0;i<4;i++){h.tick(15000);await delay(10);}
   assert.equal(h.streams.length,1);assert.equal(h.worklets.length,1);assert.equal(h.sockets.length,1);
   assert.equal(h.recordings.length,5);assert.deepEqual(h.phases,[]);assert.equal(h.asks.length,0);
+ }finally{h.cleanup();}
+});
+
+test('an unsolicited recorder stop is a capture failure, never an automatic speech submission',async()=>{
+ const h=harness({live:true});try{
+  await h.open();await until(()=>h.worklets.length===1);h.worklets[0].frame(0);
+  await until(()=>h.nodes.get('sageVoiceState').textContent==='Listening…');h.phases.length=0;
+  h.recordings[0].stop();await delay(80);h.tick(16000);await delay(30);
+  assert.equal(h.nodes.get('sageVoiceState').textContent,'Microphone paused');
+  assert.equal(h.recordings.length,1);assert.equal(h.requests.length,0);assert.equal(h.asks.length,0);
+  assert.ok(!h.phases.includes('Processing…'));assert.match(h.nodes.get('sageVoiceHint').textContent,/stopped unexpectedly/);
+ }finally{h.cleanup();}
+});
+test('an unsolicited recorder stop during speech cannot submit a partial command',async()=>{
+ const h=harness({live:true});try{
+  await h.open();await until(()=>h.worklets.length===1);h.worklets[0].frame();h.tick(100);
+  h.sockets[0].message({serverContent:{inputTranscription:{text:'Delete'},generationComplete:true}});
+  await delay(15);h.recordings[0].stop();await delay(80);
+  assert.equal(h.asks.length,0);assert.equal(h.requests.length,0);
+  assert.equal(h.nodes.get('sageVoiceState').textContent,'Microphone paused');
+ }finally{h.cleanup();}
+});
+test('resuming a call cannot claim Listening on a suspended reused audio context',async()=>{
+ const h=harness({live:true});try{
+  await h.open();await until(()=>h.worklets.length===1);h.worklets[0].frame(0);
+  h.nodes.get('sageVoiceMic').emit('click');h.contexts[0].state='suspended';
+  h.contexts[0].resume=async()=>{};
+  h.nodes.get('sageVoiceMic').emit('click');await delay(80);
+  assert.equal(h.nodes.get('sageVoiceState').textContent,'Microphone paused');
+  assert.match(h.nodes.get('sageVoiceHint').textContent,/audio.*paused/i);assert.equal(h.requests.length,0);
+ }finally{h.cleanup();}
+});
+
+
+test('audio suspended during a spoken reply resumes the same samples and speaker',async()=>{
+ const h=harness({live:true,holdPlayback:true});try{
+  await h.open();await until(()=>h.worklets.length===1);h.worklets[0].frame(0);
+  const reply=h.root.SageVoice.sendVoiceText('Test playback interruption');await until(()=>h.playback.length===1);
+  const context=h.contexts[0],source=h.playback[0];let resumes=0;
+  context.resume=async()=>{resumes++;context.state='running';};context.state='suspended';context.emitState();
+  await until(()=>resumes===1);assert.equal(context.state,'running');source.end();await reply;
+  assert.equal(h.requests.length,1);assert.equal(h.playback.length,1,'no replay or voice change');
+  assert.equal(context.events.statechange.size,0,'finished playback releases its recovery listener');
+ }finally{h.cleanup();}
+});
+test('a blocked mid-reply audio device reports the problem and never claims successful sound',async()=>{
+ const h=harness({live:true,holdPlayback:true});try{
+  await h.open();await until(()=>h.worklets.length===1);h.worklets[0].frame(0);
+  const reply=h.root.SageVoice.sendVoiceText('Test blocked playback');await until(()=>h.playback.length===1);
+  const context=h.contexts[0];context.resume=async()=>{};context.state='suspended';context.emitState();await reply;
+  assert.equal(h.nodes.get('sageVoiceState').textContent,'Microphone paused');
+  assert.match(h.nodes.get('sageVoiceHint').textContent,/Sound is blocked/);assert.equal(h.requests.length,1);
+ }finally{h.cleanup();}
+});
+test('diagnostics record route failures and transitions without recording speech or keys',async()=>{
+ const h=harness({live:true});try{
+  await h.open();await until(()=>h.worklets.length===1);h.worklets[0].frame(0);h.recordings[0].stop();await delay(40);
+  const diagnostic=h.root.SageVoice.diagnostics(),encoded=JSON.stringify(diagnostic);
+  assert.equal(diagnostic.recording,false);assert.equal(diagnostic.muted,true);
+  assert.ok(diagnostic.events.some(e=>e.event==='paused'));
+  assert.ok(!encoded.includes('test-only'));assert.ok(!encoded.includes('transcript'));assert.ok(!encoded.includes('base64'));
+  diagnostic.events.length=0;assert.ok(h.root.SageVoice.diagnostics().events.length>0);
+ }finally{h.cleanup();}
+});
+
+
+test('capture interruption recovers once and waits for fresh audio before Listening',async()=>{
+ const h=harness({live:true});try{
+  await h.open();await until(()=>h.worklets.length===1);const mic=h.worklets[0],context=h.contexts[0];mic.frame(0);
+  context.state='suspended';context.resume=async()=>{context.state='running';};h.tick(100);await delay(15);
+  assert.equal(h.nodes.get('sageVoiceState').textContent,'Connecting…');assert.equal(h.asks.length,0);
+  mic.frame(0);await until(()=>h.nodes.get('sageVoiceState').textContent==='Listening…');
+  assert.equal(h.worklets.length,1);assert.equal(h.recordings.length,1);assert.equal(h.streams.length,1);
+ }finally{h.cleanup();}
+});
+test('irrecoverable capture suspension cannot auto-submit or cycle the microphone',async()=>{
+ const h=harness({live:true});try{
+  await h.open();await until(()=>h.worklets.length===1);h.worklets[0].frame();h.tick(100);
+  h.contexts[0].state='suspended';h.contexts[0].resume=async()=>{};
+  h.nodes.get('sageVoiceOrb').emit('click');assert.equal(h.recordings[0].state,'recording');
+  h.tick(100);await delay(40);h.tick(16000);await delay(20);
+  assert.equal(h.nodes.get('sageVoiceState').textContent,'Microphone paused');
+  assert.equal(h.requests.length,0);assert.equal(h.recordings.length,1);assert.equal(h.asks.length,0);
+ }finally{h.cleanup();}
+});
+
+test('a short dense first hello starts recognition without requiring a second utterance',async()=>{
+ const h=harness({live:true});try{
+  await h.open();await until(()=>h.worklets.length===1);const mic=h.worklets[0];mic.frame(0);
+  mic.frame(.015,new ArrayBuffer(3200),{speechMs:80,activeMs:80});h.tick(100);
+  h.sockets[0].message({serverContent:{inputTranscription:{text:'Hi'},generationComplete:true}});
+  await until(()=>/Hi/.test(h.nodes.get('sageVoiceCaption').innerHTML));
+  mic.frame(0);h.tick(100);h.tick(650);await until(()=>h.asks.length===1);assert.deepEqual(h.asks,['Hi']);
+ }finally{h.cleanup();}
+});
+test('sub-100ms meter prefix is checked locally after warm-up rather than discarded',async()=>{
+ let ready;const checked=[];const h=harness({live:true,loud:true,recordedSpeech:true,checkedRecordings:checked,
+  addModule:()=>new Promise(resolve=>{ready=resolve;})});try{
+  await h.open();h.tick(50);h.analysers[0].sample=128;h.tick(50);ready();await until(()=>h.worklets.length===1);
+  h.worklets[0].frame(0);h.tick(100);h.tick(650);await until(()=>h.asks.length===1);
+  assert.equal(checked.length,1);assert.equal(h.decoded.at(-1),'first-LAST');
  }finally{h.cleanup();}
 });

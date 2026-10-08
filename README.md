@@ -1154,3 +1154,10 @@ See [reproduced failures and validation](docs/sage-stable-listening-fix.md).
 Cold audio and recognition setup now have up to eight seconds to initialize, with Connecting shown until capture and recognition are ready. This is a deadline, not an added delay. Automatic and manual submission wait for readiness. Startup volume candidates are checked locally without replacing healthy capture; silence in recorded fallback also rotates only the recorder. Detector errors explicitly pause instead of repeating startup.
 
 See [implementation and validation](docs/sage-ready-before-listening-fix.md).
+
+
+## Sage recorder and audio interruption fixes — v1.9.46
+
+Unexpected recorder stops now pause explicitly instead of submitting partial audio or restarting capture. Reused and interrupted browser audio must recover before Listening becomes ready. Reply playback resumes a suspended audio context without regenerating the selected voice. Cold-start noise no longer discards a healthy Live connection, and short dense first words can qualify while sparse background hits remain blocked.
+
+See [reproductions, diagnostics and validation](docs/sage-capture-lifecycle-fix.md).

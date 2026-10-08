@@ -15,7 +15,7 @@ const server=http.createServer(async(req,res)=>{
   if(!file.startsWith(root+path.sep)){res.writeHead(403).end();return;}
   try{let data=await readFile(file);
     if(rel==='index.html')data=data.toString().replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace('</body>',
-      '<script src="src/js/sage-transcription.js?v=1.9.45"></script><script src="src/js/sage-voice.js?v=1.9.45"></script></body>');
+      '<script src="src/js/sage-transcription.js?v=1.9.46"></script><script src="src/js/sage-voice.js?v=1.9.46"></script></body>');
     res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.css':'text/css'})[path.extname(file)]||'application/octet-stream');res.end(data);
   }catch{res.writeHead(404).end();}
 });
@@ -24,13 +24,14 @@ const base=`http://127.0.0.1:${server.address().port}`;let browser;
 try{
   browser=await chromium.launch({executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE||undefined,headless:true,
     args:['--no-sandbox','--disable-dev-shm-usage','--use-fake-ui-for-media-stream','--use-fake-device-for-media-stream']});
-  for(const scenario of ['noise','first-word']){
+  for(const scenario of ['noise','first-word','recorder-stop']){
     const page=await browser.newPage({viewport:{width:390,height:844}}),errors=[];
     page.on('pageerror',e=>errors.push(e.message));
     await page.route('**/*',r=>r.request().url().startsWith(base)?r.continue():r.abort());
     await page.addInitScript(({scenario,fixture})=>{
       window.requests=[];window.asks=[];window.modes=[];window.historyRows=[];window.inputFrames=0;window.outputStarts=0;
-      window.audioContexts=[];window.failStream=true;window.interruptOutput=false;
+      window.audioContexts=[];window.failStream=true;window.interruptOutput=false;window.interruptDuringOutput=false;window.recorders=[];
+      const MR=window.MediaRecorder;window.MediaRecorder=class extends MR{constructor(...args){super(...args);recorders.push(this);}};
       const AC=window.AudioContext;
       window.AudioContext=class extends AC{constructor(...args){super(...args);audioContexts.push(this);}};
       const addModule=AudioWorklet.prototype.addModule;
@@ -38,12 +39,18 @@ try{
         setTimeout(()=>addModule.apply(this,args).then(resolve,reject),2200);
       });};
       const start=AudioBufferSourceNode.prototype.start;
-      AudioBufferSourceNode.prototype.start=function(...args){if(this.buffer?.sampleRate===24000)outputStarts++;return start.apply(this,args);};
+      AudioBufferSourceNode.prototype.start=function(...args){
+        if(this.buffer?.sampleRate===24000){outputStarts++;
+          if(interruptDuringOutput){interruptDuringOutput=false;setTimeout(()=>audioContexts[0].suspend(),30);}
+        }
+        return start.apply(this,args);
+      };
       const getMic=navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
       navigator.mediaDevices.getUserMedia=async constraints=>{
         const original=await getMic(constraints),ctx=new AudioContext(),out=ctx.createMediaStreamDestination();
         const input=ctx.createBuffer(1,48000,16000),samples=input.getChannelData(0);
-        if(scenario==='noise'){
+        if(scenario==='recorder-stop'){samples.fill(0);}
+        else if(scenario==='noise'){
           let seed=11;
           for(let i=0;i<5600;i++){seed=(seed*1664525+1013904223)>>>0;
             samples[i]=Math.sin(2*Math.PI*100*i/16000)*.016+(seed/4294967296-.5)*.009;}
@@ -94,6 +101,14 @@ try{
       assert.deepEqual([result.requests,result.asks,result.history],[0,0,0],'startup noise is checked locally, never uploaded or answered');
       assert.ok(!result.modes.includes('Processing…'),'no silent startup processing flash');
       assert.equal(result.state,'Listening…');
+    }else if(scenario==='recorder-stop'){
+      await page.waitForFunction(()=>document.getElementById('sageVoiceState').textContent==='Listening…');
+      await page.evaluate(()=>recorders[0].stop());
+      await page.waitForFunction(()=>document.getElementById('sageVoiceState').textContent==='Microphone paused');
+      await page.waitForTimeout(400);
+      assert.deepEqual(await page.evaluate(()=>[recorders.length,requests.length,asks.length]),[1,0,0]);
+      assert.match(await page.locator('#sageVoiceHint').textContent(),/stopped unexpectedly/);
+      assert.equal(await page.evaluate(()=>modes.includes('Processing…')),false);
     }else{
       await page.waitForFunction(()=>asks.length===1&&document.getElementById('sageVoiceState').textContent==='Listening…',null,{timeout:20000});
       const result=await page.evaluate(()=>({requests,asks,history:historyRows.length,outputStarts,modes}));
@@ -108,6 +123,10 @@ try{
       await page.waitForFunction(()=>document.getElementById('sageVoiceState').textContent==='Listening…');
       assert.deepEqual(await page.evaluate(()=>[asks.length,historyRows.length,outputStarts,requests.length,audioContexts[0].state]),
         [2,4,2,4,'running'],'a real context suspended during synthesis resumes and plays without another API request');
+      await page.evaluate(async()=>{interruptDuringOutput=true;await SageVoice.sendVoiceText('Keep speaking');});
+      await page.waitForFunction(()=>document.getElementById('sageVoiceState').textContent==='Listening…');
+      assert.deepEqual(await page.evaluate(()=>[asks.length,outputStarts,requests.length,audioContexts[0].state]),
+        [3,3,5,'running'],'actual mid-playback suspension resumes the same performance');
     }
     assert.deepEqual(errors,[]);await page.locator('#sageVoiceEnd').click();await page.close();
     console.log(`✓ Cold-load ${scenario}: real MediaRecorder, local speech classification, no invented turn, correct audio handoff`);
