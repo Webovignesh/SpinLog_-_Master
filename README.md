@@ -1161,3 +1161,9 @@ See [implementation and validation](docs/sage-ready-before-listening-fix.md).
 Unexpected recorder stops now pause explicitly instead of submitting partial audio or restarting capture. Reused and interrupted browser audio must recover before Listening becomes ready. Reply playback resumes a suspended audio context without regenerating the selected voice. Cold-start noise no longer discards a healthy Live connection, and short dense first words can qualify while sparse background hits remain blocked.
 
 See [reproductions, diagnostics and validation](docs/sage-capture-lifecycle-fix.md).
+
+## Sage long commands and spoken interruption — v1.9.47
+
+Long requests retain extra breathing space and no longer auto-submit at 45 seconds. Speaking during an answer cancels pending work and queued speech, then preserves the first words in the next turn. A local echo matcher rejects the reply and its acoustic tail. Independent settings retain fixed-pause and orb-only modes; the selected English speaker stays unchanged.
+
+See [behavior, regressions and device checks before merge](docs/sage-conversation-turns.md). Website-control improvements remain the next stage.

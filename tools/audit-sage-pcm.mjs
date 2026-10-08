@@ -9,18 +9,21 @@ for(const rate of [16000,44100,48000]) {
   test(`PCM worklet preserves onset, duration and packet continuity at ${rate} Hz`,()=>{
     const packets=[];let Ctor;
     class Processor {port={postMessage:m=>packets.push(m)};}
-    vm.runInNewContext(source,{AudioWorkletProcessor:Processor,sampleRate:rate,Int16Array,
-      createSpeechDetector,registerProcessor:(_name,value)=>{Ctor=value;}});
+    const clock={currentTime:0,AudioWorkletProcessor:Processor,sampleRate:rate,Int16Array,
+      createSpeechDetector,registerProcessor:(_name,value)=>{Ctor=value;}};
+    vm.runInNewContext(source,clock);
     const p=new Ctor(),duration=.537,input=new Float32Array(Math.round(rate*duration));
     for(let i=0;i<input.length;i++)input[i]=.2*Math.sin(2*Math.PI*220*i/rate);
     // A short first word begins in the very first render block.
     input[0]=.5;
-    for(let i=0;i<input.length;i+=128)p.process([[input.subarray(i,i+128)]]);
+    for(let i=0;i<input.length;i+=128){clock.currentTime=i/rate;p.process([[input.subarray(i,i+128)]]);}
     p.port.onmessage({data:'flush'});
     const audio=packets.filter(m=>m.pcm),samples=audio.flatMap(m=>Array.from(new Int16Array(m.pcm)));
     assert.ok(Math.abs(samples.length-input.length*16000/rate)<1);
     assert.ok(samples[0]>1000,'the first sample is retained');
     assert.ok(audio.slice(0,-1).every(m=>m.pcm.byteLength===3200),'100 ms packets');
+    let captured=0;
+    for(const packet of audio){captured+=packet.pcm.byteLength/2;assert.ok(Math.abs(packet.endTime-captured/16000)<=1/rate,'audio-clock timestamps survive asynchronous delivery');}
     let error=0;
     for(let i=1;i<samples.length;i++)error+=Math.abs(samples[i]/32768-.2*Math.sin(2*Math.PI*220*(i+.5)/16000));
     assert.ok(error/samples.length<.009,'no dropped/repeated samples or frame-boundary clicks');
@@ -65,11 +68,12 @@ for(const scale of [1,.15,.06])test(`complete recorder validation retains a cold
 function classify(pcm) {
   const packets=[];let Ctor;
   class Processor {port={postMessage:m=>packets.push(m)};}
-  vm.runInNewContext(source,{AudioWorkletProcessor:Processor,sampleRate:16000,Int16Array,createSpeechDetector,
-    registerProcessor:(_name,value)=>{Ctor=value;}});
+  const clock={currentTime:0,AudioWorkletProcessor:Processor,sampleRate:16000,Int16Array,createSpeechDetector,
+    registerProcessor:(_name,value)=>{Ctor=value;}};
+  vm.runInNewContext(source,clock);
   const p=new Ctor();
   const input=Float32Array.from(pcm,n=>n/32768);
-  for(let i=0;i<input.length;i+=128)p.process([[input.subarray(i,i+128)]]);
+  for(let i=0;i<input.length;i+=128){clock.currentTime=i/16000;p.process([[input.subarray(i,i+128)]]);}
   p.port.onmessage({data:'flush'});p.port.onmessage({data:'close'});
   return packets.filter(m=>m.pcm);
 }

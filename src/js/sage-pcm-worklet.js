@@ -1,13 +1,13 @@
 // Continuous 16 kHz mono PCM, 100 ms packets. Fractional integration preserves
 // sample continuity across 44.1/48 kHz render blocks and low-pass downsamples.
-import {createSpeechDetector} from '../../vendor/sage-vad.js?v=1.9.46';
+import {createSpeechDetector} from '../../vendor/sage-vad.js?v=1.9.47';
 class SagePCMCapture extends AudioWorkletProcessor {
   constructor() {
     super(); this.samples = new Int16Array(1600); this.offset = 0;
     this.weight = 0; this.sum = 0; this.energy = 0; this.peak = 0;
     this.ratio = sampleRate / 16000;
     this.vadFrame = new Int16Array(320); this.vadOffset = 0; this.vadEnergy = 0;
-    this.speechMs = 0; this.activeMs = 0;
+    this.speechMs = 0; this.activeMs = 0; this.endTime = 0;
     try { this.vad = createSpeechDetector(); } catch { this.vad = null; }
     this.port.onmessage = event => {
       if (event.data === 'flush') { this.flush(); this.port.postMessage({flushed:true}); }
@@ -18,13 +18,14 @@ class SagePCMCapture extends AudioWorkletProcessor {
     if (!this.offset) return;
     const pcm = this.samples.slice(0,this.offset).buffer;
     this.port.postMessage({pcm,rms:Math.sqrt(this.energy/this.offset),peak:this.peak,
-      speechMs:this.vad ? this.speechMs : null,activeMs:this.activeMs},[pcm]);
+      speechMs:this.vad ? this.speechMs : null,activeMs:this.activeMs,endTime:this.endTime},[pcm]);
     this.offset = 0; this.energy = 0; this.peak = 0; this.speechMs = 0; this.activeMs = 0;
   }
   process(inputs) {
     const input = inputs[0]?.[0];
     if (!input) return true;
-    for (const sample of input) {
+    for (let index=0; index<input.length; index++) {
+      const sample=input[index];
       let remaining = 1;
       while (remaining > 1e-8) {
         const part = Math.min(remaining, this.ratio - this.weight);
@@ -33,6 +34,7 @@ class SagePCMCapture extends AudioWorkletProcessor {
           const value = Math.max(-1,Math.min(1,this.sum/this.ratio));
           const pcm = Math.round(value * (value < 0 ? 32768 : 32767));
           this.samples[this.offset++] = pcm;
+          this.endTime = currentTime + (index+1)/sampleRate;
           this.vadFrame[this.vadOffset++] = pcm; this.vadEnergy += value * value;
           if (this.vadOffset === 320) {
             const audible = Math.sqrt(this.vadEnergy / 320) > 0.003;

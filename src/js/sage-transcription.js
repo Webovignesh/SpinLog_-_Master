@@ -5,12 +5,12 @@
   const MODEL = 'gemini-3.5-transcribe-live'; // Dedicated speech recognition, never a reply voice.
   const WS = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
   const workletURL = document.currentScript?.src
-    ? new URL('sage-pcm-worklet.js?v=1.9.46', document.currentScript.src).href
-    : 'src/js/sage-pcm-worklet.js?v=1.9.46';
+    ? new URL('sage-pcm-worklet.js?v=1.9.47', document.currentScript.src).href
+    : 'src/js/sage-pcm-worklet.js?v=1.9.47';
   const prepared = new WeakMap();
   const detectorURL = document.currentScript?.src
-    ? new URL('../../vendor/sage-vad.js?v=1.9.46', document.currentScript.src).href
-    : '../../vendor/sage-vad.js?v=1.9.46';
+    ? new URL('../../vendor/sage-vad.js?v=1.9.47', document.currentScript.src).href
+    : '../../vendor/sage-vad.js?v=1.9.47';
   let detectorModule;
   async function hasSpeech(wav) {
     // Meter-only startup/fallback audio is provisional. Classify the complete
@@ -232,6 +232,9 @@
     // routing the microphone back into speakers or adding an echo.
     source.connect(node); node.connect(context.destination);
     return {
+      // Transfer an already-running detector from reply interruption to the
+      // new utterance without reopening the microphone or losing first words.
+      rebind(handler) { if (active && !stopping) { onPCM = handler; return true; } return false; },
       stop() {
         return stopping ||= (async () => {
           let complete = false;
