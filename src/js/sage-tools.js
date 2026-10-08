@@ -87,7 +87,7 @@
         + 'ids. Use this to find the id of an upload before editing its notes or deleting it.',
       parameters: {
         type: 'object',
-        properties: { limit: { ...INTEGER, description: 'How many, newest first. Default 20, max 50.' }, kind:{...STRING,enum:['image','video','audio'],description:'Optional type filter, applied before newest-first pagination.'} },
+        properties: { limit: { ...INTEGER, description: 'How many, newest first. Default 20, max 50.' }, kind:{...STRING,enum:['image','video','audio'],description:'Optional type filter, applied before newest-first pagination.'}, query:{...STRING,description:'Optional file name substring. Filters the entire archive before pagination, including older files.'} },
       },
     },
     {
@@ -540,8 +540,9 @@
     },
     {
       name:'scroll_page',
-      description:'Scroll the visible page or current dialog when asked. Optionally use a current visible control handle as the scroll target. Keeps the voice call minimized and running.',
-      parameters:{type:'object',properties:{direction:{...STRING,enum:['up','down','left','right','top','bottom']},target:STRING},required:['direction']},
+      description:'Scroll the actual visible page or dialog and verify its final position. Steps run in sequence; use count for repeated scrolling. Optionally target a current control or scrollTargets handle from inspect_page_controls. A boundary result means it was already at that edge; never claim movement then. Keeps voice minimized and running.',
+      parameters:{type:'object',properties:{direction:{...STRING,enum:['up','down','left','right','top','bottom']},target:STRING,
+        count:{...INTEGER,description:'Number of completed scroll steps, 1 to 8.'},amount:{...STRING,enum:['small','page','large']}},required:['direction']},
     },
     {
       name:'inspect_page_controls',
@@ -725,12 +726,12 @@
     open_stored_file: (app,a,context) => app.openStoredFile({...a,isCancelled:context?.isCancelled}),
     control_media_player: (app,a,context) => app.controlMediaPlayer({...a,isCancelled:context?.isCancelled}),
     show_record: (app,a,context) => app.showRecord({...a,isCancelled:context?.isCancelled}),
-    click_page_control: (_app,a) => root.SagePageControls?.click(a) || {ok:false,error:'Page controls are still loading.'},
-    scroll_page: (_app,a) => root.SagePageControls?.scroll(a) || {ok:false,error:'Page controls are still loading.'},
+    click_page_control: (_app,a,context) => root.SagePageControls?.click(a,context) || {ok:false,error:'Page controls are still loading.'},
+    scroll_page: (_app,a,context) => root.SagePageControls?.scroll(a,context) || {ok:false,error:'Page controls are still loading.'},
     inspect_page_controls: () => root.SagePageControls?.inspect() || {ok:false,error:'Page controls are still loading.'},
-    fill_page_fields: (_app,a) => root.SagePageControls?.fill(a) || {ok:false,error:'Page controls are still loading.'},
-    open_page_form: (_app,a) => root.SagePageControls?.openForm(a) || {ok:false,error:'Page controls are still loading.'},
-    activate_page_control: (_app,a) => root.SagePageControls?.action(a) || {ok:false,error:'Page controls are still loading.'},
+    fill_page_fields: (_app,a,context) => root.SagePageControls?.fill(a,context) || {ok:false,error:'Page controls are still loading.'},
+    open_page_form: (_app,a,context) => root.SagePageControls?.openForm(a,context) || {ok:false,error:'Page controls are still loading.'},
+    activate_page_control: (_app,a,context) => root.SagePageControls?.action(a,context) || {ok:false,error:'Page controls are still loading.'},
     control_voice: (_app, a) => {
       if (!['open', 'close', 'minimize', 'expand'].includes(a.action)) return { ok: false, error: 'Unknown voice action.' };
       if (!root.SageVoice) return { ok: false, error: 'Voice mode is not loaded.' };
@@ -739,17 +740,24 @@
       if (['minimize','expand'].includes(a.action) && !root.SageVoice[a.action]?.()) return {ok:false,error:'There is no active voice conversation.'};
       return { ok: true, voice: a.action === 'close' ? 'closed' : a.action };
     },
-    navigate_history: async (app,a) => {
-      const result = await app.navigateHistory(a);
+    navigate_history: async (app,a,context) => {
+      const allowed=await prepareNavigation(app,context);
+      if(!allowed.ok)return allowed;
+      const result = await app.navigateHistory({...a,isCancelled:context?.isCancelled});
+      if(result.ok && root.SagePageControls?.inspect().section && root.SagePageControls.inspect().section!==result.opened)return {ok:false,error:'The requested page did not become visible.'};
       if (result.ok) root.SageVoice?.minimize?.();
-      return result;
+      return {...result,verified:!!result.ok};
     },
-    prepare_file_upload: (app,a) => app.prepareFileUpload(a),
-    navigate_section: async (app, a) => {
+    prepare_file_upload: (app,a,context) => app.prepareFileUpload({...a,isCancelled:context?.isCancelled}),
+    navigate_section: async (app, a, context) => {
       if (!['home', 'service', 'docs', 'sage'].includes(a.section)) return { ok: false, error: 'Unknown section.' };
-      const result = await app.goToSection({ section: a.section });
+      const allowed=await prepareNavigation(app,context);
+      if(!allowed.ok)return allowed;
+      const result = await app.goToSection({ section: a.section,isCancelled:context?.isCancelled });
+      const actual=root.SagePageControls?.inspect().section || result.opened;
+      if(result.ok && actual!==a.section)return {ok:false,error:'The requested page did not become visible.'};
       if (result.ok) root.SageVoice?.minimize?.();
-      return result;
+      return {...result,verified:!!result.ok};
     },
     open_sage_settings: (_app, a) => {
       if (!['memory', 'voice', 'timing', 'alerts'].includes(a.tab)) return { ok: false, error: 'Unknown settings panel.' };
@@ -1118,6 +1126,19 @@
     },
   };
 
+  async function prepareNavigation(app,context) {
+    if(context?.isCancelled?.())return {ok:false,error:'Navigation was cancelled.'};
+    const dialog=root.SagePageControls?.inspect().dialog;
+    if(!dialog)return {ok:true};
+    if(dialog==='docsPlayer') {
+      const closed=await app.controlMediaPlayer({action:'close',isCancelled:context?.isCancelled});
+      if(!closed?.ok)return closed || {ok:false,error:'Close the file viewer first.'};
+    } else if(dialog==='sageSettingsModal')root.SageUI?.close?.();
+    else return {ok:false,error:'Close the current form or confirmation before changing pages. Your draft is still open.'};
+    if(context?.isCancelled?.() || root.SagePageControls?.inspect().dialog)return {ok:false,error:'The current panel did not close. Navigation was not completed.'};
+    return {ok:true};
+  }
+
   /** Anything that changes or removes data, for the log line and the UI hint. */
   const WRITES = new Set([
     'log_service', 'update_service', 'update_cover', 'update_media_notes',
@@ -1185,8 +1206,11 @@
   }
   function uiReply(intent, result) {
     if (!result?.ok) return result?.error || 'That action could not finish. Try again.';
-    if (intent.name === 'click_page_control') return `Activated ${result.activated}.`;
-    if (intent.name === 'scroll_page') return `Scrolling ${intent.direction}.`;
+    if (intent.name === 'click_page_control') return result.outcome==='file_opened' ? `Opened ${result.name || result.activated}.`
+      : result.playing ? `Playing ${result.name || 'the file'}.` : result.closed ? 'Closed the file viewer.'
+      : `Pressed ${result.activated}.`;
+    if (intent.name === 'scroll_page') return result.moved===false ? `Already at the ${result.boundary || 'edge'}.`
+      : result.verified ? `Scrolled ${intent.direction}${result.steps>1?` ${result.steps} times`:''}.` : 'The scroll has not been confirmed.';
     if (intent.name === 'fill_page_fields') {
       const draft=result.changed.some(field=>['serviceEntryForm','serviceEditModal','docAddModal','historicNotesModal','coverEditModal','parkHistoryModal'].includes(field.form));
       return `${result.changed.map(field => `${field.label}: ${field.checked === undefined ? field.value : field.checked ? 'on' : 'off'}`).join(', ')}. ${draft ? 'Filled in for review.' : 'Controls updated.'}`;
@@ -1207,8 +1231,8 @@
     // Split only an explicit next command. Ordinary "and" in notes or a
     // document name is data, not permission to perform another action.
     const text = directRequest(raw);
-    if (!/^(?:(?:hey )?sage[, ]+|bro\s+|please\s+|(?:can|could|would) you\s+)*(?:open|go|take|switch|show|hide|close|stop|end|hang|back|next|previous|clear|set|fill|enter|change|select|choose|minimi[sz]e|expand|restore|maximize|search|upload|attach|click|press|tap|scroll|slide|move|type)\b/i.test(text)) return [text];
-    const parts = [], separator = /\s*(;\s*|,?\s+(?:and then|then|and)\s+)(?=(?:please\s+)?(?:open|go to|take me to|switch to|show|hide|close|stop|end|hang up|back|next|previous|clear|set|fill|enter|change|select|choose|minimi[sz]e|expand|restore|maximize|search|upload|attach|click|press|tap|scroll|slide|move|type)\b)/gi;
+    if (!/^(?:(?:hey )?sage[, ]+|bro\s+|please\s+|(?:can|could|would) you\s+)*(?:open|go|take|switch|show|hide|close|stop|end|hang|back|next|previous|clear|set|fill|enter|change|select|choose|minimi[sz]e|expand|restore|maximize|search|upload|attach|click|press|tap|scroll|slide|move|type|play|pause|resume)\b/i.test(text)) return [text];
+    const parts = [], separator = /\s*(;\s*|,?\s+(?:and then|then|and)\s+)(?=(?:please\s+)?(?:open|go to|take me to|switch to|show|hide|close|stop|end|hang up|back|next|previous|clear|set|fill|enter|change|select|choose|minimi[sz]e|expand|restore|maximize|search|upload|attach|click|press|tap|scroll|slide|move|type|play|pause|resume)\b)/gi;
     let from = 0;
     for (const match of text.matchAll(separator)) {
       const before = text.slice(from,match.index), value = before.match(/^(?:please\s+)?(?:set|fill|enter|change)\s+.+?\s+(?:to|with|as)\s+(.+)$/i)?.[1];
@@ -1226,12 +1250,13 @@
       parts.push(before.trim()); from = match.index + match[0].length;
     }
     parts.push(text.slice(from).trim());
-    return parts.length <= 6 ? parts.map(part => part.trim()).filter(Boolean) : [];
+    return parts.length <= 12 ? parts.map(part => part.trim()).filter(Boolean) : [];
   }
   function uiPlan(raw) {
     const requests = uiRequests(raw);
     if (requests.length === 1 && !uiIntent(requests[0]) && !root.SagePageControls?.intent?.(requests[0])) return null;
-    if (!requests.length || !requests.every(text => uiIntent(text) || root.SagePageControls?.canHandle?.(text) || root.SagePageControls?.intent?.(text))) return null;
+    if (!requests.length || !requests.every(text => uiIntent(text) || root.SagePageControls?.canHandle?.(text) || root.SagePageControls?.intent?.(text)
+      || fileRequest(text) || playbackIntent(text))) return null;
     return requests;
   }
   function fileRequest(raw) {
@@ -1248,36 +1273,66 @@
   }
   async function handleFileRequest(context) {
     if(context?.isCancelled?.()) return {ok:false,reason:'cancelled'};
+    if(uiRequests(context?.userText).length!==1)return null;
+    const calls=[];
+    const execute=async(name,args)=>{const result=await run(name,args,context);calls.push({name,args,result});return result;};
     const playback=playbackIntent(context?.userText);
     if(playback && root.SagePageControls?.inspect().dialog==='docsPlayer') {
-      const result=await run('control_media_player',playback,context);
-      return {ok:true,text:result.ok ? result.playing?'Playing.':result.paused?'Paused.':result.closed?'Closed the file viewer.':`Opened ${result.opened}.` : result.error};
+      const result=await execute('control_media_player',playback);
+      return {ok:true,completed:!!result.ok,calls,text:result.ok ? result.playing?'Playing.':result.paused?'Paused.':result.closed?'Closed the file viewer.':`Opened ${result.opened}.` : result.error};
     }
-    if(uiPlan(context?.userText)) return null;
+    if(uiIntent(context?.userText) || root.SagePageControls?.intent?.(context?.userText)) return null;
     const request=fileRequest(context?.userText);
     if(!request) return null;
     const label=request.label.toLowerCase(),clean=t=>String(t).toLowerCase().replace(/[^a-z0-9]/g,'');
     let kind,id,name;
-    const document=/\b(?:licen[cs]e|rc|puc|insurance|document|passport)\b/i.test(label);
-    const media=/\b(?:video|audio|recording|image|photo|picture|archive)\b/i.test(label);
+    const document=/\b(?:licen[cs]e|rc|puc|insurance|document|passport)\b/i.test(label) || /\.pdf\b/i.test(label);
+    const media=/\b(?:video|audio|recording|image|photo|picture|archive)\b/i.test(label) || /\.(?:mp4|webm|mov|mp3|wav|m4a|ogg|png|jpe?g|webp|gif|avif)\b/i.test(label);
     if(document && !media) {
-      const inventory=await run('list_documents',{},context);
-      if(!inventory.ok) return {ok:true,text:inventory.error};
+      const inventory=await execute('list_documents',{});
+      if(!inventory.ok) return {ok:true,completed:false,calls,text:inventory.error};
       const alias=t=>/licen[cs]e/.test(t)?'license':/\b(rc|registration)\b/.test(t)?'rc':/\bpuc\b/.test(t)?'puc':/insurance/.test(t)?'insurance':clean(t);
-      const matches=(inventory.documents || []).filter(row=>row.onFile && (alias(row.document.toLowerCase())===alias(label) || clean(label).includes(clean(row.document))));
+      const matches=(inventory.documents || []).filter(row=>row.onFile && (alias(row.document.toLowerCase())===alias(label) || clean(label).includes(clean(row.document))
+        || row.fileName && clean(label).includes(clean(row.fileName))));
       if(matches.length===1) {kind='document';id=matches[0].document;name=id;}
-    } else if(media) {
-      const type=/\bvideo\b/.test(label)?'video':/\b(audio|recording)\b/.test(label)?'audio':/\b(image|photo|picture)\b/.test(label)?'image':null;
-      const inventory=await run('list_media',{limit:50,...(type?{kind:type}:{})},context);
-      if(!inventory.ok) return {ok:true,text:inventory.error};
-      const records=(inventory.media || []).filter(row=>!type || row.kind===type);
+      else if(matches.length>1)return {ok:true,completed:false,calls,text:'More than one saved document matches. Which exact document should I open?'};
+    }
+    if(!id && (media || /\.[a-z0-9]{2,5}\b/i.test(label))) {
+      const type=/\bvideo\b|\.(?:mp4|webm|mov)\b/.test(label)?'video':/\b(audio|recording)\b|\.(?:mp3|wav|m4a|ogg)\b/.test(label)?'audio':/\b(image|photo|picture)\b|\.(?:png|jpe?g|webp|gif|avif)\b/.test(label)?'image':null;
       const newest=/\b(last|latest|newest|recent)\b/.test(label);
+      const query=newest?'':request.label.replace(/^(?:(?:the|my|saved|archive|file|video|audio|image|photo|picture)\s+)+/i,'').replace(/^"([\s\S]*)"$|^'([\s\S]*)'$/g,(_m,a,b)=>a ?? b).trim();
+      const inventory=await execute('list_media',{limit:50,...(type?{kind:type}:{}),...(query?{query}:{})});
+      if(!inventory.ok) return {ok:true,completed:false,calls,text:inventory.error};
+      const records=(inventory.media || []).filter(row=>!type || row.kind===type);
       const matches=newest ? records.slice(0,1) : records.filter(row=>clean(label).includes(clean(row.fileName)));
       if(matches.length===1) {kind='media';id=String(matches[0].id);name=matches[0].fileName;}
+      else if(matches.length>1)return {ok:true,completed:false,calls,text:'More than one saved file matches. Which exact file should I open?'};
     }
-    if(!id || context?.isCancelled?.()) return context?.isCancelled?.()?{ok:false,reason:'cancelled'}:null;
-    const result=await run('open_stored_file',{kind,id,action:request.action},context);
-    return {ok:true,text:result.ok ? result.playing?`Playing ${name}.`:`Opened ${name}.` : result.error};
+    if(!id || context?.isCancelled?.()) return context?.isCancelled?.()?{ok:false,reason:'cancelled'}
+      : document || media ? {ok:true,completed:false,calls,text:'I couldn’t find one saved file matching that name. Tell me its exact name.'} : null;
+    const result=await execute('open_stored_file',{kind,id,action:request.action});
+    return {ok:true,completed:!!result.ok,calls,text:result.ok ? result.playing?`Playing ${name}.`:`Opened ${name}.` : result.error};
+  }
+  const ACTION_RESULTS=new Set(['navigate_section','navigate_history','open_sage_settings','control_voice','open_stored_file','control_media_player',
+    'show_record','click_page_control','scroll_page','fill_page_fields','open_page_form','activate_page_control','prepare_file_upload']);
+  function actionReply(raw,calls=[]) {
+    const actions=calls.filter(call=>ACTION_RESULTS.has(call.name));
+    const text=directRequest(raw).replace(/^(?:(?:hey )?sage[, ]+|bro\s+|please\s+|(?:can|could|would) you\s+)*/i,'');
+    const pure=/^(?:open|go to|take me to|switch to|click|press|tap|scroll|play|pause|resume|close|back|next|previous|minimi[sz]e|expand|restore|set|fill|enter|type|slide|move)\b/i.test(text)
+      && !/\b(?:what|why|how|explain|summari[sz]e|tell me)\b/i.test(text);
+    // For imperative UI requests the model may reason about the next control,
+    // but only receipts can announce completion. Mixed questions retain their
+    // answer unless a requested action failed; report that failure truthfully.
+    if(!pure && !actions.some(call=>call.result?.ok===false))return null;
+    if(!actions.length)return pure && !calls.some(call=>WRITES.has(call.name)) ? 'That action hasn’t completed. Tell me the page, exact file name, or visible control you want.' : null;
+    return actions.map(({name,args={},result})=>{
+      if(!result?.ok)return result?.error || 'That action could not finish.';
+      if(name==='open_stored_file')return result.playing ? `Playing ${result.name || args.id}.` : `Opened ${result.name || args.id}.`;
+      if(name==='control_media_player')return result.playing?'Playing.':result.paused?'Paused.':result.closed?'Closed the file viewer.':`Opened ${result.opened}.`;
+      if(name==='show_record')return result.highlighted?'The record is highlighted.':result.opened?.endsWith('_editor')?'The record editor is open for review.':'The record could not be confirmed on screen.';
+      if(name==='prepare_file_upload')return result.uploaded===true?'The file was uploaded.':'The upload form is ready. Choose the local file to continue.';
+      return uiReply({name,...args},result);
+    }).join(' ');
   }
   function relatedPresentationAllowed(context) {
     const text=String(context?.userText || '');
@@ -1533,7 +1588,7 @@
   }
 
   root.SageTools = {
-    declarations, run, isWrite, describe, iconFor, uiIntent, uiReply, uiRequests, uiPlan,
+    declarations, run, isWrite, describe, iconFor, uiIntent, uiReply, uiRequests, uiPlan, actionReply,
     TOOLS, HANDLERS, WRITES, APP_FREE, DOING, ICONS, handleFileRequest,
   };
 })(typeof self !== 'undefined' ? self : this);
