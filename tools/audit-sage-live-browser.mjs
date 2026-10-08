@@ -21,7 +21,7 @@ const server=http.createServer(async(req,res)=>{
   if(!file.startsWith(root+path.sep)){res.writeHead(403).end();return;}
   try{let data=await readFile(file);
     if(rel==='index.html')data=data.toString().replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace('</body>',
-      '<script src="src/js/sage-transcription.js?v=1.9.46"></script><script src="src/js/sage-voice.js?v=1.9.46"></script></body>');
+      '<script src="src/js/sage-transcription.js?v=1.9.47"></script><script src="src/js/sage-voice.js?v=1.9.47"></script></body>');
     res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.css':'text/css'})[path.extname(file)]||'application/octet-stream');res.end(data);
   }catch{res.writeHead(404).end();}
 });
@@ -54,8 +54,12 @@ try{
         if(value.setup)setTimeout(()=>this.message({setupComplete:{}}),this.id===0?700:0);
         if(value.realtimeInput?.audio){this.packets.push(value.realtimeInput.audio);
           (this.byTurn[this.turn] ||= []).push(value.realtimeInput.audio);this.turnPackets++;
+          if(this.turnPackets===6 && this.turn<7){
+            // Every test utterance ends before the reply. A mic left playing
+            // speech throughout a reply now correctly triggers interruption.
+            window.testMicGain.gain.value=0;
+          }
           if(this.turnPackets===6 && this.turn<6){
-            if(this.turn<5)window.testMicGain.gain.value=0; // a real pause, not a provider shortcut
             this.message({serverContent:{interimInputTranscription:{text:this.turn%2?'tell me more':'hello there'}}});
             if(this.turn<5)setTimeout(()=>this.message({serverContent:{inputTranscription:{text:this.turn%2?'tell me more':'hello there'},generationComplete:true}}),50);
           }

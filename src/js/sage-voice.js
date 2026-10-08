@@ -32,6 +32,8 @@
     },
     get recognition() { return 'gemini'; }, // migrate old browser preferences to audio
     get pauseMs() { const pause = load('sage_voice_pause', 'natural'); return pause === 'patient' ? 1200 : pause === 'quick' ? 650 : 900; },
+    get longCommands() { return load('sage_voice_long_commands', 'on') !== 'off'; },
+    get interruption() { return load('sage_voice_interrupt', 'on') !== 'off'; },
   };
 
   // ── State ─────────────────────────────────────────────────────────────
@@ -112,6 +114,7 @@
   let actx = null;
   const playbackSources = new Map();
   let playbackNextAt = 0;
+  const outputReference = []; // Scheduled PCM, used locally to reject our own speaker echo.
   let cancelSpeech = null;
   let voiceSession = 0;
   const ttsRequests = new Set();
@@ -318,6 +321,10 @@
     throw new Error('no-audio');
   }
   function stopPlayback() {
+    if(actx) {
+      for(const reference of outputReference)reference.end=Math.min(reference.end,actx.currentTime);
+      trimOutputReference(actx.currentTime);
+    }
     for (const [source, finish] of [...playbackSources]) {
       source.onended = null;
       try { source.stop(); } catch { /* already ended */ }
@@ -374,6 +381,8 @@
     const startAt = Math.max(now + (playbackNextAt > now ? 0 : 0.08), playbackNextAt);
     const endAt = startAt + buffer.duration/rate;
     playbackNextAt = endAt;
+    outputReference.push({samples:audio.samples,rate:audio.rate*rate,start:startAt,end:endAt});
+    trimOutputReference(now);
     return new Promise((resolve, reject) => {
       let settled = false;
       let timer;
@@ -456,8 +465,9 @@
     }
   }
   let brainController = null;
-  function cancelTurn() {
+  function cancelTurn(seed = null) {
     if (!S.open) return false;
+    stopInterruptMonitor(!!seed);
     // Invalidate the brain/tool callbacks as well as STT and queued playback.
     // Keep the microphone stream, selected speaker and dock position intact.
     S.session++;
@@ -467,13 +477,12 @@
     S.resumeAfterReply = false; S.recognitionFailed = false;
     paintCaption('', false); setActivity(null); setHint('');
     startVisualizer();
-    if (!S.muted && !S.backgrounded) { warmRecognition(); startListening(); }
+    if (!S.muted && !S.backgrounded) { warmRecognition(); startListening(seed); }
     else setMode('idle', S.muted ? 'Microphone paused' : 'Microphone paused while away');
     return true;
   }
   function interrupt() {
-    stopAllAudio();
-    if (S.open && !S.busy && !S.muted) startListening();
+    return cancelTurn();
   }
 
   // One capture owner per turn. Stopping waits for MediaRecorder's final data
@@ -481,10 +490,12 @@
   const GEM_STT_MODEL = 'gemini-3.5-flash';
   const GEM_API = 'https://generativelanguage.googleapis.com/v1beta';
   let capture = null;
+  let captureRelease = Promise.resolve();
   let captureEpoch = 0;
   let openingMic = false;
   let sttController = null;
   let recognitionNotice = '', recoveryEpisode = '', replyAudioNotice = '';
+  let commandNotice = '';
   let nativeEnglishFallback = false, nativeRestUntil = 0;
   const sttCooldowns = new Map(); // key-specific; no background retry of old audio
   const sttModelRest = new Map(); // quota/access on one model must not block another
@@ -511,6 +522,124 @@
   }
 
   function current(owner) { return S.open && owner === S.session; }
+  function turnPauseMs(take) {
+    const base = settings.pauseMs;
+    if (!settings.longCommands) return base;
+    const text = take.previewText || take.nativeCaption || '';
+    const extended = take.speechStartedAt && Date.now()-take.speechStartedAt >= 8000
+      || text.trim().split(/\s+/).length >= 24;
+    const unfinished = /\b(?:and|then|but|because|with|to|from|for|actually|instead|also)\s*[,.]?\s*$/i.test(text);
+    return extended || unfinished ? (base < 900 ? 1600 : base > 900 ? 2600 : 2200) : base;
+  }
+  function trimOutputReference(now) {
+    while (outputReference.length && outputReference[0].end < now-.8) outputReference.shift();
+  }
+  function echoScore(pcm, endTime = actx?.currentTime) {
+    if (!actx || !outputReference.length) return 0;
+    const input = new Int16Array(pcm), now = Number.isFinite(endTime) ? endTime : actx.currentTime;
+    trimOutputReference(now);
+    // Correlate with audio actually scheduled on this context, including room
+    // delay and playback rate. Volume alone cannot distinguish voice from echo.
+    const count=Math.ceil(input.length/8), values=new Float32Array(count);
+    let energy=0;
+    for(let j=0;j<count;j++){values[j]=input[j*8]/32768;energy+=values[j]*values[j];}
+    if(energy<=1e-7)return 0;
+    const referenceAt=at=>{
+      const reference=outputReference.find(r=>at>=r.start && at<r.end);
+      if(!reference)return null;
+      const position=(at-reference.start)*reference.rate, index=Math.floor(position), fraction=position-index;
+      return (reference.samples[index] || 0)*(1-fraction)+(reference.samples[index+1] || 0)*fraction;
+    };
+    // Resample the shared reference window once, rather than looking up a
+    // playback chunk for every sample at every candidate delay.
+    const window=new Float32Array(count+800), coverage=new Uint8Array(window.length);
+    const start=now-input.length/16000-.4;
+    for(let j=0;j<window.length;j++){
+      const value=referenceAt(start+j/2000);
+      if(value!==null){window[j]=value;coverage[j]=1;}
+    }
+    let best = 0, bestDelay=0;
+    const score=delay=>{
+      let yy=0, xy=0, covered=0;
+      for (let j=0;j<count;j++) {
+        const value=referenceAt(now-(input.length-j*8)/16000-delay),y=value || 0;
+        yy+=y*y;xy+=values[j]*y;if(value!==null)covered++;
+      }
+      return covered>=count*.6 && yy>1e-7 ? Math.abs(xy)/Math.sqrt(energy*yy) : 0;
+    };
+    // Ten-millisecond steps miss speech waveform phase. Use a submillisecond
+    // delay grid, then refine the strongest match to the microphone sample.
+    for (let offset=0; offset<=800; offset++) {
+      let yy=0,xy=0,covered=0;
+      for(let j=0;j<count;j++){
+        const y=window[offset+j];yy+=y*y;xy+=values[j]*y;covered+=coverage[offset+j];
+      }
+      const value=covered>=count*.6 && yy>1e-7 ? Math.abs(xy)/Math.sqrt(energy*yy) : 0;
+      if(value>best){best=value;bestDelay=(800-offset)/2000;}
+    }
+    for(let delay=Math.max(0,bestDelay-.0005);delay<=bestDelay+.0005;delay+=1/16000){
+      best=Math.max(best,score(delay));
+    }
+    return best;
+  }
+  let interruptMonitor = null;
+  function paintInterruptReady(ready) {
+    els().overlay?.setAttribute('data-can-interrupt',String(ready));
+    if (S.mode==='speaking') {
+      const instruction=$('sageVoiceInstruction');
+      if(instruction)instruction.textContent=ready ? 'Speak to interrupt. Hold the orb to cancel.' : 'Tap to interrupt. Hold to listen again.';
+    }
+  }
+  function stopInterruptMonitor(transfer = false) {
+    const monitor=interruptMonitor; interruptMonitor=null;
+    paintInterruptReady(false);
+    if (monitor) {
+      monitor.cancelled=true;
+      clearInterval(monitor.watchdog);
+      if (!transfer) monitor.pcm?.stop().catch(()=>{});
+      monitor.frames=[];
+    }
+  }
+  function startInterruptMonitor() {
+    if (!settings.interruption || !S.open || S.muted || S.backgrounded || interruptMonitor
+      || !root.SageTranscription?.attach || !(S.busy || S.transcribing || S.speaking)) return;
+    const monitor={owner:S.session,frames:[],voicedMs:0,cancelled:false,pcm:null};
+    interruptMonitor=monitor;
+    const valid=()=>interruptMonitor===monitor && current(monitor.owner) && !monitor.cancelled
+      && settings.interruption && !S.muted && !S.backgrounded;
+    (async()=>{
+      await captureRelease;
+      if(!valid()) return;
+      const stream=await startMeter();
+      if(!valid()) return;
+      monitor.pcm=await root.SageTranscription.attach(stream,actx,frame=>{
+        if(!valid()) return;
+        if(frame.failed || !Number.isFinite(frame.speechMs)) { stopInterruptMonitor(); return; }
+        monitor.lastAt=Date.now();
+        paintInterruptReady(true);
+        const duration=frame.pcm.byteLength/32;
+        const echo=echoScore(frame.pcm,frame.endTime) >= .78;
+        const speech=!echo && frame.speechMs>=Math.min(40,duration*.5) && frame.rms>Math.max(.004,noiseFloor*1.6);
+        // Never carry the assistant's echo into the next utterance. Keep up to
+        // 600 ms of non-echo prefix locally; no audio is sent while she replies.
+        if(echo) monitor.frames=[];
+        else monitor.frames.push(frame);
+        while(monitor.frames.reduce((n,f)=>n+f.pcm.byteLength,0)>19200 && monitor.frames.length>1)monitor.frames.shift();
+        monitor.voicedMs=speech ? monitor.voicedMs+Math.min(duration,frame.speechMs) : 0;
+        if(monitor.voicedMs<180 || !monitor.pcm || !(S.busy || S.transcribing || S.speaking)) return;
+        const seed={pcm:monitor.pcm,frames:monitor.frames.slice()};
+        captureEvent('spoken-interruption');
+        cancelTurn(seed);
+      });
+      if(!valid()) { monitor.pcm?.stop().catch(()=>{}); return; }
+      if(!monitor.pcm) { stopInterruptMonitor(); return; }
+      // Processor failure never changes the working reply/listening loop.
+      monitor.started=Date.now();
+      monitor.watchdog=setInterval(()=>{
+        if(valid() && Date.now()-(monitor.lastAt || monitor.started)>(monitor.lastAt ? 750 : 3000))stopInterruptMonitor();
+      },300);
+    })().catch(()=>{if(valid())stopInterruptMonitor();});
+  }
   function canListen() {
     return S.open && !S.backgrounded && !S.muted && !S.busy && !S.speaking && !S.transcribing && !S.recognitionFailed;
   }
@@ -603,6 +732,7 @@
     return meterLevel;
   }
   function stopMeter() {
+    stopInterruptMonitor(); outputReference.length=0;
     const stream = meterStream;
     meterStream = null;
     stream?.getTracks().forEach(t => { t.onended = null; t.stop(); });
@@ -645,9 +775,11 @@
     outputAnalyser = outputData = null;
     paintLevel(0);
   }
-  function startListening() {
+  function startListening(seed = null) {
     if (!canListen() || openingMic || S.recording) return false;
-    return startGeminiListen();
+    if (!seed && interruptMonitor?.pcm) seed={pcm:interruptMonitor.pcm,frames:[]};
+    stopInterruptMonitor(!!seed);
+    return startGeminiListen(seed);
   }
   async function resumeListening(owner) {
     if (!current(owner) || S.busy || S.speaking) return false;
@@ -797,7 +929,7 @@
     }
     return text;
   }
-  async function startGeminiListen() {
+  async function startGeminiListen(seed = null) {
     if (!canListen() || openingMic || S.recording) return false;
     const owner = S.session;
     const epoch = ++captureEpoch;
@@ -807,8 +939,17 @@
     const take = { recorder:null, chunks:[], frames:[], preRoll:[], owner, epoch, heard:false, loudAt:0, voicedMs:0,
       quietAt:0, previewText:'', started:Date.now(), timer:null, stopping:false, cancelled:false,
       micStarted:false, liveReady:false, pcmUnavailable:!root.SageTranscription };
+    if(seed?.frames?.length) {
+      take.frames=seed.frames.map(frame=>frame.pcm);
+      take.preRoll=take.frames.slice(); take.heard=take.vadConfirmed=true;
+      take.speechStartedAt=Date.now();
+      take.seeded=true;
+    }
+    take.pcm=seed?.pcm || null;
     capture = take;
-    take.native = nativeEnglishFallback ? englishBrowserListener(take) : null;
+    // A newly started browser recognizer cannot replay buffered first words.
+    // A spoken interruption uses Live/complete PCM for this turn instead.
+    take.native = nativeEnglishFallback && !take.seeded ? englishBrowserListener(take) : null;
     paintCaption('', false);
     warmRecognition();
     take.live = warmEars; warmEars = null;
@@ -840,7 +981,7 @@
           // Server finals can arrive mid-sentence. They never bypass the
           // microphone's breathing window, or cut off renewed local speech.
           if (current(owner) && capture === take && !take.stopping && take.heard && take.previewText
-            && take.quietAt && Date.now()-take.quietAt >= settings.pauseMs) finishGeminiListen(true);
+            && take.quietAt && Date.now()-take.quietAt >= turnPauseMs(take)) finishGeminiListen(true);
         },
       });
     }
@@ -877,7 +1018,7 @@
         // owns the complete utterance; switch this turn to that recording.
         abandonPartialPCM();
       }, 8000);
-      root.SageTranscription?.attach(stream, actx, frame => {
+      const receivePCM = frame => {
         if (capture !== take || take.cancelled) return;
         if (frame.failed) {
           captureEvent('processor-failed');
@@ -885,6 +1026,11 @@
           take.live?.close(); take.live = null;
           liveDisabled = true; releaseWarmRecognition();
           paintCaptureReadiness(take); return;
+        }
+        if(echoScore(frame.pcm,frame.endTime)>=.78) {
+          // Include a silent packet on the same clock, rather than accepting
+          // the acoustic tail of a reply as the start of a new command.
+          frame={...frame,pcm:new ArrayBuffer(frame.pcm.byteLength),rms:0,speechMs:0,activeMs:0};
         }
         if(!take.pcmAt) captureEvent('first-audio-frame');
         take.frames.push(frame.pcm);
@@ -917,6 +1063,8 @@
           speechStarted = !take.heard;
           if(speechStarted) captureEvent('speech-start',{rms:Math.round(frame.rms*10000)/10000,voicedMs:take.voicedMs});
           take.heard = true; take.quietAt = 0;
+          commandNotice='';
+          take.speechStartedAt ||= Date.now();
           if (take.vadReady) take.vadConfirmed = true;
           if (take.vadConfirmed && take.nativeCaption && !take.previewText) { take.previewText=take.nativeCaption; paintCaption(take.nativeCaption,take.nativeDraft); }
         }
@@ -931,7 +1079,15 @@
         clearTimeout(take.readyTimer);
         paintCaptureReadiness(take);
         if (speechStarted && !take.previewText) setHint('I can hear you. No need to repeat — your words are on the way.');
-      }).then(handle => {
+      };
+      const pcmAttachment = seed?.pcm?.rebind?.(receivePCM) ? Promise.resolve(seed.pcm)
+        : root.SageTranscription?.attach(stream, actx, receivePCM);
+      if(seed?.frames?.length) {
+        for(const pcm of take.preRoll)take.live?.push(pcm);
+        take.preRoll=[];
+        take.liveGap=!seed.pcm; // compressed fallback does not contain the prefix
+      }
+      pcmAttachment?.then(handle => {
         if (!current(owner) || capture !== take || take.cancelled || take.stopping) { handle?.stop(); return; }
         take.pcm = handle;
         // Only use the full recording if speech could have preceded PCM.
@@ -996,13 +1152,15 @@
           if (!take.loudAt) take.loudAt = now;
           if (!take.vadReady && now - take.loudAt >= 100 && !take.heard) {
             take.heard = true;
+            commandNotice='';
+            take.speechStartedAt ||= now;
             if (!take.previewText) setHint('Your mic is recording while speech detection starts.');
           }
         } else {
           take.loudAt = 0;
           if (take.heard || take.prefixCandidate) {
             if (!take.quietAt) take.quietAt = now;
-            if (now - take.quietAt >= settings.pauseMs && take.readyForSpeech) {
+            if (now - take.quietAt >= turnPauseMs(take) && take.readyForSpeech) {
               if(take.prefixCandidate && !take.heard && !take.previewText && take.vadReady && root.SageTranscription?.hasSpeech) checkColdPrefix(take);
               else finishGeminiListen(true);
             }
@@ -1030,7 +1188,14 @@
           } else {
             pauseListening('Recording stopped. Tap the mic to retry.');
           }
-        } else if (now - take.started >= 45000) finishGeminiListen(true);
+        } else if (settings.longCommands ? take.speechStartedAt && now-take.speechStartedAt>=120000 : now-take.started>=45000) {
+          // A resource limit is never permission to execute an unfinished task.
+          if(settings.longCommands) {
+            commandNotice='Two-minute recording limit reached. Nothing was submitted. Please split the command into smaller parts.';
+            cancelGeminiListen(); startListening();setHint(commandNotice);
+            captureEvent('long-command-limit');
+          } else finishGeminiListen(true);
+        }
       }, 100);
       return true;
     } catch (err) {
@@ -1075,7 +1240,7 @@
     setMode(label === 'I’m listening' ? 'listening' : 'starting', label);
     const el = $('sageVoiceInstruction');
     if (el) el.textContent = instruction;
-    setHint(replyAudioNotice || (label === 'I’m listening' ? recognitionNotice || 'Pause to send, or tap the orb when you’re done.' : ''));
+    setHint(commandNotice || replyAudioNotice || (label === 'I’m listening' ? recognitionNotice || 'Pause to send, or tap the orb when you’re done.' : ''));
   }
   function recorderStopped(take,recorder) {
     if(capture !== take || take.cancelled || !current(take.owner) || take.recorder !== recorder) return;
@@ -1092,7 +1257,7 @@
     take.cancelled = true;
     take.native?.cancel();
     take.live?.close();
-    take.pcm?.stop().catch(() => {});
+    captureRelease=Promise.resolve(take.pcm?.stop()).catch(() => {});
     clearInterval(take.timer);
     clearTimeout(take.stopTimer);
     clearTimeout(take.readyTimer);
@@ -1147,6 +1312,7 @@
     // Flush the last PCM packet and finalize recognition alongside the
     // recorder. A slow recorder stop must not delay the speech endpoint.
     finalizeCapture(take);
+    startInterruptMonitor();
     try {
       // dataavailable arrives BEFORE stop; only onstop assembles the blob.
       // Some recorders never dispatch stop. PCM capture can still finish the
@@ -1159,7 +1325,8 @@
     return take.finalizing ||= (async () => {
       const native = take.native?.end();
       try {
-        if (await bounded(take.pcm?.stop(), 200, 'capture-timeout') === false) take.pcmBroken = true;
+        captureRelease=Promise.resolve(take.pcm?.stop());
+        if (await bounded(captureRelease, 200, 'capture-timeout') === false) take.pcmBroken = true;
       } catch { take.pcmBroken = true; }
       if (take.pcmBroken) { take.live?.close(); take.live = null; }
       if (!take.vadConfirmed) {
@@ -1191,6 +1358,13 @@
     else if (liveFailed) retireRecognition(take.live);
     else take.live?.close();
     capture = null;
+    if(take.seeded && (take.pcmBroken || take.liveGap)) {
+      // A compressed recorder starts after interruption. If PCM then fails,
+      // that recording is missing the first words; never execute its fragment.
+      take.chunks=[];take.frames=[];S.transcribing=false;S.busy=true;
+      const clarification='I missed part of your interruption. Could you say the full request again?';
+      addLine('her',clarification);await deliverReply(clarification,take.owner);return;
+    }
     if (take.vadReady && !take.vadConfirmed && !take.prefixCandidate) {
       take.chunks = []; take.frames = []; S.transcribing = false; paintCaption('',false); startListening(); return;
     }
@@ -1468,6 +1642,7 @@
     sendVoiceText(text);
   }
   function stopListening() {
+    stopInterruptMonitor();
     captureEpoch++;
     openingMic = false;
     if (sttController) sttController.abort();
@@ -1523,6 +1698,7 @@
     if (!S.recording) e.orb?.setAttribute('data-speech-active', 'false');
     const instruction = $('sageVoiceInstruction');
     if (instruction) instruction.textContent = { listening: 'Speak naturally. Pause when you’re done.', thinking: 'You’ll hear the reply as soon as it’s ready.', transcribing: 'Catching every word.', speaking: 'Tap to interrupt. Hold to listen again.', idle: 'Take your time. I’m here.' }[mode] || '';
+    if(mode==='speaking')paintInterruptReady(!!interruptMonitor?.pcm && e.overlay?.getAttribute('data-can-interrupt')==='true');
     if (e.orb) e.orb.setAttribute('aria-label', S.docked ? 'Open voice conversation; hold to cancel and listen' : mode === 'speaking' ? 'Interrupt reply' : S.recording ? 'Finish speaking and send' : S.lastSaid ? 'Restore audio' : 'Conversation controls');
     paintMic();
   }
@@ -1630,6 +1806,7 @@
     S.lastSaid = text;
     replyAudioNotice = '';
     warmRecognition(); // connect the next turn while this reply plays
+    startInterruptMonitor();
     let failure;
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
@@ -1724,6 +1901,7 @@
     S.speechSeen = false;
     stopListening();
     warmRecognition(); // overlap next-turn setup with the current answer
+    startInterruptMonitor();
     setMode('thinking');
     paintCaption('', false);
     addLine('you', said);
@@ -1974,6 +2152,7 @@
     fileTarget = null; $('sageVoiceChooseFile').hidden = true;
     brainController?.abort(); brainController = null;
     S.open = false;
+    commandNotice='';
     S.docked = false;
     cancelWindowMotion();
     cancelDrag();
@@ -2059,9 +2238,7 @@
         unlockAudio();
         if (S.recording) { finishGeminiListen(true); return; }
         if (S.speaking || S.mode === 'speaking') {
-          S.lastSaid = null; // the cut-off line is abandoned, not retried
-          stopAllAudio();
-          if (!S.busy && !S.muted) startListening();
+          cancelTurn();
           return;
         }
         if (S.busy || S.transcribing || S.recognitionFailed) return;
@@ -2086,7 +2263,7 @@
           stopListening();
           if (!S.busy && !S.speaking && !S.recognitionFailed) setMode('idle', 'Microphone paused');
           setHint('Mic off. Tap again when you’re ready.');
-        } else { setHint(''); startListening(); }
+        } else { setHint(''); if(S.busy || S.speaking)startInterruptMonitor();else startListening(); }
         paintMic();
       });
     }
@@ -2103,13 +2280,18 @@
     });
     const preferences = [
       ['sageVoicePause', 'sage_voice_pause', load('sage_voice_pause', 'natural')],
+      ['sageVoiceLongCommands', 'sage_voice_long_commands', load('sage_voice_long_commands', 'on')],
+      ['sageVoiceInterrupt', 'sage_voice_interrupt', load('sage_voice_interrupt', 'on')],
     ];
     preferences.forEach(([id, key, value]) => {
       const input = $(id);
       if (!input) return;
       if (input.type === 'checkbox') input.checked = value;
       else input.value = value;
-      input.addEventListener('change', () => save(key, input.type === 'checkbox' ? input.checked : input.value));
+      input.addEventListener('change', () => {
+        save(key, input.type === 'checkbox' ? input.checked : input.value);
+        if(key==='sage_voice_interrupt') {stopInterruptMonitor();startInterruptMonitor();}
+      });
     });
     document.addEventListener('visibilitychange', () => {
       if (!S.open) return;
@@ -2122,7 +2304,7 @@
         unlockAudio();
         if (S.resumeAfterReply && S.lastSaid && !S.busy) {
           S.busy=true;deliverReply(S.lastSaid,S.session);
-        } else startListening();
+        } else if(S.busy || S.speaking)startInterruptMonitor();else startListening();
       }
     });
 
@@ -2141,8 +2323,9 @@
     speak, interrupt, cancelTurn, startListening, stopListening, sendVoiceText,
     settings,
     // Local only: no transcript, name, audio, URLs, API key or request body.
-    diagnostics: () => ({version:'1.9.46',mode:S.mode,open:S.open,muted:S.muted,
+    diagnostics: () => ({version:'1.9.47',mode:S.mode,open:S.open,muted:S.muted,
       recording:S.recording,audio:actx?.state || 'unavailable',route:S.sttMode,
+      interruption:!!interruptMonitor?.pcm,longCommands:settings.longCommands,
       capture:capture ? {ready:!!capture.readyForSpeech,pcm:!!capture.pcmAt,classified:!!capture.vadConfirmed,
         recorder:capture.recorder?.state || 'unavailable',prefixCheck:!!capture.prefixChecking,
         live:!!capture.live?.available,fullRecording:!!capture.liveGap} : null,
